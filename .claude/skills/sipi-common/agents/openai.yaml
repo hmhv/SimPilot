@@ -1,0 +1,4 @@
+interface:
+  display_name: "SimPilot Common"
+  short_description: "Prepare simulator sessions and fix SimPilot setup issues"
+  default_prompt: "Use $sipi-common to prepare the simulator session and fix setup issues."

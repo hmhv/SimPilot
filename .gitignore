@@ -1,0 +1,12 @@
+.build/
+**/.build/
+.swiftpm/
+*.app
+DerivedData/
+*.xcuserstate
+Runner/Runner.xcodeproj/xcuserdata/
+.DS_Store
+.claude/settings.local.json
+.claude/settings.json
+.simpilot/
+.vscode/

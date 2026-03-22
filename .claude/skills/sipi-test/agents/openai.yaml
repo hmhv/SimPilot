@@ -1,0 +1,4 @@
+interface:
+  display_name: "SimPilot Test"
+  short_description: "Run simulator regression tests and quality audits"
+  default_prompt: "Use $sipi-test to create, run, or audit iOS Simulator tests."
