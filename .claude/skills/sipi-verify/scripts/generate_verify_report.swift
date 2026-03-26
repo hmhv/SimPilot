@@ -15,6 +15,11 @@ func esc(_ s: String) -> String {
      .replacingOccurrences(of: "'", with: "&#39;")
 }
 
+func imageDataURI(_ path: String) -> String? {
+    guard let data = FileManager.default.contents(atPath: path) else { return nil }
+    return "data:image/png;base64," + data.base64EncodedString()
+}
+
 struct Check {
     let filename: String
     let description: String
@@ -112,7 +117,12 @@ for check in checks {
     rows += "<tr><td>\(esc(check.description))</td>"
     for variant in variants {
         if let fname = check.variants[variant] {
-            rows += "<td><img src=\"\(esc(variant))/\(esc(fname))\" alt=\"\(esc(variant))\" onclick=\"openLightbox(this)\"></td>"
+            let imgPath = verifyDir + "/" + variant + "/" + fname
+            if let dataURI = imageDataURI(imgPath) {
+                rows += "<td><img src=\"\(dataURI)\" alt=\"\(esc(variant))\" onclick=\"openLightbox(this)\"></td>"
+            } else {
+                rows += "<td>N/A</td>"
+            }
         } else {
             rows += "<td>N/A</td>"
         }
