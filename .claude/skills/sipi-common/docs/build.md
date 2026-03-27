@@ -97,14 +97,20 @@ BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP_PATH/Inf
 ## Install
 
 ```bash
-# Uninstall existing version (no error if not installed)
-xcrun simctl uninstall $UDID $BUNDLE_ID 2>/dev/null
-
-# Install the built .app
+# Install (overwrites existing version)
 xcrun simctl install $UDID "$APP_PATH"
 
 # Verify installation
 xcrun simctl listapps $UDID 2>/dev/null | grep -q "$BUNDLE_ID" && echo "OK"
+```
+
+### Clean Install
+
+When the user explicitly requests a clean install, or when test instructions require fresh app state:
+
+```bash
+xcrun simctl uninstall $UDID $BUNDLE_ID 2>/dev/null
+xcrun simctl install $UDID "$APP_PATH"
 ```
 
 ## Automatic Bundle ID Retrieval

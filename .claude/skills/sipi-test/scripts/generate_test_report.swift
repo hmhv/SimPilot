@@ -25,6 +25,11 @@ func safeRelpath(_ name: String) -> String {
     return name
 }
 
+func imageDataURI(_ path: String) -> String? {
+    guard let data = FileManager.default.contents(atPath: path) else { return nil }
+    return "data:image/png;base64," + data.base64EncodedString()
+}
+
 func badge(_ entry: JSON) -> (cls: String, label: String) {
     let passed = entry["passed"] as? Bool ?? false
     let skipped = entry["skipped"] as? Bool ?? false
@@ -115,10 +120,16 @@ for entry in tests {
         if !ss.isEmpty {
             // badge computed inline via cardCls below
             let cardCls = !((step["passed"] as? Bool) ?? false) ? "fail" : ((step["review"] as? Bool ?? false) ? "review" : "")
-            let imgSrc = "\(safeRelpath(tid))/\(safeRelpath(ss))"
+            let imgPath = runDir + "/" + safeRelpath(tid) + "/" + safeRelpath(ss)
             let sdur = (step["duration"] as? Double).map { String(format: "%.1f", $0) + "s" } ?? ""
             stepsHTML += "<div class=\"step-card \(cardCls)\" onclick=\"openLightbox(this.querySelector('img'))\">"
-            stepsHTML += "<img src=\"\(esc(imgSrc))\" alt=\"Step \(n)\"><div class=\"step-label\"><span>Step \(n)</span><span>\(sdur)</span></div></div>\n"
+            if let dataURI = imageDataURI(imgPath) {
+                stepsHTML += "<img src=\"\(dataURI)\" alt=\"Step \(n)\">"
+            } else {
+                let imgSrc = "\(safeRelpath(tid))/\(safeRelpath(ss))"
+                stepsHTML += "<img src=\"\(esc(imgSrc))\" alt=\"Step \(n)\">"
+            }
+            stepsHTML += "<div class=\"step-label\"><span>Step \(n)</span><span>\(sdur)</span></div></div>\n"
         }
 
         if !((step["passed"] as? Bool) ?? false) {
