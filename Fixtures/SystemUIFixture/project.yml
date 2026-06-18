@@ -1,0 +1,34 @@
+name: SystemUIFixture
+options:
+  bundleIdPrefix: com.simpilot
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+targets:
+  SystemUIFixture:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: System UI Fixture
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - simpilotfixture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.simpilot.SystemUIFixture
+        INFOPLIST_FILE: Sources/Info.plist
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO

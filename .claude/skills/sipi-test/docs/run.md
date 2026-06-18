@@ -21,6 +21,8 @@ git diff --quiet 2>/dev/null || COMMIT="${COMMIT}-dirty"
 RUN_DIR=".simpilot/runs/${TIMESTAMP}_${DEVICE_SHORT}_${COMMIT}"
 ```
 
+Also include the `ui-driver.md` shell prelude in this same Bash call before the first UI operation.
+
 ### 2. Launch App
 
 ```bash
@@ -33,11 +35,11 @@ sleep 2
 
 Execution order for each step (**strictly required**):
 
-1. `describe-ui` — get current screen state
+1. `ui_describe` — get current screen state
 2. Execute action via fallback chain
 3. `sleep` (wait for animations)
-4. verify with `describe-ui | grep`
-5. `axe screenshot` — capture screen after verify
+4. verify with `ui_describe | grep`
+5. `ui_screenshot "$RUN_DIR/$TEST/<step-file>.png"` — capture screen after verify
 6. On failure, retry (up to max-retries times; go back to step 1 and restart from describe-ui)
 
 
@@ -47,7 +49,7 @@ When hints are present, first try the one matching environment variant (`device-
 ```bash
 MAX_WAIT=3; ELAPSED=0
 while [ "$(awk "BEGIN{print ($ELAPSED < $MAX_WAIT)}")" -eq 1 ]; do
-  axe describe-ui --udid $UDID 2>/dev/null | grep -q "expected-label" && break
+  ui_describe --expect "expected-label" 2>/dev/null | grep -q "expected-label" && break
   sleep 0.3; ELAPSED=$(awk "BEGIN{print $ELAPSED + 0.3}")
 done
 ```
@@ -77,8 +79,8 @@ The environment variant for a run is represented by:
 
 Record only the **single method that ultimately passed verify** for that step.
 
-- Passed with `axe tap --id ...` → `tap-id`
-- Passed with `axe tap --label ...` → `tap-label`
+- Passed with `ui_tap_id ...` → `tap-id`
+- Passed with `ui_tap_label ...` → `tap-label`
 - Passed with `axe touch ...` → `touch-coordinate`
 - Passed with coordinate action after screenshot confirmation → `touch-coordinate`
 
@@ -124,11 +126,11 @@ Choose one failure classification:
 
 ### describe-ui-snapshot
 
-Record up to the first 50 lines of `axe describe-ui` output at the point of failure. This makes it possible to understand "what was on screen" without a screenshot when grep finds nothing.
+Record up to the first 50 lines of `ui_describe` output at the point of failure. When the failed check was looking for a specific string, call `ui_describe --expect "<string>"` so the native bridge can supply System UI details if AXe returned a partial tree.
 
 ```bash
 # Example recording on verify failure
-UI=$(axe describe-ui --udid $UDID 2>/dev/null | head -50)
+UI=$(ui_describe --expect "expected-label" 2>/dev/null | head -50)
 # → store in describe-ui-snapshot in result.json
 ```
 
@@ -164,7 +166,7 @@ The `steps` array in result.json must correspond 1:1 with the `steps` array in t
 
 ## Error Recovery
 
-- **Retry**: Re-confirm with describe-ui, then re-execute the same action
+- **Retry**: Re-confirm with `ui_describe`, then re-execute the same action
 - **Alert blocking**: Detect AXDialog before each step → get button label → tap
 - **Crash**: App not found in describe-ui → terminate+launch → FAIL the affected step, SKIP the rest
 - **iPad-specific issues**: See docs/patterns.md "App Launch" (iOS 18.x foreground, iOS 26 DockFolderViewService)
@@ -180,11 +182,11 @@ Coordinate fallback used for 2 or more steps in the same test → issue a warnin
 
 ## optional Steps
 
-Before execution, confirm the target element exists with describe-ui → if absent, set `passed: true, skipped: true`.
+Before execution, confirm the target element exists with `ui_describe` → if absent, set `passed: true, skipped: true`.
 
 ## preconditions
 
-Check each condition with `describe-ui | grep`. If not met → SKIP the entire test.
+Check each condition with `ui_describe | grep`. If not met → SKIP the entire test.
 
 ## Video Recording
 

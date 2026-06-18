@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 
 # Implementation Verification on iOS Simulator
 
-Verify that a feature implementation or bug fix works correctly by checking it on the iOS Simulator. By default, capture 4 variants: iPhone light, iPhone dark, iPad light, iPad dark. Uses AXe CLI for all simulator interaction.
+Verify that a feature implementation or bug fix works correctly by checking it on the iOS Simulator. By default, capture 4 variants: iPhone light, iPhone dark, iPad light, iPad dark. Uses AXe CLI plus `sipi-ui` for UI interaction.
 
 ## When This Skill Is Used
 
@@ -20,14 +20,15 @@ Verify that a feature implementation or bug fix works correctly by checking it o
 - **Understand first, then verify** — read the changes to know what to check
 - **Check what matters** — focus on the specific behavior that was changed, not everything
 - **Be honest** — if something looks wrong or broken, say so clearly
-- **Show evidence** — use screenshots and `axe describe-ui` output to support findings
+- **Show evidence** — use `ui_screenshot` captures and `ui_describe` output to support findings
 - **4 variants by default** — always capture iPhone light/dark and iPad light/dark unless the user specifies otherwise (e.g., "just iPhone" or "iPad only"). If only a subset is requested, capture that subset
 - **Suggest follow-up** — if the verification reveals a good regression test candidate, suggest `/sipi-test create`
 
 ## Preflight
 
 Read `../sipi-common/docs/preflight.md` and complete all checks before proceeding.
-Before using AXe, read the `axe` skill (registered as a Claude Code / Codex skill; typically at `~/.claude/skills/axe/SKILL.md` or `~/.agents/skills/axe/SKILL.md`). If the `axe` skill is not available, tell the user that it is required and stop.
+Read `../sipi-common/docs/ui-driver.md` and define its shell prelude in every Bash call that inspects or taps UI.
+Before using AXe, read the `axe` skill (typically at `~/.claude/skills/axe/SKILL.md` or `~/.agents/skills/axe/SKILL.md`). If the `axe` skill is not available, tell the user that it is required and stop.
 
 ## Workflow
 
@@ -78,7 +79,7 @@ Use the same fallback chain as sipi-test (defined in `../sipi-test/SKILL.md`). S
 This is **exploratory, not scripted**. Unlike regression tests:
 
 - No predefined JSON steps — determine what to check based on the change
-- Use judgement — if something looks off visually, flag it even if describe-ui says it's fine
+- Use judgement — if something looks off visually, flag it even if `ui_describe` says it's fine
 - Screenshots are first-class evidence here (unlike regression tests where describe-ui is required)
 - Check both the happy path and obvious edge cases
 - All 4 variants are always captured for comparison
@@ -91,5 +92,6 @@ This is **exploratory, not scripted**. Unlike regression tests:
 | `docs/report.md` | When generating the HTML report |
 | `../sipi-test/docs/patterns.md` | When interacting with UI elements |
 | `../sipi-common/docs/preflight.md` | Before starting any session |
+| `../sipi-common/docs/ui-driver.md` | UI driver shell prelude and native bridge wrappers |
 | `../sipi-common/docs/build.md` | When building or installing |
 | `../sipi-common/docs/troubleshooting.md` | When problems occur |

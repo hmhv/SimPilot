@@ -10,6 +10,13 @@ which axe
 
 If not found, tell the user to install with `brew install cameroncooke/axe/axe`, run `axe init`, and stop.
 
+## 1.5 UI Driver
+
+Read `ui-driver.md` before the first UI interaction. Use its shell prelude at the top of every Bash call that calls `ui_describe`, `ui_tap_label`, `ui_tap_id`, or `native_*`.
+
+The UI driver uses AXe first. When the native bridge is available, it falls back automatically for System UI.
+Keep using direct `axe` commands for screenshots, launch/state helpers, video, and raw gestures that the UI driver does not wrap.
+
 ## 2. Booted Simulator
 
 ```bash
@@ -26,6 +33,12 @@ BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print app" /dev/stdin <<< "$(plutil -con
 ```
 
 These variables do not persist between Bash calls — redefine them in each command.
+
+After `UDID` is set, define the `ui-driver.md` shell prelude and run a minimal readiness check:
+
+```bash
+ui_describe >/tmp/sipi-ui-preflight.json
+```
 
 
 ## 3. Config (`.simpilot/config.json`)

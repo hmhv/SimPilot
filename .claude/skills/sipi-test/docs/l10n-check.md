@@ -13,8 +13,8 @@ Judge whether each localized UI is semantically correct: the wording matches the
    - switch simulator language in `Settings.app`
    - relaunch the app
    - navigate to each target screen
-   - run `axe describe-ui`
-   - save `axe screenshot`
+   - run `ui_describe`
+   - save `ui_screenshot`
 3. Compare locale outputs for:
    - untranslated labels
    - mixed-language strings
@@ -57,7 +57,7 @@ Use `simctl` only as a helper for launching apps, rebooting the simulator, or re
 ## Settings Navigation Notes
 
 - Prefer visible labels in `Settings.app` first
-- If the Settings hierarchy changes across iOS versions, re-check with `axe describe-ui` before tapping
+- If the Settings hierarchy changes across iOS versions, re-check with `ui_describe` before tapping
 - Record the exact path that worked for the current simulator runtime in the report or note
 - If the locale switch path is too unstable, inspect source localization files first and then return to the simulator for final verification
 

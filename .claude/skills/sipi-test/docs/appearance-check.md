@@ -16,8 +16,8 @@ Judge whether each variant is semantically correct: readable, correctly emphasiz
    - switch appearance or content size category
    - relaunch if needed
    - navigate to the same screen
-   - capture `axe screenshot`
-   - inspect `axe describe-ui`
+   - capture `ui_screenshot`
+   - inspect `ui_describe`
 4. Compare captures and identify regressions.
 5. If needed, inspect relevant view code to confirm root cause. Apply fixes that meet the Fix Priority criteria below.
 

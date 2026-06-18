@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 
 # iOS Simulator UI Test Automation
 
-Use AXe CLI to interact with apps on the simulator and manage test creation, execution, and results. All operations go through the Bash tool. See `references/json-reference.md` for JSON format details.
+Use AXe CLI plus SimPilot's `sipi-ui` wrapper to interact with apps on the simulator and manage test creation, execution, and results. All operations go through the Bash tool. See `references/json-reference.md` for JSON format details.
 
 Read `references/test-fix-policy.md` before proposing or applying source-code changes.
 
@@ -23,16 +23,16 @@ This skill **creates tests based on facts observed and confirmed directly on the
 
 ## Mindset When Creating Tests
 
-- Start by checking the current screen with `axe screenshot` / `axe describe-ui`
+- Start by checking the current screen with `ui_screenshot` / `ui_describe`
 - Base steps on operations that actually worked
 - For elements that are unstable based on the real screen alone, cross-check by reviewing source code
 - For elements that repeatedly fall back to coordinate-based interaction, consider adding `.accessibilityIdentifier()`
-- System UI and areas where `axe describe-ui` cannot reach should be excluded from regression tests or replaced with pre-seeding
+- System UI should be inspected through `ui_describe`; include it in regression tests only when the resulting interaction is stable, otherwise prefer pre-seeding
 
 ## Mindset When Running Tests
 
 - Do not rewrite existing steps to force a PASS
-- Evaluate verify mechanically using `axe describe-ui | grep` — screenshots alone are not sufficient because they are subjective and non-reproducible across runs
+- Evaluate verify mechanically using `ui_describe | grep` — screenshots alone are not sufficient because they are subjective and non-reproducible across runs
 - If a hint fails, return to the standard fallback chain — do not invent ad hoc workarounds
 - If verify still does not pass, mark FAIL
 
@@ -51,7 +51,8 @@ Do not implement changes whose main effect is hiding a defect or making the test
 ## Preflight
 
 Read `../sipi-common/docs/preflight.md` and complete all checks before proceeding.
-Before using AXe, read the `axe` skill (registered as a Claude Code / Codex skill; typically at `~/.claude/skills/axe/SKILL.md` or `~/.agents/skills/axe/SKILL.md`). If the `axe` skill is not available, tell the user that it is required for this workflow and stop rather than improvising AXe usage.
+Read `../sipi-common/docs/ui-driver.md` and define its shell prelude in every Bash call that inspects or taps UI.
+Before using AXe, read the `axe` skill (typically at `~/.claude/skills/axe/SKILL.md` or `~/.agents/skills/axe/SKILL.md`). If the `axe` skill is not available, tell the user that it is required for this workflow and stop rather than improvising AXe usage.
 
 ## Element Interaction Fallback Chain
 
@@ -60,14 +61,14 @@ Always check `docs/patterns.md` first — some controls (Toggle, Menu, Disclosur
 ```
 0. Check docs/patterns.md for the target control
    → If marked "false success", skip to the method that works
-1. axe tap --label "Label"
+1. ui_tap_label "Label"
    ↓ fail
-2. axe tap --id "identifier"
+2. ui_tap_id "identifier"
    ↓ fail
 3. axe touch -x N -y N  (from frame: cx=x+w/2, cy=y+h/2)
    ↓ verify fail
 4. Visual operation from screenshot:
-   a. axe screenshot → Read → determine position/state
+   a. `ui_screenshot` → Read → determine position/state
    b. Execute action (touch / swipe / long press / clipboard paste)
    c. verify → if fail, mark FAIL
 ```
@@ -82,7 +83,7 @@ See `docs/run.md` for the full procedure, build, hint updates, failure recording
 
 - **1 Bash = 1 step** — batching multiple steps loses intermediate screenshots, making it impossible to pinpoint which step failed
 - **Continue with `;` on failure, not `&&`** — `&&` aborts the rest of the command, so the post-failure screenshot never gets saved
-- **verify uses `axe describe-ui | grep` only** — screenshots are subjective and produce non-reproducible results across different runs and reviewers
+- **verify uses `ui_describe | grep` only** — screenshots are subjective and produce non-reproducible results across different runs and reviewers
 - **Do not work hard to force a PASS** — the value of a test is failing when it should fail
 - Re-define `UDID` and `BUNDLE_ID` at the top of each Bash call (shell state does not persist between calls)
 
@@ -126,6 +127,7 @@ Build once → run tests sequentially (progress: `[1/8] app-launch: PASS (5s)`) 
 |------|---------|
 | `docs/patterns.md` | Control-specific interaction patterns and known quirks |
 | `../sipi-common/docs/preflight.md` | Session setup checklist |
+| `../sipi-common/docs/ui-driver.md` | UI driver shell prelude and native bridge wrappers |
 | `axe` skill | AXe CLI commands; if unavailable, tell the user and stop |
 
 ### Read for specific operations

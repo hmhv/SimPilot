@@ -19,8 +19,8 @@ Judge whether each screen is semantically correct for assistive technology users
 1. Confirm preflight is complete.
 2. Ask the app to navigate screen by screen or run the user-provided flow.
 3. For each screen:
-   - run `axe describe-ui`
-   - capture `axe screenshot`
+   - run `ui_describe`
+   - capture `ui_screenshot`
    - inspect element roles, labels, identifiers, and ordering
 4. When the issue is unclear from simulator output alone, inspect the relevant source code.
 5. Record issues by screen in a report.
@@ -81,9 +81,9 @@ The floating tab bar in iOS 18+ exposes an `AXGroup` with `AXLabel: "Tab Bar"` b
 
 When tab items cannot be tapped by label, use coordinate-based tapping. See `patterns.md` "Tab Switching" for device-specific coordinates and methods.
 
-## System UI exclusion
+## System UI scope
 
-The following system-provided UI runs in a separate process and **cannot be audited** with `axe describe-ui`. Do not report missing labels for these:
+The following system-provided UI runs in a separate process. It is inspectable with `ui_describe` when the native bridge is available, but it is not app-owned UI. Do not report missing labels as app accessibility defects unless the app supplies or configures that content:
 
 - **ColorPicker** - system color picker sheet
 - **PhotosPicker** - system photo library picker
@@ -92,4 +92,4 @@ The following system-provided UI runs in a separate process and **cannot be audi
 - **ASWebAuthenticationSession** - Safari web authentication
 - **System alerts** - permission dialogs (camera, location, etc.)
 
-When encountering these, note in the report: "System UI - outside audit scope" and move to the next screen.
+When encountering these, note in the report: "System UI - outside app audit scope" and move to the next screen unless the task explicitly asks to audit the app-to-system flow.

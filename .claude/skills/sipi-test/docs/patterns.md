@@ -26,7 +26,7 @@ Legend: **Works** = confirmed working / **Fake success** = returns "successfully
 | Swipe Action | - | - | - | left/right swipe | Sleep 0.3 after swipe → `--label` |
 | Search Bar | - | - | coordinate | - | No AXLabel. Paste via clipboard |
 | Confirmation Dialog | Works | Works | Works | - | iPad popover has constraints |
-| ColorPicker popup | - | - | right edge circle | - | Cannot describe-ui. touch color well to open, touch × to close |
+| ColorPicker popup | - | - | right edge circle | - | Inspect with `ui_describe` if available. Touch color well to open, touch × to close |
 | Tab Bar (AXRadioButton) | Works | - | Works | - | iOS 18.1-18.4, all iPad versions |
 | Tab Bar (no children) | - | - | coordinate calc | - | iOS 18.6+/26 iPhone. Calculate from width/tab count |
 
@@ -38,12 +38,12 @@ For key combos and modifier keys, read the `axe` skill (see sipi-test/SKILL.md f
 
 ### App Launch
 
-- Wait for launch with `sleep 2`. On iPad iOS 18.x the app may not come to the foreground → tap SpringBoard with `axe tap --label "AppName"`
+- Wait for launch with `sleep 2`. On iPad iOS 18.x the app may not come to the foreground → tap SpringBoard with `ui_tap_label "AppName"`
 - iPad iOS 26: terminate+launch may return `DockFolderViewService` → do not terminate between tests when running suites
 
 ### Tab Switching
 
-- **iOS 18.1-18.4**: `AXRadioButton` present → `axe tap --label "TabName"`
+- **iOS 18.1-18.4**: `AXRadioButton` present → `ui_tap_label "TabName"`
 - **iOS 18.6+ / iOS 26 (iPhone)**: no children → calculate coordinates from Tab Bar frame (width/tab count)
 - **iPad**: `AXRadioButton` present in all versions → `--label` works
 - 6+ tabs: last tab becomes "..." (More)
@@ -101,13 +101,13 @@ touch the frame center → sleep 1-2s → `--label` for item inside menu. **All 
 
 ### Deep Link
 
-`xcrun simctl openurl $UDID 'scheme://path'`. First time shows a confirmation dialog → tap the "Open" button with `axe tap --label "Open"` (label varies by locale, e.g., Japanese: "開く").
+`xcrun simctl openurl $UDID 'scheme://path'`. First time shows a confirmation dialog → tap the "Open" button with `ui_tap_label "Open"` (label varies by locale, e.g., Japanese: "開く").
 
 ---
 
 ## Device Settings
 
-For dark mode, Dynamic Type, landscape, and other commands, read the `axe` skill (see sipi-test/SKILL.md for location). If not available, tell the user and stop. Use osascript menu operations for landscape; wait `sleep 3` after rotation.
+For dark mode, Dynamic Type, landscape, and other commands, read the `axe` skill (see sipi-test/SKILL.md for location). If not available, tell the user and stop. Use `native_orientation portrait|landscape-left|landscape-right` for rotation when the native bridge is available; wait `sleep 3` after rotation.
 
 ---
 
@@ -130,16 +130,16 @@ For dark mode, Dynamic Type, landscape, and other commands, read the `axe` skill
 |---|---|
 | Tab Badge (.badge()) | No tab bar children on iOS 18.6+/26 |
 | Keyboard show/hide | No keyboard information in describe-ui |
-| PhotosPicker (single selection) | Separate process UI. Photo grid is touchable; tap immediately dismisses. Cancel with `axe key 41` (Esc) |
-| PhotosPicker (multiple selection) | Separate process UI. Photo grid is touchable; ✓/× buttons cannot be touched. Confirm with `axe key 40` (Enter), cancel with `axe key 41` (Esc). Stability varies by iOS version (see below) |
-| FileImporter | Separate process UI. Cannot describe-ui, cannot touch × button. Close with `axe key 41` (Esc) |
-| Share Sheet | Separate process UI. Cannot describe-ui. Close with downward `axe swipe` |
+| PhotosPicker (single selection) | Separate process UI. Photo grid is touchable; tap immediately dismisses. Cancel with `ui_key 41` (Esc) |
+| PhotosPicker (multiple selection) | Separate process UI. Photo grid is touchable; confirm with `ui_key 40` (Enter), cancel with `ui_key 41` (Esc). Stability varies by iOS version (see below) |
+| FileImporter | Separate process UI. Inspect with `ui_describe`; if controls are not stable, close with `ui_key 41` (Esc) |
+| Share Sheet | Separate process UI. Inspect with `ui_describe`; close with `ui_tap_label` on a visible label or downward `axe swipe` |
 | `.borderless` Button in List (iOS 26) | `tap --label`/`--id`/`touch` all give fake success. Workaround: remove `.borderless` or tap the entire row |
 | Drag & Drop / Pinch / Rotation | axe touch only supports down/up; move is not supported |
 | Menu in List (iOS 18.x) | List row absorbs gestures. All methods fail |
 | iPad iOS 26 describe-ui | May return `DockFolderViewService` |
 | iPad confirmationDialog | Cannot tap buttons inside popover |
-| System UI (ASWebAuth, SFSafari) | Separate process, cannot describe-ui. For investigation only |
+| System UI (ASWebAuth, SFSafari) | Separate process. Use `ui_describe` / `ui_tap_label` so native fallback can inspect and act when AXe is blind |
 | UIKit full-screen toolbar | Toolbar items in UIKit full-screen view controllers (e.g., photo viewer) are not exposed in describe-ui. Use screenshot + coordinate estimation |
 
 ### PhotosPicker Multiple Selection — Behavior by iOS Version

@@ -66,10 +66,12 @@ xcrun simctl ui $UDID appearance light  # or dark
 sleep 2
 ```
 
+Also include the `../../sipi-common/docs/ui-driver.md` shell prelude in this same Bash call before the first UI operation.
+
 For each check item:
 
 1. **Navigate** to the relevant screen
-   - Use `axe describe-ui -d $UDID` to confirm current location
+   - Use `ui_describe` to confirm current location
    - Navigate using the fallback chain from `../../sipi-test/docs/patterns.md`
 
 2. **Perform the action**
@@ -77,14 +79,14 @@ For each check item:
    - Allow time for animations (`sleep 1-2`)
 
 3. **Capture screenshot**
-   - `axe screenshot -d $UDID --output $VERIFY_DIR/<variant>/NNN_<description>.png`
+   - `ui_screenshot "$VERIFY_DIR/<variant>/NNN_<description>.png"`
    - Use zero-padded 3-digit numbering: `001`, `002`, ...
    - Description in kebab-case: `001_settings-screen.png`, `002_toggle-on.png`
    - Same numbering and names across all 4 variants
 
 4. **Observe and note**
    - Read the screenshot to assess visual correctness
-   - Use `axe describe-ui` when element state needs confirmation
+   - Use `ui_describe` when element state needs confirmation
    - Note any issues found for the report
 
 ### Screenshot naming
@@ -104,7 +106,7 @@ This is exploratory — if you notice something unexpected while checking, inves
 
 ## 5. Record Findings
 
-Before generating the report, write `findings.json` in the verify directory. This file drives the report status badge and prevents the agent from claiming "All OK" when issues exist.
+Before generating the report, write `findings.json` in the verify directory. This file drives the report status badge and prevents reporting "All OK" when issues exist.
 
 ```bash
 # No issues found — write empty array

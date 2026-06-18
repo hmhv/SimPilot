@@ -5,14 +5,14 @@
 1. **Understand requirements**: Clarify the test target, purpose, and expected behavior. Ask if anything is unclear
 2. **Design the test**:
    - Build & install (if `build` is in config.json; see docs/run.md for details)
-   - Confirm screens in Simulator: `axe screenshot` + `Read` + `axe describe-ui`
+   - Confirm screens in Simulator: `ui_screenshot` + `Read` + `ui_describe`
    - Reference source code: use `Glob`/`Grep` to understand navigation structure and display conditions
 3. **Generate JSON and present to user** → save to `.simpilot/tests/<id>.json` after confirmation
 4. **Suggest "Would you like to run it now?"**
 
 When asked to "create and run": create → save → run without waiting for confirmation. Build once.
 
-When asked to "start from the current screen": use screenshot + Read + describe-ui to understand the screen → design steps.
+When asked to "start from the current screen": use screenshot + Read + `ui_describe` to understand the screen → design steps.
 
 ## Rules
 
@@ -26,7 +26,7 @@ When asked to "start from the current screen": use screenshot + Read + describe-
 - Up to one hint per environment variant in `hints`. Prefer updating/replacing over adding new entries
 - Set `updated` when modifying a test
 - Elements without accessibilityIdentifier set → add `.accessibilityIdentifier("screen.element-name")` to source and rebuild
-- System UI (PhotosPicker, etc.) should be excluded from regression tests; use pre-loaded data instead
+- System UI (PhotosPicker, Share Sheet, SFSafariViewController, etc.) is inspectable through `sipi-ui`; include it only when stable on the target runtime, otherwise use pre-loaded data
 
 ## Step Types
 
@@ -36,11 +36,11 @@ When asked to "start from the current screen": use screenshot + Read + describe-
 
 ## preconditions
 
-Check with `describe-ui | grep` before the test starts. If not met → SKIP the entire test (not FAIL).
+Check with `ui_describe | grep` before the test starts. If not met → SKIP the entire test (not FAIL).
 
 ## optional Steps
 
-Marked with `"optional": true`. Before execution, confirm the target element exists with describe-ui → skip if absent.
+Marked with `"optional": true`. Before execution, confirm the target element exists with `ui_describe` → skip if absent.
 
 ## Error Case Patterns
 
