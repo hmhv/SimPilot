@@ -16,32 +16,29 @@ Os resultados são salvos em `.simpilot/` com relatórios HTML que podem ser abe
 ## Pré-requisitos
 
 - macOS 15 ou superior
-- Xcode 26 ou superior
-- [AXe](https://github.com/cameroncooke/AXe) CLI
-  - `brew install cameroncooke/axe/axe`
-  - `axe init`
+- Xcode 26 ou superior: necessário em **tempo de execução** para controlar o Simulator (o SimPilot carrega os private Simulator frameworks do Xcode). Não é necessário para instalar.
 - [Claude Code](https://claude.com/claude-code) ou Codex
-
-A simulator automation do SimPilot assume que o ambiente do agente tem o skill `axe` disponível.
 
 ## Instalação
 
+O SimPilot é distribuído como um único binário `sipi` com os skills embutidos. Instale com um único comando:
+
 ```bash
-git clone https://github.com/hmhv/SimPilot.git
-cd SimPilot
-make install
+curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh | bash
 ```
 
-`make install` faz o seguinte:
+O instalador baixa o binário `sipi` pré-compilado e, em seguida, o `sipi` registra os skills embutidos `sipi-common` / `sipi-test` / `sipi-verify` em:
 
-- Registra os skills do SimPilot no Claude Code (`~/.claude/skills/`)
-- Registra os skills do SimPilot no Codex (`~/.agents/skills/`)
+- Claude Code (`~/.claude/skills/`)
+- Codex (`~/.agents/skills/`)
+
+Verifique os recursos do simulador com `sipi doctor`.
 
 Para atualizar e desinstalar:
 
 ```bash
-make update
-make uninstall
+sipi update      # baixa o sipi mais recente do GitHub Releases e atualiza os skills
+sipi uninstall   # remove os skills, a metadata de instalação e o binário sipi
 ```
 
 ## Início rápido
@@ -147,15 +144,18 @@ O SimPilot usa a seguinte estrutura padrão dentro de `.simpilot/`:
 
 ## Limitações conhecidas
 
-- A entrada de texto usa a área de transferência; não há `axe type` para senhas
-- `axe type` assume um layout de teclado dos EUA
-- Não é possível reproduzir gestos de drag and drop, pinch e rotation
-- Elementos de system UI como PhotosPicker não são acessíveis via `describe-ui`
+- A entrada de texto fora do padrão dos EUA é feita pela área de transferência (colar), não tecla por tecla
+- A digitação HID direta tecla por tecla cobre o layout de teclado dos EUA
+- Apenas simulador — dispositivos físicos não são suportados
 
 ## Note
 
 Este repositório é gerenciado principalmente por IA. Issues e feedback são bem-vindos, mas pull requests não são aceitos. Se quiser adaptar ao seu fluxo, faça um fork e use sua própria cópia.
 
+## Isenção de responsabilidade
+
+O SimPilot é uma ferramenta de desenvolvimento. Ele controla o Simulador do iOS por meio dos **frameworks privados não documentados** da Apple, que a Apple pode alterar ou remover em qualquer atualização do Xcode ou do macOS — o que pode quebrar o SimPilot sem aviso. Ele não é afiliado nem endossado pela Apple e não se destina ao uso na App Store ou em produção. É fornecido **no estado em que se encontra, sem garantia — use por sua conta e risco.**
+
 ## License
 
-Consulte [LICENSE](LICENSE).
+MIT © 2026 hmhv. Consulte [LICENSE](LICENSE).

@@ -2,11 +2,30 @@
 
 Use this to decide what to propose and what to change directly.
 
+## When Fixes Are Allowed
+
+Fixes happen only in an explicit FIX phase, **never mid-run**.
+
+- The run that hit the failure is recorded as **FAIL first** — do not edit anything to turn that run green.
+- Apply the fix afterward, then **re-run from a clean launch** to confirm it.
+- Keep the prior FAIL in the run history; the fix is validated by a new run, not by overwriting the failing one.
+
 ## Core Rule
 
 Do not weaken verification just to make a test pass.
 
 Prefer app changes that make the UI more observable and more deterministic.
+
+## Fix Priority
+
+When the root cause is in app code, prefer the smallest useful change, in this order:
+
+1. add or correct stable identifiers and labels
+2. replace fragile custom interactions with standard controls when local and safe
+3. add deterministic seed data, debug hooks, or launch paths that improve repeatability
+4. adjust layout or timing only when the root cause is clearly in app code
+
+If the fix is local, low-risk, and improves repeatability without masking a real bug, implement it (see "Implement Directly When"); do not implement changes whose main effect is hiding a defect or making the test pass without improving the product.
 
 ## Good Fixes
 
@@ -22,6 +41,7 @@ Prefer app changes that make the UI more observable and more deterministic.
 - adding arbitrary sleeps when the underlying issue is a missing state signal
 - changing business behavior only to help tests
 - hiding real regressions behind test-specific hacks
+- **applying an identifier/label fix without a negative-control check** — before the fix, confirm the test would still FAIL if the feature were actually broken. A fix that makes a broken feature pass is masking a defect, not stabilizing a test
 
 ## Implement Directly When
 

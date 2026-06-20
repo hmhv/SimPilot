@@ -15,7 +15,7 @@ See `../../sipi-common/docs/build.md` for details.
 
 ```bash
 TIMESTAMP=$(date +%Y-%m-%d_%H%M%S)
-DEVICE_SHORT=$(axe list-simulators | grep "$UDID" | awk -F'|' '{print $2}' | xargs | tr '[:upper:]' '[:lower:]' | tr -d ' ()' | tr -s '-')
+DEVICE_SHORT=$(xcrun simctl list devices | grep "$UDID" | sed -E 's/^[[:space:]]*//; s/ \(.*//' | tr '[:upper:]' '[:lower:]' | tr -d ' ()' | tr -s '-')
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "nogit")
 git diff --quiet 2>/dev/null || COMMIT="${COMMIT}-dirty"
 RUN_DIR=".simpilot/runs/${TIMESTAMP}_${DEVICE_SHORT}_${COMMIT}"
@@ -26,6 +26,7 @@ Also include the `ui-driver.md` shell prelude in this same Bash call before the 
 ### 2. Launch App
 
 ```bash
+mkdir -p "$RUN_DIR/$TEST"
 xcrun simctl terminate $UDID $BUNDLE_ID 2>/dev/null
 xcrun simctl launch $UDID $BUNDLE_ID
 sleep 2
@@ -33,17 +34,17 @@ sleep 2
 
 ### 3. Step Execution Loop
 
-Execution order for each step (**strictly required**):
+**Run is read-only on the spec.** During a run, do not edit test steps, verify strings, `config.json`, or app source. If verify fails, record FAIL and stop trying to make it pass. The only sanctioned write-back during a run is the post-run hint update (see "Hint update" below), and it never flips a step from `passed: false` to `passed: true`.
 
-1. `ui_describe` — get current screen state
-2. Execute action via fallback chain
-3. `sleep` (wait for animations)
-4. verify with `ui_describe | grep`
-5. `ui_screenshot "$RUN_DIR/$TEST/<step-file>.png"` — capture screen after verify
-6. On failure, retry (up to max-retries times; go back to step 1 and restart from describe-ui)
+Each step follows these invariants (not a rigid fixed sequence — they are the properties every step must satisfy, and the reasons):
 
+- **Describe BEFORE acting.** Start every step with `ui_describe` to read the current screen, and choose the action target from that tree — never act on an assumed screen state. Acting on a stale assumption is the classic cause of fake-success taps and mis-targeted coordinates.
+- **Screenshot AFTER verify.** Capture `ui_screenshot "$RUN_DIR/$TEST/<step-file>.png"` once the verify check has run, so the saved image reflects the verified state.
+- **Prefer a conditional wait over a fixed `sleep`.** A fixed sleep either wastes time or races the animation; poll for the expected state instead (see below).
+- **Verify via `ui_describe | grep`, not screenshots.** Screenshots are subjective and non-reproducible across runs and reviewers; only a grep on the describe-ui tree is a mechanical, repeatable check.
+- **Honor step semantics.** A verify-only step (no `action`) just greps current state. An action-only step (no `verify`) PASSes on exit 0. (Definitions: `create.md`.)
 
-When hints are present, first try the one matching environment variant (`device-class` + `device-name` + `ios` + `orientation`). Use only `tap-id` / `tap-label` / `touch-coordinate` for the hint's `method`. If it fails, fall back to the normal fallback chain. The normal search order follows patterns.md, but for hint retention, prioritize reproducibility: `tap-id` > `tap-label` > `touch-coordinate`. If `tap-id` succeeds, replace any existing `tap-label` / `touch-coordinate`; if `tap-label` succeeds, replace any existing `touch-coordinate`.
+When hints are present, first try the one matching environment variant (`device-class` + `device-name` + `ios` + `orientation`). Use only `tap-id` / `tap-label` / `touch-coordinate` for the hint's `method`. If it fails, fall back to the normal fallback chain in `../../sipi-common/docs/patterns.md`. (Hint retention priority is covered under "Hint update" below.)
 
 **Conditional wait** (preferred over fixed sleep):
 ```bash
@@ -62,53 +63,24 @@ echo "$UI" | grep -q '"AXLabel" : "Settings"' || ok=false
 [ "$ok" = "true" ] && PASSED=true
 ```
 
-## Hint Update Rules
+### Strong vs weak verify
 
-After each step where verify succeeds, determine whether to update `hints` for that step. Do not update `hints` when verify fails.
+- **WEAK**: grepping a string that was already present BEFORE the action — static chrome, an unchanging tab label, a fixed navigation title. Such a check passes whether or not the action did anything, so it cannot catch a regression.
+- **STRONG**: assert the NEW state the action produces, and where feasible assert that the OLD state is gone (e.g. after switching to Settings, confirm a Settings-only label appears AND the Home-only label is absent).
 
-### Determining the Environment Variant
+Before recording PASS, state a one-line **negative control**: name the substring you matched and why it would be absent if the feature were broken. If you cannot state it, set `review: true` and put the reason in `note` rather than claiming a PASS.
 
-The environment variant for a run is represented by:
+## Hint update
 
-- `device-class`: `iphone` / `ipad`
-- `device-name`: e.g. `iPhone 16 Pro`
-- `ios`: up to `major.minor`. e.g. `18.3`
-- `orientation`: `portrait` / `landscape`
+After a step's verify succeeds, record the single method that worked so future runs are reproducible. One principle block:
 
-### Which Method to Record
+- **Rank by reproducibility**: `tap-id` > `tap-label` > `touch-coordinate`. Record only the *single* method that ultimately passed verify (`ui_tap_id`→`tap-id`, `ui_tap_label`→`tap-label`, `ui_tap_xy` / `sipi tap`→`touch-coordinate`); methods that were tried but failed are not saved.
+- **One hint per environment variant** (`device-class` + `device-name` + `ios` + `orientation`). Update/replace the matching hint rather than accumulating new ones.
+- **Replace only with an equal-or-stronger method.** If the successful method outranks the stored one, replace it and refresh `value` / `last-used` / `note`. Same method → refresh `value` / `last-used` / `note`. **Never downgrade**, and never refresh `last-used` when this run only succeeded with a weaker method than the one already stored.
+- **Write back once after the test**, not per step — update `tests/<id>.json` reflecting only `passed: true` steps (allowed even when the overall test is FAIL). Never touch `hints` for a step whose verify failed.
+- **Integrity caveat**: if there is any concern about overall JSON integrity, do not write back; note it in the results display.
 
-Record only the **single method that ultimately passed verify** for that step.
-
-- Passed with `ui_tap_id ...` → `tap-id`
-- Passed with `ui_tap_label ...` → `tap-label`
-- Passed with `axe touch ...` → `touch-coordinate`
-- Passed with coordinate action after screenshot confirmation → `touch-coordinate`
-
-Methods that were tried but failed are not saved in `hints`.
-
-### Update Algorithm
-
-1. Search the step's `hints` for a hint with the same environment variant
-2. If no existing hint, add one new hint
-3. If an existing hint exists and the successful method is the same, do not add; update `value` / `last-used` / `note` instead
-4. If the existing hint is `touch-coordinate` and `tap-label` succeeds this time, replace it
-5. If the existing hint is `tap-label` or `touch-coordinate` and `tap-id` succeeds this time, replace it
-6. If the existing hint is stronger, do not replace it. Do not update `last-used` either
-
-### Write-back Timing
-
-- Do not write back after every step during testing
-- After test completion, update `tests/<id>.json` once, reflecting only `passed: true` steps
-- Hint updates for successful steps are allowed even for FAIL tests
-- However, if there is any concern about the overall JSON integrity, do not write back; notify the user in the results display
-
-### Writing the note
-
-Keep the `note` short when updating a hint. Examples:
-
-- `updated from label to id`
-- `same method, value refreshed`
-- `landscape on iPad`
+Keep the `note` short. Examples: `updated from label to id`, `same method, value refreshed`, `landscape on iPad`.
 
 ## Failure Recording Procedure
 
@@ -126,7 +98,7 @@ Choose one failure classification:
 
 ### describe-ui-snapshot
 
-Record up to the first 50 lines of `ui_describe` output at the point of failure. When the failed check was looking for a specific string, call `ui_describe --expect "<string>"` so the native bridge can supply System UI details if AXe returned a partial tree.
+Record up to the first 50 lines of `ui_describe` output at the point of failure. When the failed check was looking for a specific string, call `ui_describe --expect "<string>"` so `sipi describe-ui` runs its deeper grid pass and includes System UI details when the fast frontmost tree misses the expected text.
 
 ```bash
 # Example recording on verify failure
@@ -146,7 +118,7 @@ Record the action methods tried in that step in normalized form. Record only the
 ]
 ```
 
-For input operations (`axe input`, `clipboard paste`, etc.), use `"input"` as the method and record only the target field name in value (do not record the input value itself).
+For input operations (`sipi type`, `clipboard paste`, etc.), use `"input"` as the method and record only the target field name in value (do not record the input value itself).
 
 ### Cases Not to Record
 
@@ -166,12 +138,13 @@ The `steps` array in result.json must correspond 1:1 with the `steps` array in t
 
 ## Error Recovery
 
-- **Retry**: Re-confirm with `ui_describe`, then re-execute the same action
+- **Retry**: Re-confirm with `ui_describe`, then re-execute the **same action** and re-check the **same verify string**. Do not change the verify condition or the target between retries within a run — that is a FIX, not a retry. If the unchanged verify still fails after `max-retries`, record FAIL
 - **Alert blocking**: Detect AXDialog before each step → get button label → tap
+- **Destructive-confirm alert**: After tapping a destructive trigger (Trash/Delete) that presents a `UIAlertController`, wait for the alert to settle before tapping confirm — the confirm button can be absorbed if tapped mid-presentation. Use a conditional wait on the confirm label (or a brief `sleep 0.5`), then re-`describe-ui` and tap. See `../../sipi-common/docs/patterns.md` "Alert / Confirmation Dialog"
 - **Crash**: App not found in describe-ui → terminate+launch → FAIL the affected step, SKIP the rest
-- **iPad-specific issues**: See docs/patterns.md "App Launch" (iOS 18.x foreground, iOS 26 DockFolderViewService)
+- **iPad-specific issues**: See `../../sipi-common/docs/patterns.md` "App Launch" (iOS 18.x foreground, iOS 26 DockFolderViewService)
 
-## review Criteria
+## Review Criteria
 
 - Coordinate fallback with verify OK → `passed: true` (record coordinate usage in `note`)
 - Succeeded after retry → `passed: true` (record retry count in `note`)
@@ -180,17 +153,16 @@ The `steps` array in result.json must correspond 1:1 with the `steps` array in t
 
 Coordinate fallback used for 2 or more steps in the same test → issue a warning after execution. Test level: if any step has `review: true` → the entire test is also `review: true`.
 
-## optional Steps
+## Optional Steps and Preconditions
 
-Before execution, confirm the target element exists with `ui_describe` → if absent, set `passed: true, skipped: true`.
+See `create.md` for the definitions. At run time:
 
-## preconditions
-
-Check each condition with `ui_describe | grep`. If not met → SKIP the entire test.
+- **Optional step**: confirm the target element exists with `ui_describe` → if absent, set `passed: true, skipped: true` (still produces a 1:1 result entry).
+- **Precondition**: check each condition with `ui_describe | grep` → if not met, SKIP the entire test (not FAIL).
 
 ## Video Recording
 
-When config.json has `"record-video": true`: `axe record-video --udid $UDID --output "$RUN_DIR/$TEST/recording.mp4" &` → after test completion, send `kill -INT`.
+When config.json has `"record-video": true`: `sipi record-video $UDID "$RUN_DIR/$TEST/recording.mp4" &` → after test completion, send `kill -INT` to the recording process to stop and finalize the file.
 
 ## Device Resolution
 
@@ -213,49 +185,32 @@ Share SESSION → issue separate Bash commands to each device simultaneously →
 
 Table summary → FAIL details → Notes summary → improvement suggestions.
 
-| Event | Suggestion |
+These are **post-run** suggestions — record the run's result first (a failing run is FAIL), then propose them for a separate FIX phase. Never apply them mid-run (see "Run is read-only on the spec").
+
+| Event | Post-run suggestion |
 |------|-----|
-| Unexpected alert | Add optional step |
-| verify mismatch but different text matched | Update verify |
-| Coordinate fallback 2 or more times | Add accessibilityIdentifier |
+| Unexpected alert | Add an optional step |
+| verify mismatch but different text matched | Correct the verify string in the FIX phase (this run is still FAIL) |
+| Coordinate fallback 2 or more times | Add an accessibilityIdentifier |
 
 On failure guidance: display failure details / open report.html / re-run failed tests.
 
 ## Final Check for run.json / result.json
 
-Before generating the report, always confirm that the JSON under `.simpilot` matches `../references/json-reference.md`.
-
-- `config.json` required keys: `app`
-- `tests/*.json` required keys: `id`, `title`, `steps`
-- `suites/*.json` required keys: `name`, `tests`
-- `devices/*.json` required keys: `name`, `devices`
-- `run.json` required keys: `started`, `device`, `tests`, `summary`
-- `result.json` required keys: `id`, `passed`, `duration`, `steps`
-- `result.json` step `verify` must be array format: `[{ "check": "...", "found": true }]` — never a plain string
-- `result.json` step `screenshot` should name the file: `"screenshot": "step-001.png"`
-- `run.json` `tests` must be array of objects: `[{ "id": "...", "passed": true, "duration": N }]` — never a plain string array
-- Timestamps must be ISO 8601 with timezone offset. Example: `2026-03-12T23:09:09+09:00`
-- Prohibited: custom keys such as `timestamp`, `total_tests`, `results`, `test_id`, `status`, `duration_seconds`, `ios_version`
-- Prohibited: putting a display name in `device`. `device` is the UDID; the display name goes in `device-name`
-
-After saving, always run the following:
+`../references/json-reference.md` is the single authority for every key (and for the prohibited custom keys). After writing the JSON, validate against it, then run the mechanical gate until it shows OK:
 
 ```bash
-SKILL_ROOT="$HOME/.agents/skills/sipi-test"
-[ -d "$SKILL_ROOT" ] || SKILL_ROOT="$HOME/.claude/skills/sipi-test"
-swift "$SKILL_ROOT/scripts/validate_simpilot_results.swift" .simpilot
+sipi validate .simpilot
 ```
 
 - `OK` → generate report
-- Errors present → fix the JSON before generating the report
+- Errors present → fix the JSON before generating the report (the validator rejects unknown keys, so any custom field will surface here)
 
 ## HTML Report
 
-Generate `report.html` using the bundled script:
+See `report.md`. Generate the self-contained report with the sole supported generator, then open it:
 
 ```bash
-swift "$SKILL_ROOT/scripts/generate_test_report.swift" "$RUN_DIR"
+sipi report "$RUN_DIR"
 open "$RUN_DIR/report.html"
 ```
-
-The script reads `run.json` and each `result.json`, then writes a self-contained `report.html`. See `report.md` for the template reference if manual adjustments are needed.

@@ -33,6 +33,21 @@ Specification for JSON files under `.simpilot/`. For everyday usage, see the pro
 - Run/result timestamps use ISO 8601 with timezone offset
   - Example: `2026-03-07T11:03:24-08:00`
 
+### Prohibited custom keys
+
+`sipi validate` rejects unknown keys, so do not invent fields. Use the keys defined in this document exactly. Common mistaken keys the validator rejects (with the correct key in parentheses):
+
+- `timestamp` (use `started` / `finished` in `run.json`)
+- `total_tests` (use `summary.total`)
+- `results` (use `tests` in `run.json`, `steps` in `result.json`)
+- `test_id` (use `id`)
+- `status` (use the `passed` / `review` / `skipped` booleans; the report derives the display status from the Status Display table)
+- `duration_seconds` (use `duration`)
+- `ios_version` (use `device-runtime`)
+- a display name in `device` — `device` is the UDID; the display name goes in `device-name`
+
+This file is the single authority for keys; `../docs/run.md` and `../SKILL.md` point here rather than re-listing them.
+
 ## config.json
 
 Path: `.simpilot/config.json`
@@ -140,7 +155,7 @@ One file per test.
 | `optional` | bool | No | `false` | Skip if the target is not found |
 | `note` | string | No | - | Additional notes |
 | `target` | object | No | - | Hints for locating the UI element |
-| `hints` | Hint[] | No | `[]` | Previously successful interaction methods |
+| `hints` | Hint[] | No | `[]` | Known-good interaction methods recorded from earlier runs |
 
 - Omitting both `action` and `verify` is not allowed
 - No `action` means verify-only
@@ -347,7 +362,7 @@ The `steps` array must have the same length as the test definition's `steps`. Ev
 |---|---|:---:|---|---|
 | `check` | string | Yes | - | Verification condition |
 | `found` | bool | Yes | - | Whether a match was found |
-| `grep-match` | string | No | - | The actual string that was matched |
+| `grep-match` | string | No | - | The actual string that was matched. **Strongly recommended** for any passed check so the PASS is auditable — but it is not schema-required |
 
 ### AttemptedMethod
 
@@ -407,7 +422,7 @@ Path: `.simpilot/runs/<run-id>/run.json`
 | `session` | string | No | - | Session ID |
 | `suite` | string | No | - | Suite name used |
 | `profile` | string | No | - | Device set name used |
-| `commit` | string | No | - | Git commit hash (7 chars; appended with `-dirty` if there are uncommitted changes) |
+| `commit` | string | No | - | Abbreviated git commit from `git rev-parse --short` (>= 7 chars; `-dirty` suffix appended when the working tree is dirty) |
 | `build-error` | string | No | - | Build failure summary |
 | `tests` | TestEntry[] | Yes | - | Summary of test results |
 | `summary` | Summary | Yes | - | Aggregated counts |

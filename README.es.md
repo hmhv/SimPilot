@@ -16,32 +16,29 @@ Los resultados se guardan en `.simpilot/` con informes HTML que se pueden abrir 
 ## Requisitos previos
 
 - macOS 15 o posterior
-- Xcode 26 o posterior
-- [AXe](https://github.com/cameroncooke/AXe) CLI
-  - `brew install cameroncooke/axe/axe`
-  - `axe init`
+- Xcode 26 o posterior: necesario en **tiempo de ejecución** para controlar el Simulator (SimPilot carga los private Simulator frameworks de Xcode). No hace falta para instalar.
 - [Claude Code](https://claude.com/claude-code) o Codex
-
-La simulator automation de SimPilot asume que el entorno del agente tiene disponible el skill `axe`.
 
 ## Instalación
 
+SimPilot se distribuye como un único binario `sipi` con los skills incorporados. Se instala con un solo comando:
+
 ```bash
-git clone https://github.com/hmhv/SimPilot.git
-cd SimPilot
-make install
+curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh | bash
 ```
 
-`make install` hace lo siguiente:
+El instalador descarga el binario `sipi` precompilado y luego `sipi` registra los skills incorporados `sipi-common` / `sipi-test` / `sipi-verify` en:
 
-- Registra los skills de SimPilot en Claude Code (`~/.claude/skills/`)
-- Registra los skills de SimPilot en Codex (`~/.agents/skills/`)
+- Claude Code (`~/.claude/skills/`)
+- Codex (`~/.agents/skills/`)
+
+Verifica las capacidades del simulador con `sipi doctor`.
 
 Para actualizar o desinstalar:
 
 ```bash
-make update
-make uninstall
+sipi update      # descarga el sipi más reciente desde GitHub Releases y actualiza los skills
+sipi uninstall   # elimina los skills, la metadata de instalación y el binario sipi
 ```
 
 ## Inicio rápido
@@ -147,15 +144,18 @@ Se recomienda añadir `.simpilot/` completa, o al menos `runs/` y `verify/`, al 
 
 ## Limitaciones conocidas
 
-- La entrada de texto usa el portapapeles; no hay `axe type` para contraseñas
-- `axe type` asume una distribución de teclado de EE. UU.
-- No se pueden reproducir gestos de drag and drop, pinch ni rotation
-- Los elementos de system UI como PhotosPicker no son accesibles mediante `describe-ui`
+- La entrada de texto que no es de EE. UU. se realiza mediante el portapapeles (pegar), no tecla por tecla
+- La escritura HID directa tecla por tecla admite la distribución de teclado de EE. UU.
+- Solo simulador: los dispositivos físicos no son compatibles
 
 ## Note
 
 Este repositorio está gestionado principalmente por IA. Se agradecen los issues y comentarios, pero no se aceptan pull requests. Si quieres adaptarlo a tu flujo, haz un fork y usa tu propia copia.
 
+## Descargo de responsabilidad
+
+SimPilot es una herramienta de desarrollo. Controla el Simulador de iOS a través de los **frameworks privados no documentados** de Apple, que Apple puede cambiar o eliminar en cualquier actualización de Xcode o macOS, lo que puede romper SimPilot sin previo aviso. No está afiliado ni respaldado por Apple, y no está pensado para su uso en la App Store ni en producción. Se proporciona **tal cual, sin garantía: úsalo bajo tu propia responsabilidad.**
+
 ## License
 
-Consulta [LICENSE](LICENSE).
+MIT © 2026 hmhv. Consulta [LICENSE](LICENSE).

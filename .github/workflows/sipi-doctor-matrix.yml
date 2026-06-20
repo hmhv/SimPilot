@@ -1,0 +1,109 @@
+# sipi doctor matrix (DRAFT)
+#
+# Builds the SimPilotKit package and runs `sipi doctor` so an Apple-version
+# private-symbol break shows up as a named failing capability check rather than
+# as a downstream crash. See docs/sipi-doctor-contract.md and
+# docs/private-symbols.md.
+#
+# STATUS: DRAFT. Items marked TODO need a runner fleet decision before this
+# becomes a real per-Xcode churn gate.
+#
+# TODO(matrix): A real per-Xcode churn matrix needs MULTIPLE Xcode versions
+#   installed on the runner(s). GitHub-hosted macos runners ship a fixed set of
+#   Xcodes that rolls forward over time, so `xcode: [...]` below only covers
+#   whatever the image happens to carry. To pin specific/old Xcodes, either:
+#     (a) use a self-hosted runner with several Xcodes side by side, or
+#     (b) download + select Xcodes explicitly (xcodes / xcode-select), which is
+#         slow and license-gated.
+#   Until that is decided, the matrix is a placeholder using the runner's
+#   default Xcode plus whatever `xcode-version` values resolve on the image.
+#
+# TODO(doctor-exit): `sipi doctor` exits non-zero unless ALL core capabilities
+#   resolve AND (implicitly, for a useful AX probe) a Simulator is reachable.
+#   On a headless CI runner with no booted device the framework dlopen checks
+#   still pass, but decide whether CI should also boot a simulator (slower) or
+#   accept "frameworks load, no booted device" as green. For now we boot a
+#   simulator so the AX transport check exercises a real device.
+
+name: sipi doctor matrix (draft)
+
+on:
+  workflow_dispatch: {}
+  # TODO(triggers): enable on push / pull_request once the matrix is real.
+  # push:
+  #   paths:
+  #     - "Sources/**"
+  #     - "Package.swift"
+  #     - ".github/workflows/sipi-doctor-matrix.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  doctor:
+    name: build + sipi doctor (Xcode ${{ matrix.xcode }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        # TODO(matrix): replace with the real set of Xcodes to certify. These
+        # are placeholders that may or may not exist on the hosted image.
+        xcode:
+          - "26.0"
+          # - "26.1"
+          # - "16.4"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # TODO(matrix): this select is best-effort. If the requested Xcode is not
+      # on the image it should fail loudly (so we know the matrix entry is a
+      # no-op), not silently fall back to the default.
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: |
+          set -euo pipefail
+          APP="/Applications/Xcode_${{ matrix.xcode }}.app"
+          if [ -d "$APP" ]; then
+            sudo xcode-select -s "$APP/Contents/Developer"
+          else
+            echo "::warning::Xcode ${{ matrix.xcode }} not found at $APP; using default"
+          fi
+          xcodebuild -version
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+
+      - name: Build sipi (release)
+        run: swift build -c release
+
+      # TODO(doctor-exit): boot a simulator so the AX transport check runs
+      # against a live device. Pick a device type/runtime that exists on the
+      # selected Xcode image.
+      - name: Boot a simulator
+        run: |
+          set -euo pipefail
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; \
+print(next((x["udid"] for r in d.values() for x in r if x.get("isAvailable")), ""))')
+          if [ -z "$UDID" ]; then
+            echo "::error::no available simulator to boot"; exit 1
+          fi
+          echo "Booting $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b || true
+
+      - name: Run sipi doctor (JSON)
+        run: |
+          set -euo pipefail
+          BIN=".build/release/sipi"
+          # Gate on the exit code per docs/sipi-doctor-contract.md: 0 only when
+          # all core capabilities are present. Print the JSON either way.
+          "$BIN" doctor --json | tee doctor.json
+          "$BIN" doctor
+
+      - name: Upload doctor report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sipi-doctor-${{ matrix.xcode }}
+          path: doctor.json
+          if-no-files-found: ignore

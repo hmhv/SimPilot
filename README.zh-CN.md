@@ -16,32 +16,29 @@ SimPilot 是一组面向 iOS Simulator 测试与验证的 agent skills，可在 
 ## 前置条件
 
 - macOS 15 或更高版本
-- Xcode 26 或更高版本
-- [AXe](https://github.com/cameroncooke/AXe) CLI
-  - `brew install cameroncooke/axe/axe`
-  - `axe init`
+- Xcode 26 或更高版本：在**运行时**需要，用于驱动 Simulator（SimPilot 会加载 Xcode 的 private Simulator frameworks）。安装时不需要。
 - [Claude Code](https://claude.com/claude-code) 或 Codex
-
-SimPilot 的 simulator automation 默认要求 agent 环境中已经安装 `axe` skill。
 
 ## 安装
 
+SimPilot 以单个内置 skills 的 `sipi` 二进制文件分发。一条命令即可安装:
+
 ```bash
-git clone https://github.com/hmhv/SimPilot.git
-cd SimPilot
-make install
+curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh | bash
 ```
 
-`make install` 会执行以下操作:
+安装脚本会下载预构建的 `sipi` 二进制文件，随后 `sipi` 会将内置的 `sipi-common` / `sipi-test` / `sipi-verify` skills 注册到:
 
-- 将 SimPilot skills 注册到 Claude Code (`~/.claude/skills/`)
-- 将 SimPilot skills 注册到 Codex (`~/.agents/skills/`)
+- Claude Code (`~/.claude/skills/`)
+- Codex (`~/.agents/skills/`)
+
+运行 `sipi doctor` 验证模拟器能力。
 
 更新和卸载:
 
 ```bash
-make update
-make uninstall
+sipi update      # 从 GitHub Releases 下载最新的 sipi 并刷新 skills
+sipi uninstall   # 移除 skills、安装 metadata 和 sipi 二进制文件
 ```
 
 ## 快速开始
@@ -147,15 +144,18 @@ SimPilot 在 `.simpilot/` 下使用如下目录结构:
 
 ## 已知限制
 
-- 文本输入使用剪贴板，密码场景不能使用 `axe type`
-- `axe type` 默认假设为美式键盘布局
-- 无法复现 drag and drop、pinch、rotation 手势
-- PhotosPicker 这类 system UI 无法通过 `describe-ui` 访问
+- 非美式文本输入通过剪贴板（粘贴）完成，而非逐键直接输入
+- 逐键直接 HID 输入支持美式键盘布局
+- 仅支持 simulator，不支持真机
 
 ## Note
 
 这个仓库主要由 AI 维护。欢迎提交 issue 和反馈，但不接受 pull request。如果你想按自己的流程调整，请 fork 后使用。
 
+## 免责声明
+
+SimPilot 是一个开发工具。它通过 Apple 的**未公开私有框架**驱动 iOS 模拟器，而这些框架可能被 Apple 在任意 Xcode 或 macOS 更新中更改或移除，从而可能在没有任何预告的情况下导致 SimPilot 无法工作。本工具与 Apple 没有关联，也未获得 Apple 认可，并非用于 App Store 或生产环境。本工具**按“现状”提供，不附带任何保证——使用风险由你自行承担。**
+
 ## License
 
-请参阅 [LICENSE](LICENSE)。
+MIT © 2026 hmhv。请参阅 [LICENSE](LICENSE)。

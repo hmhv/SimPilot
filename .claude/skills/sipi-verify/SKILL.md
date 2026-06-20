@@ -1,12 +1,14 @@
 ---
 name: sipi-verify
-description: Verify feature implementations and bug fixes on the iOS Simulator. Use after implementing or fixing something to confirm it works correctly and looks right. Use for "verify this works", "check on simulator", "does this look right", "confirm the fix", "check it on the device", "build and run it", "see if it works", "show me how it looks", etc. Also trigger when the user finishes implementing something and wants visual confirmation — even if they don't say "verify" explicitly.
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep
+description: Verify feature implementations and bug fixes on the iOS Simulator, capturing iPhone and iPad in light and dark by default. Use after implementing or fixing something to confirm it works correctly and looks right. Use for "verify this works", "check on simulator", "does this look right", "confirm the fix", "check it on the device", "build and run it", "see if it works", "show me how it looks", etc. Also trigger when the user finishes implementing something and wants visual confirmation — even if they don't say "verify" explicitly. This is a one-off, exploratory check of a just-made change (no saved test); to build a repeatable regression test or audit suite, use sipi-test instead.
+allowed-tools: Bash, Read, Write, Glob, Grep
 ---
 
 # Implementation Verification on iOS Simulator
 
-Verify that a feature implementation or bug fix works correctly by checking it on the iOS Simulator. By default, capture 4 variants: iPhone light, iPhone dark, iPad light, iPad dark. Uses AXe CLI plus `sipi-ui` for UI interaction.
+Verify that a feature implementation or bug fix works correctly by checking it on the iOS Simulator. By default, capture 4 variants: iPhone light, iPhone dark, iPad light, iPad dark. Uses SimPilot's native `sipi` driver for UI interaction.
+
+This skill **observes and reports only — it never patches product source.** It authors `findings.json` with Write and generates the report via Bash (`sipi verify-report`), but does not edit application code. If verification surfaces a code-level problem, describe it in the findings and hand the fix to sipi-test, which owns source changes.
 
 ## When This Skill Is Used
 
@@ -21,14 +23,15 @@ Verify that a feature implementation or bug fix works correctly by checking it o
 - **Check what matters** — focus on the specific behavior that was changed, not everything
 - **Be honest** — if something looks wrong or broken, say so clearly
 - **Show evidence** — use `ui_screenshot` captures and `ui_describe` output to support findings
-- **4 variants by default** — always capture iPhone light/dark and iPad light/dark unless the user specifies otherwise (e.g., "just iPhone" or "iPad only"). If only a subset is requested, capture that subset
-- **Suggest follow-up** — if the verification reveals a good regression test candidate, suggest `/sipi-test create`
+- **Confirm the new state before declaring all-OK** — before writing `findings.json` as an empty `[]`, confirm for the SPECIFIC changed behavior that you observed the NEW state via `ui_describe` (not the screenshot alone), and can state why that state would be absent if the change had not worked. Appearance/visual checks remain screenshot-first and exploratory
+- **4 variants by default** — always capture iPhone light, iPhone dark, iPad light, iPad dark. Drop a device class only when it is clearly inapplicable (an iPhone-only or iPad-only app, or a change that cannot appear on the other class). When you skip a variant, state in the summary which variants were skipped and why
+- **Suggest follow-up** — if the verification reveals a good regression test candidate, suggest the user run `/sipi-test` to capture this as a regression test
 
 ## Preflight
 
 Read `../sipi-common/docs/preflight.md` and complete all checks before proceeding.
 Read `../sipi-common/docs/ui-driver.md` and define its shell prelude in every Bash call that inspects or taps UI.
-Before using AXe, read the `axe` skill (typically at `~/.claude/skills/axe/SKILL.md` or `~/.agents/skills/axe/SKILL.md`). If the `axe` skill is not available, tell the user that it is required and stop.
+Confirm the native driver is ready with `sipi doctor` (exit 0). If it fails, report the failing capability and stop.
 
 ## Workflow
 
@@ -44,35 +47,21 @@ See `docs/verify-workflow.md` for the detailed procedure. Summary:
 
 ## Output
 
-Screenshots and an HTML report are saved to:
+Screenshots, `findings.json`, and a self-contained HTML report are saved under `.simpilot/verify/<timestamp>_<description>/`. See `docs/report.md` for the directory layout, naming rules, and the `findings.json` contract.
 
-```
-.simpilot/verify/<timestamp>_<description>/
-  iphone-light/
-  iphone-dark/
-  ipad-light/
-  ipad-dark/
-  findings.json
-  report.html
-```
-
-See `docs/report.md` for output structure and HTML generation details.
-
-Generate the report: `swift "$SKILL_ROOT/scripts/generate_verify_report.swift" "$VERIFY_DIR" --title "Description"` (status is auto-detected from `findings.json`; do not pass `--status ok` manually)
+Generate the report with `sipi verify-report "$VERIFY_DIR" --title "Description"` — the sole report generator. Status is auto-detected from `findings.json`; do not pass `--status ok` manually.
 
 ### Returning results to the caller
 
-After generating the report, **always output the result path** so that calling skills or the user can locate and review the artifacts:
+**Always** output the result path so calling skills or the user can locate the artifacts. This line must appear in the conversation output; calling skills rely on it to read the screenshots and HTML report for further review (e.g., comparing against design references):
 
 ```
 Verify results: <absolute path to $VERIFY_DIR>
 ```
 
-This line must appear in the conversation output. Calling skills rely on this path to read screenshots and the HTML report for further review (e.g., comparing against design references).
-
 ## Element Interaction
 
-Use the same fallback chain as sipi-test (defined in `../sipi-test/SKILL.md`). See `../sipi-test/docs/patterns.md` for control-specific guidance.
+Use the shared element-interaction fallback chain defined in `../sipi-common/docs/patterns.md`. That file also has control-specific guidance and known quirks.
 
 ## Verification Approach
 
@@ -90,7 +79,7 @@ This is **exploratory, not scripted**. Unlike regression tests:
 |------|-------------|
 | `docs/verify-workflow.md` | Before starting verification |
 | `docs/report.md` | When generating the HTML report |
-| `../sipi-test/docs/patterns.md` | When interacting with UI elements |
+| `../sipi-common/docs/patterns.md` | When interacting with UI elements (shared fallback chain + control quirks) |
 | `../sipi-common/docs/preflight.md` | Before starting any session |
 | `../sipi-common/docs/ui-driver.md` | UI driver shell prelude and native bridge wrappers |
 | `../sipi-common/docs/build.md` | When building or installing |

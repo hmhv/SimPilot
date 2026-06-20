@@ -1,122 +1,35 @@
 # UI Driver
 
 Use this shell prelude at the top of every Bash call that inspects or taps simulator UI.
-Shell state does not persist between Bash calls, so redefine `UDID` and these functions each time.
+Shell state does not persist between Bash calls, so redefine `SIPI`, `UDID`, and these
+functions each time.
+
+Preflight resolves the `sipi` binary path once (see `preflight.md`) and prints a
+ready-to-paste `SIPI=…` line. Copy that whole line **verbatim** as the first line below —
+it is already shell-quoted (so a path with spaces, e.g. `~/My Projects/.build/release/sipi`,
+works), so do NOT wrap it in quotes or re-run the resolver here. If preflight was not run in
+this session, run its resolver first to get the line.
 
 ```bash
-UDID="${UDID:?set UDID}"
+SIPI=/Users/you/.local/bin/sipi   # paste the SIPI= line preflight printed, verbatim (already shell-quoted; do not add quotes)
+UDID="<resolved-udid>"
+[ -x "$SIPI" ] || { echo "sipi not found at '$SIPI' — re-run preflight to resolve it" >&2; exit 1; }
 
-resolve_sipilot_root() {
-  if [ -n "${SIPILOT_ROOT:-}" ] && [ -d "$SIPILOT_ROOT" ]; then
-    printf '%s\n' "$SIPILOT_ROOT"
-    return
-  fi
-  for root in \
-    "$PWD" \
-    "$(cd "$PWD/.." 2>/dev/null && pwd)" \
-    "$(cd "$PWD/../.." 2>/dev/null && pwd)" \
-    "$PWD/SimPilot" \
-    "$HOME/Documents/github/SimPilot"
-  do
-    if [ -x "$root/NativePrototype/Scripts/sipi-ui" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-  done
-  printf '%s\n' ""
-}
+ui_describe()   { "$SIPI" describe-ui "$UDID" "$@"; }
+ui_tap_label()  { "$SIPI" tap "$UDID" --label "$1"; }
+ui_tap_id()     { "$SIPI" tap "$UDID" --id "$1"; }
+ui_tap_xy()     { "$SIPI" tap "$UDID" --pixel -x "$1" -y "$2"; }
+ui_key()        { "$SIPI" key "$1" "$UDID"; }
+ui_screenshot() { "$SIPI" screenshot "$UDID" "$1"; }
 
-SIPILOT_ROOT="$(resolve_sipilot_root)"
-SIPI_UI=""
-SIPI_BRIDGE=""
-if [ -n "$SIPILOT_ROOT" ]; then
-  SIPI_UI="$SIPILOT_ROOT/NativePrototype/Scripts/sipi-ui"
-  SIPI_BRIDGE="$SIPILOT_ROOT/NativePrototype/.build/debug/sipi-bridge"
-  if [ -x "$SIPI_UI" ] && [ ! -x "$SIPI_BRIDGE" ]; then
-    (cd "$SIPILOT_ROOT/NativePrototype" && swift build >/dev/null)
-  fi
-  export SIPI_BRIDGE
-fi
-
-ui_describe() {
-  if [ -x "$SIPI_UI" ]; then
-    "$SIPI_UI" describe "$UDID" "$@"
-  else
-    axe describe-ui --udid "$UDID"
-  fi
-}
-
-ui_tap_label() {
-  if [ -x "$SIPI_UI" ]; then
-    "$SIPI_UI" tap "$UDID" --label "$1"
-  else
-    axe tap --label "$1" --udid "$UDID"
-  fi
-}
-
-ui_tap_id() {
-  if [ -x "$SIPI_UI" ]; then
-    "$SIPI_UI" tap "$UDID" --id "$1"
-  else
-    axe tap --id "$1" --udid "$UDID"
-  fi
-}
-
-ui_tap_xy() {
-  if [ -x "$SIPI_UI" ]; then
-    "$SIPI_UI" tap "$UDID" -x "$1" -y "$2"
-  else
-    axe tap -x "$1" -y "$2" --udid "$UDID"
-  fi
-}
-
-ui_key() {
-  if [ -x "$SIPI_BRIDGE" ]; then
-    "$SIPI_BRIDGE" key "$UDID" "$1"
-  else
-    axe key "$1" --udid "$UDID"
-  fi
-}
-
-ui_screenshot() {
-  if [ -x "$SIPI_BRIDGE" ]; then
-    "$SIPI_BRIDGE" screenshot "$UDID" "$1"
-  else
-    axe screenshot --udid "$UDID" --output "$1"
-  fi
-}
-
-native_tap() {
-  [ -x "$SIPI_BRIDGE" ] || return 127
-  "$SIPI_BRIDGE" tap "$UDID" "$1" "$2"
-}
-
-native_swipe() {
-  [ -x "$SIPI_BRIDGE" ] || return 127
-  "$SIPI_BRIDGE" swipe "$UDID" "$1" "$2" "$3" "$4"
-}
-
-native_button() {
-  [ -x "$SIPI_BRIDGE" ] || return 127
-  "$SIPI_BRIDGE" button "$UDID" "$1"
-}
-
-native_key() {
-  [ -x "$SIPI_BRIDGE" ] || return 127
-  "$SIPI_BRIDGE" key "$UDID" "$1"
-}
-
-native_orientation() {
-  [ -x "$SIPI_BRIDGE" ] || return 127
-  "$SIPI_BRIDGE" orientation "$UDID" "$1"
-}
-
-native_screenshot() {
-  [ -x "$SIPI_BRIDGE" ] || return 127
-  "$SIPI_BRIDGE" screenshot "$UDID" "$1"
-}
+native_tap()         { "$SIPI" tap "$UDID" --norm -x "$1" -y "$2"; }
+native_swipe()       { "$SIPI" swipe "$UDID" --norm --start-x "$1" --start-y "$2" --end-x "$3" --end-y "$4"; }
+native_button()      { "$SIPI" button "$UDID" "$1"; }
+native_key()         { "$SIPI" key "$1" "$UDID"; }
+native_orientation() { "$SIPI" orientation "$UDID" --set "$1"; }
+native_screenshot()  { "$SIPI" screenshot "$UDID" "$1"; }
 ```
 
-Use `ui_describe`, `ui_tap_label`, `ui_tap_id`, `ui_key`, and `ui_screenshot` as the default path. They use AXe first where useful and use the native bridge when it is available or needed for System UI. Pass `ui_describe --expect "Text"` when a subsequent grep is looking for specific text; this lets the driver fall back to native AX when AXe returns a partial tree.
+Use `ui_describe`, `ui_tap_label`, `ui_tap_id`, `ui_key`, and `ui_screenshot` as the default path. They drive the native `sipi` binary, which sees both the frontmost app tree and System UI (PhotosPicker, Share Sheet, SFSafariViewController). Pass `ui_describe --expect "Text"` when a subsequent grep is looking for specific text; this signals `sipi describe-ui` to auto-trigger its deeper grid pass when the fast frontmost tree does not contain the expected text.
 
 Use `native_tap`, `native_swipe`, `native_button`, `native_key`, `native_orientation`, or `native_screenshot` when a step already has normalized coordinates, needs high-throughput simulator input, or needs Simulator-only operations.

@@ -1,4 +1,4 @@
 interface:
   display_name: "SimPilot Verify"
-  short_description: "Verify iOS Simulator changes across key variants"
+  short_description: "Verify a feature or fix on the simulator — iPhone/iPad, light/dark"
   default_prompt: "Use $sipi-verify to verify this implementation on the iOS Simulator."

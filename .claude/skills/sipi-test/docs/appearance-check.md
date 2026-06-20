@@ -1,6 +1,6 @@
 # Appearance Verification
 
-Use AXe and `xcrun simctl ui` to compare the same screens across appearance and text-size variants. Simulator observation is the primary source of truth; source code review is supplementary for understanding constraints and applying fixes.
+Use the native `sipi` UI driver (via the `ui_*` helpers) and `xcrun simctl ui` to compare the same screens across appearance and text-size variants. Simulator observation is the primary source of truth; source code review is supplementary for understanding constraints and applying fixes.
 
 Read `../references/appearance-fix-policy.md` before proposing or applying source-code changes.
 

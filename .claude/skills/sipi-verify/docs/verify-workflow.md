@@ -72,7 +72,7 @@ For each check item:
 
 1. **Navigate** to the relevant screen
    - Use `ui_describe` to confirm current location
-   - Navigate using the fallback chain from `../../sipi-test/docs/patterns.md`
+   - Navigate using the fallback chain from `../../sipi-common/docs/patterns.md`
 
 2. **Perform the action**
    - Trigger the behavior being verified
@@ -108,6 +108,8 @@ This is exploratory — if you notice something unexpected while checking, inves
 
 Before generating the report, write `findings.json` in the verify directory. This file drives the report status badge and prevents reporting "All OK" when issues exist.
 
+Before writing an empty `[]` (all-OK), confirm for the SPECIFIC changed behavior that you observed the NEW state via `ui_describe` (not the screenshot alone), and can state why that state would be absent if the change had not worked. Appearance/visual checks remain screenshot-first and exploratory.
+
 ```bash
 # No issues found — write empty array
 echo '[]' > "$VERIFY_DIR/findings.json"
@@ -120,7 +122,7 @@ cat > "$VERIFY_DIR/findings.json" << 'EOF'
 EOF
 ```
 
-The report script reads `findings.json` to auto-determine the status badge:
+`sipi verify-report` reads `findings.json` to auto-determine the status badge:
 - Empty array `[]` → "All OK"
 - Non-empty array → "Issues Found"
 - Missing file + `--status ok` → prints a warning (status is caller-asserted without verification)
@@ -131,15 +133,13 @@ The report script reads `findings.json` to auto-determine the status badge:
 After all 4 variants are complete and findings are recorded, generate `report.html`:
 
 ```bash
-SKILL_ROOT="$HOME/.agents/skills/sipi-verify"
-[ -d "$SKILL_ROOT" ] || SKILL_ROOT="$HOME/.claude/skills/sipi-verify"
-swift "$SKILL_ROOT/scripts/generate_verify_report.swift" "$VERIFY_DIR" --title "Description"
+sipi verify-report "$VERIFY_DIR" --title "Description"
 open "$VERIFY_DIR/report.html"
 ```
 
-Do not pass `--status ok` manually. Let the script read `findings.json` to determine the status. The `--status` flag exists only as a fallback when `findings.json` cannot be written.
+Do not pass `--status ok` manually. Let `sipi verify-report` read `findings.json` to determine the status. The `--status` flag exists only as a fallback when `findings.json` cannot be written.
 
-The script reads screenshots from each variant directory and generates a comparison grid. See `report.md` for the template reference if manual adjustments are needed.
+`sipi verify-report` is the single path for producing `report.html`: it reads the screenshots from each variant directory, embeds them as Base64 data URIs, and generates a self-contained comparison grid. See `report.md` for the directory layout and the `findings.json` contract.
 
 ## 7. Summarize and Return Results
 
@@ -153,4 +153,5 @@ After opening the report, provide a brief summary **and output the result path**
 2. **Summarize findings**:
    - **All OK**: "Verification complete — all 4 variants look good. Report opened in browser."
    - **Issues found**: list each issue with which variant(s) are affected
-   - **Regression candidate**: if the verified behavior is worth protecting, suggest `/sipi-test create`
+   - **Skipped variants**: if you dropped a device class, state which and why
+   - **Regression candidate**: if the verified behavior is worth protecting, suggest the user run `/sipi-test` to capture this as a regression test

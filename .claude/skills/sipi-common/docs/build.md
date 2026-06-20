@@ -36,7 +36,7 @@ When `project`/`scheme` are not specified, detection proceeds in this order:
 4. If multiple are found, ask the user
 
 ```bash
-find . -name "*.xcworkspace" -not -path "*/.xcodeproj/*" -maxdepth 2
+find . -name "*.xcworkspace" -not -path "*.xcodeproj/*" -maxdepth 2
 find . -name "*.xcodeproj" -maxdepth 2
 ```
 

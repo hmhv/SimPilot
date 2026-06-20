@@ -1,6 +1,6 @@
 # Accessibility Audit
 
-Use AXe to inspect screens on the iOS Simulator and produce a concrete issue list by screen. Simulator observation is the primary source of truth; source code review is supplementary for confirming root cause and implementing fixes.
+Use the native `sipi` UI driver (via the `ui_*` helpers) to inspect screens on the iOS Simulator and produce a concrete issue list by screen. Simulator observation is the primary source of truth; source code review is supplementary for confirming root cause and implementing fixes.
 
 Read `../references/a11y-best-practices.md` before proposing fixes or editing code.
 
@@ -69,7 +69,7 @@ Screen: settings
 
 ### Tab Bar (iOS 18+)
 
-The floating tab bar in iOS 18+ exposes an `AXGroup` with `AXLabel: "Tab Bar"` but **zero children** in `axe describe-ui`. Individual tab items have no `AXLabel`.
+The floating tab bar in iOS 18+ exposes an `AXGroup` with `AXLabel: "Tab Bar"` but **zero children** in `sipi describe-ui`. Individual tab items have no `AXLabel`.
 
 **Detection**: When you find a `Tab Bar` group with no children or children without labels, report it as:
 - severity: medium
@@ -79,7 +79,7 @@ The floating tab bar in iOS 18+ exposes an `AXGroup` with `AXLabel: "Tab Bar"` b
 
 ### Coordinate-based navigation for tabs
 
-When tab items cannot be tapped by label, use coordinate-based tapping. See `patterns.md` "Tab Switching" for device-specific coordinates and methods.
+When tab items cannot be tapped by label, use coordinate-based tapping. See `../../sipi-common/docs/patterns.md` "Tab Switching" for device-specific coordinates and methods.
 
 ## System UI scope
 

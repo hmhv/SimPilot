@@ -16,32 +16,29 @@ SimPilot은 Claude Code 또는 Codex에서 자연어 요청으로 구동되는 i
 ## 사전 요구 사항
 
 - macOS 15 이상
-- Xcode 26 이상
-- [AXe](https://github.com/cameroncooke/AXe) CLI
-  - `brew install cameroncooke/axe/axe`
-  - `axe init`
+- Xcode 26 이상: Simulator를 구동하기 위해 **런타임**에 필요합니다(SimPilot이 Xcode의 private Simulator frameworks를 로드합니다). 설치할 때는 필요하지 않습니다.
 - [Claude Code](https://claude.com/claude-code) 또는 Codex
-
-SimPilot의 simulator automation은 에이전트 환경에 `axe` skill이 있다고 가정합니다.
 
 ## 설치
 
+SimPilot은 skills를 포함한 단일 `sipi` 바이너리로 배포됩니다. 한 줄로 설치합니다.
+
 ```bash
-git clone https://github.com/hmhv/SimPilot.git
-cd SimPilot
-make install
+curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh | bash
 ```
 
-`make install`은 다음을 수행합니다.
+설치 프로그램이 사전 빌드된 `sipi` 바이너리를 내려받고, `sipi`가 포함된 `sipi-common` / `sipi-test` / `sipi-verify` skills를 다음 위치에 등록합니다.
 
-- SimPilot skills를 Claude Code에 등록 (`~/.claude/skills/`)
-- SimPilot skills를 Codex에 등록 (`~/.agents/skills/`)
+- Claude Code (`~/.claude/skills/`)
+- Codex (`~/.agents/skills/`)
+
+`sipi doctor`로 simulator 기능을 확인하세요.
 
 업데이트 및 제거:
 
 ```bash
-make update
-make uninstall
+sipi update      # GitHub Releases에서 최신 sipi를 내려받고 skills를 갱신
+sipi uninstall   # skills, 설치 metadata, sipi 바이너리를 제거
 ```
 
 ## 빠른 시작
@@ -147,15 +144,18 @@ SimPilot은 `.simpilot/` 아래에 다음 구조를 사용합니다.
 
 ## 알려진 제한 사항
 
-- 텍스트 입력은 클립보드를 사용하며, 비밀번호에는 `axe type`을 사용할 수 없습니다
-- `axe type`은 미국식 키보드 레이아웃을 가정합니다
-- drag and drop, pinch, rotation 제스처는 재현할 수 없습니다
-- PhotosPicker 같은 system UI 요소는 `describe-ui`로 접근할 수 없습니다
+- 미국식 이외의 텍스트 입력은 키 단위 직접 입력이 아니라 클립보드(붙여넣기)로 처리합니다
+- 키 단위 직접 HID 입력은 미국식 키보드 레이아웃을 지원합니다
+- simulator만 지원하며 실제 기기는 지원하지 않습니다
 
 ## Note
 
 이 저장소는 주로 AI가 관리합니다. 이슈와 피드백은 환영하지만 pull request는 받지 않습니다. 필요하면 fork해서 자체 워크플로에 맞게 사용하세요.
 
+## 면책 조항
+
+SimPilot은 개발용 도구입니다. Apple의 **문서화되지 않은 비공개 프레임워크**를 통해 iOS 시뮬레이터를 제어하며, 이러한 프레임워크는 Xcode나 macOS 업데이트에서 Apple이 언제든 변경하거나 제거할 수 있습니다. 그럴 경우 예고 없이 SimPilot이 동작하지 않을 수 있습니다. 이 도구는 Apple과 제휴하거나 승인받은 관계가 아니며, App Store나 프로덕션 용도로 사용하기 위한 것이 아닙니다. 이 도구는 **있는 그대로(as-is) 어떠한 보증도 없이 제공되며, 사용에 따른 책임은 본인에게 있습니다.**
+
 ## License
 
-[LICENSE](LICENSE)를 참고하세요.
+MIT © 2026 hmhv. 자세한 내용은 [LICENSE](LICENSE)를 참고하세요.

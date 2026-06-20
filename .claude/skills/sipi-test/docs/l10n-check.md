@@ -1,6 +1,6 @@
 # Localization Verification
 
-Use AXe and the iOS Simulator Settings app to switch languages, capture screens, and compare localized UI output. Simulator observation is the primary source of truth; source code review is supplementary for finding untranslated strings and fixing issues at the source.
+Use the native `sipi` UI driver (via the `ui_*` helpers) and the iOS Simulator Settings app to switch languages, capture screens, and compare localized UI output. Simulator observation is the primary source of truth; source code review is supplementary for finding untranslated strings and fixing issues at the source.
 
 Read `../references/l10n-fix-policy.md` before proposing or applying source-code changes.
 
@@ -24,7 +24,7 @@ Judge whether each localized UI is semantically correct: the wording matches the
 
 ## Language Switching
 
-Language switching is primarily done by operating `Settings.app` with AXe.
+Language switching is primarily done by operating `Settings.app` with the native `sipi` UI driver (`ui_*` helpers).
 
 Preferred flow:
 
@@ -34,7 +34,7 @@ Preferred flow:
 xcrun simctl launch <UDID> com.apple.Preferences
 ```
 
-2. Navigate with AXe through:
+2. Navigate with the `ui_*` helpers through:
    - `General`
    - `Language & Region`
    - `Add Language...` or current language

@@ -16,32 +16,29 @@ Results are saved in `.simpilot/` with HTML reports for browser viewing.
 ## Prerequisites
 
 - macOS 15 or later
-- Xcode 26 or later
-- [AXe](https://github.com/cameroncooke/AXe) CLI
-  - `brew install cameroncooke/axe/axe`
-  - `axe init`
+- Xcode 26 or later — needed at **runtime** to drive the Simulator (SimPilot loads Xcode's private Simulator frameworks). Not needed to install.
 - [Claude Code](https://claude.com/claude-code) or Codex
-
-SimPilot's simulator automation assumes the `axe` skill is available in the agent environment.
 
 ## Installation
 
+SimPilot ships as a single `sipi` binary with the skills embedded. Install it with one command:
+
 ```bash
-git clone https://github.com/hmhv/SimPilot.git
-cd SimPilot
-make install
+curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh | bash
 ```
 
-`make install` performs the following:
+The installer downloads the prebuilt `sipi` binary, then `sipi` installs the embedded `sipi-common` / `sipi-test` / `sipi-verify` skills into:
 
-- Registers the SimPilot skills with Claude Code (`~/.claude/skills/`)
-- Registers the SimPilot skills with Codex (`~/.agents/skills/`)
+- Claude Code (`~/.claude/skills/`)
+- Codex (`~/.agents/skills/`)
+
+Verify the simulator capabilities with `sipi doctor`.
 
 To update and uninstall:
 
 ```bash
-make update
-make uninstall
+sipi update      # download the latest sipi from GitHub Releases and refresh the skills
+sipi uninstall   # remove the skills, install metadata, and the sipi binary
 ```
 
 ## Quick start
@@ -146,15 +143,18 @@ Recommend adding `.simpilot/` (or at least `runs/` and `verify/`) to the project
 
 ## Known limitations
 
-- Text input uses the clipboard (no `axe type` for passwords)
-- `axe type` assumes a US keyboard layout
-- Drag and drop, pinch, and rotation gestures cannot be reproduced
-- System UI elements like PhotosPicker are not accessible via `describe-ui`
+- Non-US text input is entered via the clipboard (paste), not direct per-key typing
+- Direct per-key HID typing covers the US keyboard layout
+- Simulator only — physical devices are not supported
 
 ## Note
 
 This repository is primarily managed by AI. Issues and feedback are welcome, but pull requests are not accepted. If you want to adapt it for your own workflow, please fork it and use your own copy.
 
+## Disclaimer
+
+SimPilot is a development tool. It drives the iOS Simulator through Apple's **undocumented private frameworks**, which Apple may change or remove in any Xcode or macOS update — that can break SimPilot without notice. It is not affiliated with or endorsed by Apple, and is not intended for App Store or production use. It is provided **as-is, without warranty — use at your own risk.**
+
 ## License
 
-See [LICENSE](LICENSE).
+MIT © 2026 hmhv. See [LICENSE](LICENSE).

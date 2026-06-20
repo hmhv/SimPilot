@@ -4,7 +4,7 @@
 
 1. **Understand requirements**: Clarify the test target, purpose, and expected behavior. Ask if anything is unclear
 2. **Design the test**:
-   - Build & install (if `build` is in config.json; see docs/run.md for details)
+   - Build & install (if `build` is in config.json; see run.md for details)
    - Confirm screens in Simulator: `ui_screenshot` + `Read` + `ui_describe`
    - Reference source code: use `Glob`/`Grep` to understand navigation structure and display conditions
 3. **Generate JSON and present to user** → save to `.simpilot/tests/<id>.json` after confirmation
@@ -25,8 +25,8 @@ When asked to "start from the current screen": use screenshot + Read + `ui_descr
 - If coordinates must be retained, store them as `hints[].method = "touch-coordinate"` rather than in `note`
 - Up to one hint per environment variant in `hints`. Prefer updating/replacing over adding new entries
 - Set `updated` when modifying a test
-- Elements without accessibilityIdentifier set → add `.accessibilityIdentifier("screen.element-name")` to source and rebuild
-- System UI (PhotosPicker, Share Sheet, SFSafariViewController, etc.) is inspectable through `sipi-ui`; include it only when stable on the target runtime, otherwise use pre-loaded data
+- For elements without an accessibilityIdentifier, prefer a stable identifier — but treat adding `.accessibilityIdentifier("screen.element-name")` to source as a source change governed by `../references/test-fix-policy.md`: apply it only after the negative-control check there (confirm the test would still FAIL if the feature were broken), not reflexively because an id is missing
+- System UI (PhotosPicker, Share Sheet, SFSafariViewController, etc.) is inspectable through `sipi` (the native driver, via `ui_describe --deep`); include it only when stable on the target runtime, otherwise use pre-loaded data
 
 ## Step Types
 
@@ -34,13 +34,12 @@ When asked to "start from the current screen": use screenshot + Read + `ui_descr
 - **verify-only**: `{ "verify": "..." }` — check screen state only
 - **action-only**: `{ "action": "..." }` — action only; PASS on exit 0
 
-## preconditions
+## Preconditions and optional steps
 
-Check with `ui_describe | grep` before the test starts. If not met → SKIP the entire test (not FAIL).
+These are the canonical definitions; `run.md` points here for run-time behavior.
 
-## optional Steps
-
-Marked with `"optional": true`. Before execution, confirm the target element exists with `ui_describe` → skip if absent.
+- **Preconditions** (`preconditions` on the test): checked with `ui_describe | grep` before the test starts. If a precondition is **not met**, the entire test is **SKIPPED, not FAILED** — an unmet precondition means the test does not apply to the current state, which is not a regression.
+- **Optional steps** (a step marked `"optional": true`): before executing the step, confirm the target element exists with `ui_describe`. If it is absent, the step is skipped (`passed: true, skipped: true`); the rest of the test continues.
 
 ## Error Case Patterns
 
