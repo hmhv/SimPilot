@@ -42,12 +42,19 @@ public enum ResultValidator {
     private static let buildOptional: Set<String> = ["project", "scheme", "configuration"]
 
     private static let testRequired: Set<String> = ["id", "title", "steps"]
-    private static let testOptional: Set<String> = ["app", "tags", "preconditions", "created", "updated"]
-    private static let testStepOptional: Set<String> = ["action", "verify", "optional", "note", "target", "hints"]
-    private static let testTargetOptional: Set<String> = ["role", "ids", "texts", "screen", "within"]
-    private static let testHintRequired: Set<String> = ["method"]
-    private static let testHintOptional: Set<String> = ["device-class", "device-name", "ios", "orientation", "value", "last-used", "note"]
-    private static let testHintMethods: Set<String> = ["tap-id", "tap-label", "touch-coordinate"]
+    private static let testOptional: Set<String> = ["app", "tags", "created", "updated"]
+    private static let testStepOptional: Set<String> = ["id", "action", "verify", "optional", "wait", "note"]
+    private static let testActionOptional: Set<String> = [
+        "type", "selector", "point", "text", "usage", "button", "start", "end", "duration",
+        "value", "tolerance", "preset", "modifiers", "key", "keycodes", "delay", "steps", "orientation", "delta"
+    ]
+    private static let testSelectorOptional: Set<String> = ["id", "label", "value", "element-type"]
+    private static let testPointOptional: Set<String> = ["x", "y", "unit"]
+    private static let testVerifyOptional: Set<String> = ["contains", "absent"]
+    private static let testActionTypes: Set<String> = [
+        "tap", "type", "key", "button", "swipe", "wait",
+        "long-press", "slider", "gesture", "key-combo", "key-sequence", "drag", "orientation", "crown"
+    ]
 
     private static let suiteRequired: Set<String> = ["name", "tests"]
     private static let suiteOptional: Set<String> = ["description", "settings"]
@@ -74,7 +81,7 @@ public enum ResultValidator {
     private static let resultFailureTypes: Set<String> = ["action", "verify", "timeout"]
     private static let attemptedMethodRequired: Set<String> = ["method"]
     private static let attemptedMethodOptional: Set<String> = ["value"]
-    private static let attemptedMethodTypes: Set<String> = ["tap-label", "tap-id", "touch-coordinate", "input"]
+    private static let attemptedMethodTypes: Set<String> = ["tap-label", "tap-id", "tap-value", "touch-coordinate", "input"]
     private static let screenshotsOptional: Set<String> = ["before", "after"]
     private static let verifyRequired: Set<String> = ["check", "found"]
     private static let verifyOptional: Set<String> = ["grep-match"]
@@ -130,6 +137,51 @@ public enum ResultValidator {
         if let val = data[field], !(val is NSNumber) || isJSONBoolean(val) { diag.errors.append("\(path): \(prefix)\(field) must be number") }
     }
 
+    private static func checkString(_ path: String, _ data: JSON, _ field: String, prefix: String = "", _ diag: Diagnostics) {
+        if let val = data[field], !(val is String) { diag.errors.append("\(path): \(prefix)\(field) must be a string") }
+    }
+
+    private static func checkStringArray(_ path: String, _ data: JSON, _ field: String, prefix: String = "", _ diag: Diagnostics) {
+        guard let val = data[field] else { return }
+        guard let arr = val as? [Any], arr.allSatisfy({ $0 is String }) else {
+            diag.errors.append("\(path): \(prefix)\(field) must be an array of strings")
+            return
+        }
+    }
+
+    /// A JSON number that is a whole value AND representable as `Int` — so a spec
+    /// that validates decodes into the harness's `Int` fields. `1e20` is integral
+    /// as a Double but overflows `Int`, so `Int(exactly:)` (not `.rounded()`)
+    /// is the correct test.
+    private static func isJSONInteger(_ value: Any) -> Bool {
+        guard let n = value as? NSNumber, !isJSONBoolean(value) else { return false }
+        return Int(exactly: n.doubleValue) != nil
+    }
+
+    /// Upper bound for a time field, in seconds. Beyond this the harness's
+    /// `UInt32(seconds * 1_000_000)` sleep conversion would overflow; the value
+    /// is also far larger than any reasonable UI wait.
+    private static let maxDurationSeconds = 600.0
+
+    private static func checkSecondsRange(_ path: String, _ data: JSON, _ field: String, prefix: String = "", _ diag: Diagnostics) {
+        guard let v = numberValue(data[field]) else { return }  // non-number handled by checkNumber
+        if !(v >= 0 && v <= maxDurationSeconds) {
+            diag.errors.append("\(path): \(prefix)\(field) must be between 0 and \(Int(maxDurationSeconds)) seconds")
+        }
+    }
+
+    private static func checkInteger(_ path: String, _ data: JSON, _ field: String, prefix: String = "", _ diag: Diagnostics) {
+        if let val = data[field], !isJSONInteger(val) { diag.errors.append("\(path): \(prefix)\(field) must be an integer") }
+    }
+
+    private static func checkIntegerArray(_ path: String, _ data: JSON, _ field: String, prefix: String = "", _ diag: Diagnostics) {
+        guard let val = data[field] else { return }
+        guard let arr = val as? [Any], arr.allSatisfy({ isJSONInteger($0) }) else {
+            diag.errors.append("\(path): \(prefix)\(field) must be an array of integers")
+            return
+        }
+    }
+
     private static let iso8601Regex = try! NSRegularExpression(
         pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
     )
@@ -153,16 +205,35 @@ public enum ResultValidator {
     private static func validateConfig(_ path: String, _ diag: Diagnostics) {
         guard let data = loadJSON(path, diag) else { return }
         checkKeys(path, data, required: configRequired, optional: configOptional, diag)
+        checkString(path, data, "app", diag)
+        checkNumber(path, data, "step-delay", diag)
+        checkInteger(path, data, "max-retries", diag)
+        checkInteger(path, data, "keep-runs", diag)
+        checkBool(path, data, "record-video", diag)
+        // Practical bounds: a huge max-retries would loop ~forever and a huge
+        // step-delay would stall each retry for over an hour. (The runner also
+        // clamps these, since run-test does not validate config.)
+        if let r = numberValue(data["max-retries"]), !(r >= 0 && r <= 10) {
+            diag.errors.append("\(path): max-retries must be between 0 and 10")
+        }
+        if let d = numberValue(data["step-delay"]), !(d >= 0 && d <= 60) {
+            diag.errors.append("\(path): step-delay must be between 0 and 60 seconds")
+        }
         if let build = data["build"] {
             guard let b = build as? JSON else { diag.errors.append("\(path): build must be an object"); return }
             let unknown = Set(b.keys).subtracting(buildOptional).sorted()
             if !unknown.isEmpty { diag.errors.append("\(path): build unknown keys \(unknown)") }
+            for field in buildOptional { checkString(path, b, field, prefix: "build.", diag) }
         }
     }
 
     private static func validateTest(_ path: String, _ diag: Diagnostics) {
         guard let data = loadJSON(path, diag) else { return }
         checkKeys(path, data, required: testRequired, optional: testOptional, diag)
+        checkString(path, data, "id", diag)
+        checkString(path, data, "title", diag)
+        checkString(path, data, "app", diag)
+        checkStringArray(path, data, "tags", diag)
 
         if let id = data["id"] as? String {
             let expected = id + ".json"
@@ -172,22 +243,10 @@ public enum ResultValidator {
             if !isKebab(id) { diag.errors.append("\(path): id must be kebab-case (got '\(id)')") }
         }
 
-        if let preconditions = data["preconditions"] {
-            guard let arr = preconditions as? [Any] else { diag.errors.append("\(path): preconditions must be an array"); return }
-            for (i, item) in arr.enumerated() {
-                if item is String { continue }
-                guard let obj = item as? JSON else { diag.errors.append("\(path): preconditions[\(i)] must be a string or object"); continue }
-                let allowed: Set<String> = ["check", "description", "grep"]
-                let unknown = Set(obj.keys).subtracting(allowed).sorted()
-                if !unknown.isEmpty { diag.errors.append("\(path): preconditions[\(i)] unknown keys \(unknown)") }
-                let hasCheck = (obj["check"] as? String).map { !$0.isEmpty } ?? false
-                let hasDesc = (obj["description"] as? String).map { !$0.isEmpty } ?? false
-                if !hasCheck && !hasDesc { diag.errors.append("\(path): preconditions[\(i)] requires check or description") }
-            }
-        }
-
         if let steps = data["steps"] {
             guard let arr = steps as? [Any] else { diag.errors.append("\(path): steps must be an array"); return }
+            // A test with no steps runs nothing and would PASS vacuously.
+            if arr.isEmpty { diag.errors.append("\(path): steps must have at least one step") }
             for (i, item) in arr.enumerated() {
                 guard let step = item as? JSON else { diag.errors.append("\(path): steps[\(i)] must be an object"); continue }
                 let unknown = Set(step.keys).subtracting(testStepOptional).sorted()
@@ -195,21 +254,224 @@ public enum ResultValidator {
                 if step["action"] == nil && step["verify"] == nil {
                     diag.errors.append("\(path): steps[\(i)] requires action or verify")
                 }
-                if let target = step["target"] {
-                    guard let t = target as? JSON else { diag.errors.append("\(path): steps[\(i)].target must be an object"); continue }
-                    let unknownT = Set(t.keys).subtracting(testTargetOptional).sorted()
-                    if !unknownT.isEmpty { diag.errors.append("\(path): steps[\(i)].target unknown keys \(unknownT)") }
+                checkString(path, step, "id", prefix: "steps[\(i)].", diag)
+                checkString(path, step, "note", prefix: "steps[\(i)].", diag)
+                checkBool(path, step, "optional", prefix: "steps[\(i)].", diag)
+                checkNumber(path, step, "wait", prefix: "steps[\(i)].", diag)
+                checkSecondsRange(path, step, "wait", prefix: "steps[\(i)].", diag)
+                if let action = step["action"] {
+                    guard let a = action as? JSON else { diag.errors.append("\(path): steps[\(i)].action must be an object"); continue }
+                    validateAction(path, a, ordinal: "steps[\(i)].action", diag)
                 }
-                if let hints = step["hints"] {
-                    guard let arr2 = hints as? [Any] else { diag.errors.append("\(path): steps[\(i)].hints must be an array"); continue }
-                    for (hi, hItem) in arr2.enumerated() {
-                        guard let hint = hItem as? JSON else { diag.errors.append("\(path): steps[\(i)].hints[\(hi)] must be an object"); continue }
-                        checkKeys(path, hint, required: testHintRequired, optional: testHintOptional, prefix: "steps[\(i)].hints[\(hi)] ", diag)
-                        if let m = hint["method"] as? String, !testHintMethods.contains(m) {
-                            diag.errors.append("\(path): steps[\(i)].hints[\(hi)].method must be one of \(testHintMethods.sorted())")
+                if let verify = step["verify"] {
+                    guard let v = verify as? JSON else { diag.errors.append("\(path): steps[\(i)].verify must be an object"); continue }
+                    let unknownV = Set(v.keys).subtracting(testVerifyOptional).sorted()
+                    if !unknownV.isEmpty { diag.errors.append("\(path): steps[\(i)].verify unknown keys \(unknownV)") }
+                    for key in ["contains", "absent"] where v[key] != nil {
+                        guard let arr = v[key] as? [Any], arr.allSatisfy({ $0 is String }) else {
+                            diag.errors.append("\(path): steps[\(i)].verify.\(key) must be a string array")
+                            continue
+                        }
+                        // An empty/whitespace condition matches vacuously
+                        // (`contains("")` is always true), so it would PASS without
+                        // checking anything. Reject it.
+                        for text in arr.compactMap({ $0 as? String }) where text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            diag.errors.append("\(path): steps[\(i)].verify.\(key) conditions must not be empty or whitespace")
                         }
                     }
+                    // A verify with no conditions would pass vacuously in the harness
+                    // (empty allSatisfy is true), so a verify-only step would PASS
+                    // without checking anything. Require at least one condition.
+                    let containsArr = (v["contains"] as? [Any]) ?? []
+                    let absentArr = (v["absent"] as? [Any]) ?? []
+                    if containsArr.isEmpty && absentArr.isEmpty {
+                        diag.errors.append("\(path): steps[\(i)].verify must have at least one contains or absent condition")
+                    }
                 }
+            }
+        }
+    }
+
+    /// Validate a single action object: known keys, a known `type`, the
+    /// structural shape of `selector`/points, and — the part that keeps `sipi
+    /// validate` from green-lighting specs the harness will reject at runtime —
+    /// the per-type required fields, exclusivity, and value ranges.
+    /// `ordinal` is the dotted path prefix, e.g. `steps[0].action`.
+    private static func validateAction(_ path: String, _ a: JSON, ordinal: String, _ diag: Diagnostics) {
+        checkKeys(path, a, required: ["type"], optional: testActionOptional, prefix: ordinal + " ", diag)
+
+        // Scalar field types must match the decoder, so a spec that validates
+        // always decodes (no `sipi validate` OK → JSONDecoder failure gap).
+        checkString(path, a, "text", prefix: ordinal + ".", diag)
+        checkString(path, a, "button", prefix: ordinal + ".", diag)
+        checkString(path, a, "preset", prefix: ordinal + ".", diag)
+        checkString(path, a, "orientation", prefix: ordinal + ".", diag)
+        for numField in ["duration", "delay", "value", "tolerance", "delta"] {
+            checkNumber(path, a, numField, prefix: ordinal + ".", diag)
+        }
+        for intField in ["usage", "key", "steps"] {
+            checkInteger(path, a, intField, prefix: ordinal + ".", diag)
+        }
+        for intArray in ["modifiers", "keycodes"] {
+            checkIntegerArray(path, a, intArray, prefix: ordinal + ".", diag)
+        }
+        // Time fields feed a UInt32 microsecond sleep in the harness; bound them.
+        checkSecondsRange(path, a, "duration", prefix: ordinal + ".", diag)
+        checkSecondsRange(path, a, "delay", prefix: ordinal + ".", diag)
+
+        guard let type = a["type"] as? String else {
+            if a["type"] != nil { diag.errors.append("\(path): \(ordinal).type must be a string") }
+            return
+        }
+        if !testActionTypes.contains(type) {
+            diag.errors.append("\(path): \(ordinal).type must be one of \(testActionTypes.sorted())")
+            return
+        }
+
+        // Selector shape (shared): known keys, string fields, exactly one of id/label/value.
+        if let selector = a["selector"] {
+            guard let s = selector as? JSON else { diag.errors.append("\(path): \(ordinal).selector must be an object"); return }
+            let unknownS = Set(s.keys).subtracting(testSelectorOptional).sorted()
+            if !unknownS.isEmpty { diag.errors.append("\(path): \(ordinal).selector unknown keys \(unknownS)") }
+            for field in ["id", "label", "value", "element-type"] {
+                checkString(path, s, field, prefix: "\(ordinal).selector.", diag)
+            }
+            let chosen = [s["id"], s["label"], s["value"]].filter { $0 != nil }.count
+            if chosen != 1 { diag.errors.append("\(path): \(ordinal).selector requires exactly one of id, label, or value") }
+        }
+        // Point shape (shared): known keys, numeric x/y, valid unit.
+        for pointKey in ["point", "start", "end"] where a[pointKey] != nil {
+            validatePoint(path, a[pointKey]!, ordinal: "\(ordinal).\(pointKey)", diag)
+        }
+
+        switch type {
+        case "tap", "long-press":
+            if (a["selector"] != nil) == (a["point"] != nil) {
+                diag.errors.append("\(path): \(ordinal) (\(type)) requires exactly one of selector or point")
+            }
+        case "type":
+            if !(a["text"] is String) { diag.errors.append("\(path): \(ordinal) (type) requires a text string") }
+        case "key":
+            requireKeycode(path, a, "usage", ordinal: ordinal, diag)
+        case "key-combo":
+            requireKeycodeArray(path, a, "modifiers", ordinal: ordinal, diag)
+            requireKeycode(path, a, "key", ordinal: ordinal, diag)
+        case "key-sequence":
+            requireKeycodeArray(path, a, "keycodes", ordinal: ordinal, diag)
+        case "button":
+            if let name = a["button"] as? String {
+                if HardwareButton(rawValue: name) == nil {
+                    diag.errors.append("\(path): \(ordinal).button must be one of \(HardwareButton.allCases.map(\.rawValue).sorted())")
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (button) requires a button name")
+            }
+        case "swipe", "drag":
+            if a["start"] == nil || a["end"] == nil {
+                diag.errors.append("\(path): \(ordinal) (\(type)) requires start and end points")
+            }
+        case "gesture":
+            if let preset = a["preset"] as? String {
+                if GesturePreset(rawValue: preset) == nil {
+                    diag.errors.append("\(path): \(ordinal).preset must be one of \(GesturePreset.allCases.map(\.rawValue).sorted())")
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (gesture) requires a preset")
+            }
+        case "slider":
+            if let s = a["selector"] as? JSON {
+                if !(s["id"] is String) && !(s["label"] is String) {
+                    diag.errors.append("\(path): \(ordinal).selector (slider) must use id or label")
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (slider) requires a selector")
+            }
+            if let value = numberValue(a["value"]) {
+                if !(value >= 0 && value <= 100) { diag.errors.append("\(path): \(ordinal).value must be between 0 and 100") }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (slider) requires a numeric value (0...100)")
+            }
+            if let tolRaw = a["tolerance"] {
+                if let tol = numberValue(tolRaw) {
+                    if !(tol > 0 && tol <= 1) { diag.errors.append("\(path): \(ordinal).tolerance must be greater than 0 and at most 1") }
+                } else {
+                    diag.errors.append("\(path): \(ordinal).tolerance must be a number")
+                }
+            }
+        case "orientation":
+            if let name = a["orientation"] as? String {
+                if OrientationSetName(name) == nil {
+                    diag.errors.append("\(path): \(ordinal).orientation must be one of \(OrientationSetName.acceptedNames)")
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (orientation) requires an orientation name")
+            }
+        case "crown":
+            if numberValue(a["delta"]) == nil { diag.errors.append("\(path): \(ordinal) (crown) requires a numeric delta") }
+        case "wait":
+            if a["duration"] != nil, numberValue(a["duration"]) == nil {
+                diag.errors.append("\(path): \(ordinal).duration must be a number")
+            }
+        default:
+            break
+        }
+    }
+
+    private static func validatePoint(_ path: String, _ raw: Any, ordinal: String, _ diag: Diagnostics) {
+        guard let p = raw as? JSON else { diag.errors.append("\(path): \(ordinal) must be an object"); return }
+        let unknown = Set(p.keys).subtracting(testPointOptional).sorted()
+        if !unknown.isEmpty { diag.errors.append("\(path): \(ordinal) unknown keys \(unknown)") }
+        let x = numberValue(p["x"])
+        let y = numberValue(p["y"])
+        if x == nil || y == nil {
+            diag.errors.append("\(path): \(ordinal) requires numeric x and y")
+        }
+        var unit = "norm"  // CoordinateConverter default
+        if let rawUnit = p["unit"] {
+            if let u = rawUnit as? String {
+                if u != "norm" && u != "pixel" { diag.errors.append("\(path): \(ordinal).unit must be norm or pixel") }
+                else { unit = u }
+            } else {
+                diag.errors.append("\(path): \(ordinal).unit must be a string")
+            }
+        }
+        // Mirror CoordinateConverter.normalize: norm coordinates must be 0...1;
+        // pixel coordinates must be non-negative (upper bound needs the live
+        // screen size, so it stays a runtime check).
+        for (axis, value) in [("x", x), ("y", y)] {
+            guard let value else { continue }
+            if unit == "norm" {
+                if !(value >= 0 && value <= 1) {
+                    diag.errors.append("\(path): \(ordinal).\(axis) must be within 0...1 for norm coordinates")
+                }
+            } else if value < 0 {
+                diag.errors.append("\(path): \(ordinal).\(axis) must be non-negative for pixel coordinates")
+            }
+        }
+    }
+
+    /// Return a JSON number as a Double, rejecting booleans (which bridge to NSNumber).
+    private static func numberValue(_ value: Any?) -> Double? {
+        guard let value, value is NSNumber, !isJSONBoolean(value) else { return nil }
+        return (value as! NSNumber).doubleValue
+    }
+
+    private static func requireKeycode(_ path: String, _ a: JSON, _ field: String, ordinal: String, _ diag: Diagnostics) {
+        guard let d = numberValue(a[field]), d >= 0, d <= 255, d == d.rounded() else {
+            diag.errors.append("\(path): \(ordinal).\(field) must be an integer keycode (0...255)")
+            return
+        }
+    }
+
+    private static func requireKeycodeArray(_ path: String, _ a: JSON, _ field: String, ordinal: String, _ diag: Diagnostics) {
+        guard let arr = a[field] as? [Any], !arr.isEmpty else {
+            diag.errors.append("\(path): \(ordinal).\(field) must be a non-empty array of keycodes (0...255)")
+            return
+        }
+        for item in arr {
+            guard let d = numberValue(item), d >= 0, d <= 255, d == d.rounded() else {
+                diag.errors.append("\(path): \(ordinal).\(field) must be a non-empty array of keycodes (0...255)")
+                return
             }
         }
     }
@@ -217,6 +479,8 @@ public enum ResultValidator {
     private static func validateSuite(_ path: String, _ diag: Diagnostics) {
         guard let data = loadJSON(path, diag) else { return }
         checkKeys(path, data, required: suiteRequired, optional: suiteOptional, diag)
+        checkString(path, data, "name", diag)
+        checkString(path, data, "description", diag)
         if let name = data["name"] as? String {
             let expected = name + ".json"
             if URL(fileURLWithPath: path).lastPathComponent != expected {
@@ -226,19 +490,26 @@ public enum ResultValidator {
         if let tests = data["tests"] {
             guard let arr = tests as? [Any] else { diag.errors.append("\(path): tests must be an array"); return }
             for (i, item) in arr.enumerated() {
-                if !(item is String) { diag.errors.append("\(path): tests[\(i)] must be a string") }
+                // A suite entry is a test id that maps to tests/<id>.json; require
+                // kebab-case so it cannot traverse out of the workspace ("../..").
+                guard let name = item as? String else { diag.errors.append("\(path): tests[\(i)] must be a string"); continue }
+                if !isKebab(name) { diag.errors.append("\(path): tests[\(i)] must be a kebab-case test id (got '\(name)')") }
             }
         }
         if let settings = data["settings"] {
             guard let s = settings as? JSON else { diag.errors.append("\(path): settings must be an object"); return }
             let unknown = Set(s.keys).subtracting(suiteSettingsOptional).sorted()
             if !unknown.isEmpty { diag.errors.append("\(path): settings unknown keys \(unknown)") }
+            checkBool(path, s, "stop-on-failure", prefix: "settings.", diag)
+            checkBool(path, s, "reset-between-tests", prefix: "settings.", diag)
         }
     }
 
     private static func validateProfile(_ path: String, _ diag: Diagnostics) {
         guard let data = loadJSON(path, diag) else { return }
         checkKeys(path, data, required: profileRequired, optional: profileOptional, diag)
+        checkString(path, data, "name", diag)
+        checkString(path, data, "description", diag)
         if let name = data["name"] as? String {
             let expected = name + ".json"
             if URL(fileURLWithPath: path).lastPathComponent != expected {
@@ -250,6 +521,7 @@ public enum ResultValidator {
             guard let dev = item as? JSON else { diag.errors.append("\(path): devices[\(i)] must be an object"); continue }
             let unknown = Set(dev.keys).subtracting(profileDeviceOptional).sorted()
             if !unknown.isEmpty { diag.errors.append("\(path): devices[\(i)] unknown keys \(unknown)") }
+            for field in profileDeviceOptional { checkString(path, dev, field, prefix: "devices[\(i)].", diag) }
             if dev["model"] == nil && dev["runtime"] == nil && dev["udid"] == nil {
                 diag.errors.append("\(path): devices[\(i)] requires model, runtime, or udid")
             }
@@ -410,6 +682,16 @@ public enum ResultValidator {
     /// Validate the `.simpilot` workspace at `workspace`. Throws ValidationError
     /// if the workspace directory does not exist; otherwise returns the collected
     /// errors/warnings (an empty `errors` list means the workspace is valid).
+    /// Validate a single v2 test spec file, the way `sipi run-test` /
+    /// `sipi run-suite` gate a spec before running it. Reuses the same rules as
+    /// the workspace-level test validation (schema, kebab-case id, per-action
+    /// required fields and ranges), so a spec that runs is a spec that validates.
+    public static func validateTestFile(_ path: String) -> ValidationOutcome {
+        let diag = Diagnostics()
+        validateTest(path, diag)
+        return ValidationOutcome(errors: diag.errors, warnings: diag.warnings)
+    }
+
     public static func validate(workspace: String) throws -> ValidationOutcome {
         let fm = FileManager.default
 

@@ -65,7 +65,7 @@ final class ResultValidatorTests: XCTestCase {
         try write([
             "id": "login-flow",
             "title": "Login",
-            "steps": [["action": "tap Login"]]
+            "steps": [["action": ["type": "tap", "selector": ["label": "Login"]]]]
         ], to: ws.appendingPathComponent("tests/login-flow.json"))
 
         // run.json claims passed=true...
@@ -105,7 +105,7 @@ final class ResultValidatorTests: XCTestCase {
         try write([
             "id": "login-flow",
             "title": "Login",
-            "steps": [["action": "tap Login"]]
+            "steps": [["action": ["type": "tap", "selector": ["label": "Login"]]]]
         ], to: ws.appendingPathComponent("tests/login-flow.json"))
         let runDir = ws.appendingPathComponent("runs/2026-06-19_100000", isDirectory: true)
         try write([
@@ -180,7 +180,7 @@ final class ResultValidatorTests: XCTestCase {
         for d in [0, 1] {
             let ws = tempDir.appendingPathComponent(".simpilot-dur-\(d)", isDirectory: true)
             try write(["app": "com.example.App"], to: ws.appendingPathComponent("config.json"))
-            try write(["id": "f", "title": "T", "steps": [["action": "tap"]]],
+            try write(["id": "f", "title": "T", "steps": [["action": ["type": "tap", "selector": ["label": "Tap"]]]]],
                       to: ws.appendingPathComponent("tests/f.json"))
             let runDir = ws.appendingPathComponent("runs/2026-06-19_100000", isDirectory: true)
             try write([
@@ -203,7 +203,7 @@ final class ResultValidatorTests: XCTestCase {
     func testNumericPassedIsRejectedAsNonBool() throws {
         let ws = tempDir.appendingPathComponent(".simpilot-numbool", isDirectory: true)
         try write(["app": "com.example.App"], to: ws.appendingPathComponent("config.json"))
-        try write(["id": "f", "title": "T", "steps": [["action": "tap"]]],
+        try write(["id": "f", "title": "T", "steps": [["action": ["type": "tap", "selector": ["label": "Tap"]]]]],
                   to: ws.appendingPathComponent("tests/f.json"))
         let runDir = ws.appendingPathComponent("runs/2026-06-19_100000", isDirectory: true)
         // `passed` is the number 1, not a JSON boolean — it must be rejected.
@@ -221,5 +221,399 @@ final class ResultValidatorTests: XCTestCase {
         let outcome = try ResultValidator.validate(workspace: ws.path)
         XCTAssertTrue(outcome.errors.contains { $0.contains("passed") && $0.contains("must be bool") },
                       "a numeric `passed` must be rejected as a non-bool, got \(outcome.errors)")
+    }
+
+    // MARK: - Extended v2 action types (slider / gesture / long-press / key-combo /
+    // key-sequence / drag / orientation / crown). These let the deterministic
+    // harness drive the richer sipi primitives as saved test steps; the validator
+    // must accept the new `action.type` values and their fields.
+
+    func testExtendedActionTypesAndFieldsValidate() throws {
+        let ws = tempDir.appendingPathComponent(".simpilot-ext", isDirectory: true)
+        try write(["app": "com.example.App"], to: ws.appendingPathComponent("config.json"))
+        try write([
+            "id": "extended-actions",
+            "title": "Extended actions",
+            "steps": [
+                ["action": ["type": "long-press", "selector": ["label": "Photo"], "duration": 0.6]],
+                ["action": ["type": "slider", "selector": ["label": "Volume", "element-type": "Slider"], "value": 75, "tolerance": 0.02]],
+                ["action": ["type": "gesture", "preset": "scroll-down"]],
+                ["action": ["type": "drag", "start": ["x": 0.5, "y": 0.7], "end": ["x": 0.5, "y": 0.3], "steps": 60, "duration": 0.6]],
+                ["action": ["type": "key-combo", "modifiers": [227], "key": 4]],
+                ["action": ["type": "key-sequence", "keycodes": [11, 8, 15], "delay": 0.1]],
+                ["action": ["type": "orientation", "orientation": "landscape-left"]],
+                ["action": ["type": "crown", "delta": 40]]
+            ]
+        ], to: ws.appendingPathComponent("tests/extended-actions.json"))
+
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertTrue(outcome.isValid, "extended action types/fields should validate: \(outcome.errors)")
+        XCTAssertTrue(outcome.errors.isEmpty, "no errors expected, got \(outcome.errors)")
+    }
+
+    func testNewActionFieldsAreNotUnknownKeys() throws {
+        // Every new scalar/array field must be recognized, not flagged "unknown keys".
+        let ws = tempDir.appendingPathComponent(".simpilot-fields", isDirectory: true)
+        try write(["app": "com.example.App"], to: ws.appendingPathComponent("config.json"))
+        try write([
+            "id": "field-coverage",
+            "title": "Field coverage",
+            "steps": [["action": [
+                "type": "slider", "selector": ["id": "vol"], "value": 50, "tolerance": 0.05,
+                "preset": "scroll-down", "modifiers": [227], "key": 4,
+                "keycodes": [11], "delay": 0.1, "steps": 60, "orientation": "portrait", "delta": 10
+            ]]]
+        ], to: ws.appendingPathComponent("tests/field-coverage.json"))
+
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(outcome.errors.contains { $0.contains("unknown keys") },
+                       "new action fields must be recognized, got \(outcome.errors)")
+    }
+
+    func testUnknownActionTypeIsRejected() throws {
+        let ws = tempDir.appendingPathComponent(".simpilot-badtype", isDirectory: true)
+        try write(["app": "com.example.App"], to: ws.appendingPathComponent("config.json"))
+        try write([
+            "id": "bad-action",
+            "title": "Bad action",
+            "steps": [["action": ["type": "frobnicate", "selector": ["label": "X"]]]]
+        ], to: ws.appendingPathComponent("tests/bad-action.json"))
+
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("action.type must be one of") },
+                      "an unknown action type must be rejected, got \(outcome.errors)")
+    }
+
+    // MARK: - Strengthened per-action validation (release hardening)
+    //
+    // `sipi validate` (and `run-test`, which now calls validateTestFile before
+    // running) must reject specs that would only fail at runtime: missing required
+    // fields, ambiguous selectors, and out-of-range values.
+
+    private func validateSpec(id: String, steps: [Any]) throws -> ResultValidator.ValidationOutcome {
+        let dir = tempDir.appendingPathComponent("spec-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("\(id).json")
+        try Data(JSONSerialization.data(withJSONObject: ["id": id, "title": "T", "steps": steps])).write(to: file)
+        return ResultValidator.validateTestFile(file.path)
+    }
+
+    func testValidTapSpecValidates() throws {
+        let outcome = try validateSpec(id: "tap-ok", steps: [["action": ["type": "tap", "selector": ["label": "Login"]]]])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testValidExtendedSpecValidatesViaFile() throws {
+        let outcome = try validateSpec(id: "ext", steps: [
+            ["action": ["type": "swipe", "start": ["x": 0.5, "y": 0.8], "end": ["x": 0.5, "y": 0.2]]],
+            ["action": ["type": "key-combo", "modifiers": [227], "key": 4]],
+            ["action": ["type": "crown", "delta": 20]],
+            ["action": ["type": "orientation", "orientation": "landscape-left"]]
+        ])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testTapWithoutSelectorOrPointIsRejected() throws {
+        let outcome = try validateSpec(id: "tap-bad", steps: [["action": ["type": "tap"]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("exactly one of selector or point") }, "\(outcome.errors)")
+    }
+
+    func testTapWithBothSelectorAndPointIsRejected() throws {
+        let outcome = try validateSpec(id: "tap-both", steps: [["action": ["type": "tap", "selector": ["id": "x"], "point": ["x": 0.5, "y": 0.5]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("exactly one of selector or point") }, "\(outcome.errors)")
+    }
+
+    func testSelectorWithTwoIdentifiersIsRejected() throws {
+        let outcome = try validateSpec(id: "sel-two", steps: [["action": ["type": "tap", "selector": ["id": "x", "label": "y"]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("exactly one of id, label, or value") }, "\(outcome.errors)")
+    }
+
+    func testSliderWithoutValueIsRejected() throws {
+        let outcome = try validateSpec(id: "slider-noval", steps: [["action": ["type": "slider", "selector": ["label": "Vol"]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("slider") && $0.contains("value") }, "\(outcome.errors)")
+    }
+
+    func testSliderValueOutOfRangeIsRejected() throws {
+        let outcome = try validateSpec(id: "slider-hi", steps: [["action": ["type": "slider", "selector": ["label": "Vol"], "value": 150]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("between 0 and 100") }, "\(outcome.errors)")
+    }
+
+    func testKeycodeOutOfRangeIsRejected() throws {
+        let outcome = try validateSpec(id: "key-hi", steps: [["action": ["type": "key", "usage": 999]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("keycode") }, "\(outcome.errors)")
+    }
+
+    func testKeySequenceEmptyIsRejected() throws {
+        let outcome = try validateSpec(id: "seq-empty", steps: [["action": ["type": "key-sequence", "keycodes": []]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("keycodes") }, "\(outcome.errors)")
+    }
+
+    func testInvalidButtonIsRejected() throws {
+        let outcome = try validateSpec(id: "btn-bad", steps: [["action": ["type": "button", "button": "power"]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("button must be one of") }, "\(outcome.errors)")
+    }
+
+    func testInvalidGesturePresetIsRejected() throws {
+        let outcome = try validateSpec(id: "gest-bad", steps: [["action": ["type": "gesture", "preset": "twirl"]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("preset must be one of") }, "\(outcome.errors)")
+    }
+
+    func testInvalidOrientationIsRejected() throws {
+        let outcome = try validateSpec(id: "ori-bad", steps: [["action": ["type": "orientation", "orientation": "sideways"]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("orientation must be one of") }, "\(outcome.errors)")
+    }
+
+    func testTypeWithoutTextIsRejected() throws {
+        let outcome = try validateSpec(id: "type-notext", steps: [["action": ["type": "type"]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("text string") }, "\(outcome.errors)")
+    }
+
+    func testStepWaitWrongTypeIsRejected() throws {
+        let outcome = try validateSpec(id: "wait-str", steps: [["action": ["type": "wait"], "wait": "soon"]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("wait") && $0.contains("must be number") }, "\(outcome.errors)")
+    }
+
+    func testStepOptionalWrongTypeIsRejected() throws {
+        let outcome = try validateSpec(id: "opt-str", steps: [["action": ["type": "tap", "selector": ["id": "x"]], "optional": "yes"]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("optional") && $0.contains("must be bool") }, "\(outcome.errors)")
+    }
+
+    func testPointMissingCoordinateIsRejected() throws {
+        let outcome = try validateSpec(id: "pt-bad", steps: [["action": ["type": "tap", "point": ["x": 0.5]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("numeric x and y") }, "\(outcome.errors)")
+    }
+
+    // MARK: - Type checks that keep "validate" in step with what "run" can decode
+
+    func testNonStringActionTypeIsRejected() throws {
+        let outcome = try validateSpec(id: "type-num", steps: [["action": ["type": 123]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("type must be a string") }, "\(outcome.errors)")
+    }
+
+    func testNonStringSelectorIdIsRejected() throws {
+        let outcome = try validateSpec(id: "sel-num", steps: [["action": ["type": "tap", "selector": ["id": 123]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("selector.id must be a string") }, "\(outcome.errors)")
+    }
+
+    func testWrongTypeDurationIsRejected() throws {
+        let outcome = try validateSpec(id: "dur-str", steps: [["action": ["type": "tap", "selector": ["id": "x"], "duration": "slow"]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("duration must be number") }, "\(outcome.errors)")
+    }
+
+    func testNonStringTitleIsRejected() throws {
+        let dir = tempDir.appendingPathComponent("spec-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("title-num.json")
+        try Data(JSONSerialization.data(withJSONObject: [
+            "id": "title-num", "title": 7,
+            "steps": [["action": ["type": "tap", "selector": ["id": "x"]]]]
+        ])).write(to: file)
+        let outcome = ResultValidator.validateTestFile(file.path)
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("title must be a string") }, "\(outcome.errors)")
+    }
+
+    func testEmptyVerifyObjectIsRejected() throws {
+        let outcome = try validateSpec(id: "verify-empty", steps: [["verify": [String: Any]()]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("at least one contains or absent") }, "\(outcome.errors)")
+    }
+
+    func testEmptyVerifyArraysAreRejected() throws {
+        let outcome = try validateSpec(id: "verify-empties", steps: [["verify": ["contains": [String]()]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("at least one contains or absent") }, "\(outcome.errors)")
+    }
+
+    func testVerifyOnlyStepWithConditionValidates() throws {
+        let outcome = try validateSpec(id: "verify-ok", steps: [["verify": ["contains": ["Home"]]]])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testFractionalStepsIsRejected() throws {
+        let outcome = try validateSpec(id: "steps-frac", steps: [[
+            "action": ["type": "drag", "start": ["x": 0.0, "y": 0.0], "end": ["x": 1.0, "y": 1.0], "steps": 1.5]
+        ]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("steps must be an integer") }, "\(outcome.errors)")
+    }
+
+    func testNonIntegerKeycodesArrayIsRejected() throws {
+        let outcome = try validateSpec(id: "keys-str", steps: [[
+            "action": ["type": "tap", "selector": ["id": "x"], "keycodes": ["a"]]
+        ]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("keycodes must be an array of integers") }, "\(outcome.errors)")
+    }
+
+    // MARK: - Empty/whitespace verify conditions and coordinate ranges
+
+    func testEmptyStringVerifyConditionIsRejected() throws {
+        let outcome = try validateSpec(id: "verify-blank", steps: [["verify": ["contains": [""]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("must not be empty or whitespace") }, "\(outcome.errors)")
+    }
+
+    func testWhitespaceVerifyConditionIsRejected() throws {
+        let outcome = try validateSpec(id: "verify-ws", steps: [["verify": ["absent": ["   "]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("must not be empty or whitespace") }, "\(outcome.errors)")
+    }
+
+    func testNormPointOutOfRangeIsRejected() throws {
+        let outcome = try validateSpec(id: "norm-oob", steps: [["action": ["type": "tap", "point": ["x": 2, "y": 0.5]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("within 0...1") }, "\(outcome.errors)")
+    }
+
+    func testNegativePixelPointIsRejected() throws {
+        let outcome = try validateSpec(id: "px-neg", steps: [["action": ["type": "tap", "point": ["x": -5, "y": 0, "unit": "pixel"]]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("non-negative") }, "\(outcome.errors)")
+    }
+
+    func testValidPixelPointValidates() throws {
+        let outcome = try validateSpec(id: "px-ok", steps: [["action": ["type": "tap", "point": ["x": 200, "y": 700, "unit": "pixel"]]]])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    // MARK: - config / suite validate ⇒ decode, and suite id path safety
+
+    func testNumericConfigAppIsRejected() throws {
+        let ws = tempDir.appendingPathComponent(".simpilot-badapp", isDirectory: true)
+        try write(["app": 123], to: ws.appendingPathComponent("config.json"))
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("app must be a string") }, "\(outcome.errors)")
+    }
+
+    func testSuiteTraversalTestIdIsRejected() throws {
+        let ws = tempDir.appendingPathComponent(".simpilot-suite-trav", isDirectory: true)
+        try write(["app": "com.x"], to: ws.appendingPathComponent("config.json"))
+        try write(["name": "reg", "tests": ["../../evil"]], to: ws.appendingPathComponent("suites/reg.json"))
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("kebab-case test id") }, "\(outcome.errors)")
+    }
+
+    func testSuiteWrongTypeSettingIsRejected() throws {
+        let ws = tempDir.appendingPathComponent(".simpilot-suite-settings", isDirectory: true)
+        try write(["app": "com.x"], to: ws.appendingPathComponent("config.json"))
+        try write(["name": "reg", "tests": ["good"], "settings": ["stop-on-failure": "yes"]],
+                  to: ws.appendingPathComponent("suites/reg.json"))
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("stop-on-failure") && $0.contains("must be bool") }, "\(outcome.errors)")
+    }
+
+    // MARK: - Empty steps, integer overflow, and time-field ranges
+
+    func testEmptyStepsIsRejected() throws {
+        let outcome = try validateSpec(id: "no-steps", steps: [])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("at least one step") }, "\(outcome.errors)")
+    }
+
+    func testIntegerOverflowIsRejected() throws {
+        let outcome = try validateSpec(id: "int-overflow", steps: [[
+            "action": ["type": "drag", "start": ["x": 0.0, "y": 0.0], "end": ["x": 1.0, "y": 1.0], "steps": 1e20]
+        ]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("steps must be an integer") }, "\(outcome.errors)")
+    }
+
+    func testActionDurationOutOfRangeIsRejected() throws {
+        let outcome = try validateSpec(id: "dur-huge", steps: [["action": ["type": "wait", "duration": 5000]]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("duration must be between 0 and 600 seconds") }, "\(outcome.errors)")
+    }
+
+    func testStepWaitOutOfRangeIsRejected() throws {
+        let outcome = try validateSpec(id: "wait-huge", steps: [["action": ["type": "tap", "selector": ["id": "x"]], "wait": 5000]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("wait must be between 0 and 600 seconds") }, "\(outcome.errors)")
+    }
+
+    // MARK: - Config practical bounds (max-retries / step-delay)
+
+    func testConfigMaxRetriesTooLargeIsRejected() throws {
+        let ws = tempDir.appendingPathComponent(".simpilot-retries", isDirectory: true)
+        try write(["app": "com.x", "max-retries": 1_000_000_000], to: ws.appendingPathComponent("config.json"))
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("max-retries must be between 0 and 10") }, "\(outcome.errors)")
+    }
+
+    func testConfigStepDelayTooLargeIsRejected() throws {
+        let ws = tempDir.appendingPathComponent(".simpilot-delay", isDirectory: true)
+        try write(["app": "com.x", "step-delay": 5000], to: ws.appendingPathComponent("config.json"))
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("step-delay must be between 0 and 60 seconds") }, "\(outcome.errors)")
+    }
+
+    func testConfigWithSaneRetriesAndDelayValidates() throws {
+        let ws = tempDir.appendingPathComponent(".simpilot-sane", isDirectory: true)
+        try write(["app": "com.x", "max-retries": 2, "step-delay": 0.5], to: ws.appendingPathComponent("config.json"))
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    // MARK: - Config boundary values (validator ⇄ runner agreement)
+
+    private func configOutcome(_ config: [String: Any], _ name: String) throws -> ResultValidator.ValidationOutcome {
+        let ws = tempDir.appendingPathComponent(".simpilot-\(name)", isDirectory: true)
+        try write(config, to: ws.appendingPathComponent("config.json"))
+        return try ResultValidator.validate(workspace: ws.path)
+    }
+
+    func testConfigStepDelayZeroValidates() throws {
+        // 0 is allowed by the validator and honored (no pause) by the runner.
+        XCTAssertTrue(try configOutcome(["app": "com.x", "step-delay": 0], "delay0").isValid)
+    }
+
+    func testConfigStepDelayUpperBoundaryValidates() throws {
+        XCTAssertTrue(try configOutcome(["app": "com.x", "step-delay": 60], "delay60").isValid)
+    }
+
+    func testConfigStepDelayJustOverBoundaryIsRejected() throws {
+        let outcome = try configOutcome(["app": "com.x", "step-delay": 61], "delay61")
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("step-delay must be between 0 and 60 seconds") }, "\(outcome.errors)")
+    }
+
+    func testConfigNegativeStepDelayIsRejected() throws {
+        let outcome = try configOutcome(["app": "com.x", "step-delay": -1], "delayneg")
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("step-delay must be between 0 and 60 seconds") }, "\(outcome.errors)")
+    }
+
+    func testConfigMaxRetriesBoundariesValidate() throws {
+        XCTAssertTrue(try configOutcome(["app": "com.x", "max-retries": 0], "retry0").isValid)
+        XCTAssertTrue(try configOutcome(["app": "com.x", "max-retries": 10], "retry10").isValid)
+    }
+
+    func testConfigMaxRetriesElevenIsRejected() throws {
+        let outcome = try configOutcome(["app": "com.x", "max-retries": 11], "retry11")
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("max-retries must be between 0 and 10") }, "\(outcome.errors)")
     }
 }

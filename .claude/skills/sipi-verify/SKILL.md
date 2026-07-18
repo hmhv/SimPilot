@@ -6,9 +6,9 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 
 # Implementation Verification on iOS Simulator
 
-Verify that a feature implementation or bug fix works correctly by checking it on the iOS Simulator. By default, capture 4 variants: iPhone light, iPhone dark, iPad light, iPad dark. Uses SimPilot's native `sipi` driver for UI interaction.
+Verify that a feature implementation or bug fix works correctly by checking it on the iOS Simulator. By default, capture 4 variants: iPhone light, iPhone dark, iPad light, iPad dark. Use `sipi verify-session` to own artifact layout, screenshots, findings, and report generation.
 
-This skill **observes and reports only — it never patches product source.** It authors `findings.json` with Write and generates the report via Bash (`sipi verify-report`), but does not edit application code. If verification surfaces a code-level problem, describe it in the findings and hand the fix to sipi-test, which owns source changes.
+This skill **observes and reports only — it never patches product source.** It records findings through `sipi verify-session finding` and generates the report through `sipi verify-session finalize`. If verification surfaces a code-level problem, describe it in the findings and hand the fix to sipi-test, which owns source changes.
 
 ## When This Skill Is Used
 
@@ -22,7 +22,7 @@ This skill **observes and reports only — it never patches product source.** It
 - **Understand first, then verify** — read the changes to know what to check
 - **Check what matters** — focus on the specific behavior that was changed, not everything
 - **Be honest** — if something looks wrong or broken, say so clearly
-- **Show evidence** — use `ui_screenshot` captures and `ui_describe` output to support findings
+- **Show evidence** — use `ui_screenshot` captures and `ui_describe` output (the `sipi-common` ui-driver.md shell wrappers around `sipi screenshot` / `sipi describe-ui`; see Preflight) to support findings
 - **Confirm the new state before declaring all-OK** — before writing `findings.json` as an empty `[]`, confirm for the SPECIFIC changed behavior that you observed the NEW state via `ui_describe` (not the screenshot alone), and can state why that state would be absent if the change had not worked. Appearance/visual checks remain screenshot-first and exploratory
 - **4 variants by default** — always capture iPhone light, iPhone dark, iPad light, iPad dark. Drop a device class only when it is clearly inapplicable (an iPhone-only or iPad-only app, or a change that cannot appear on the other class). When you skip a variant, state in the summary which variants were skipped and why
 - **Suggest follow-up** — if the verification reveals a good regression test candidate, suggest the user run `/sipi-test` to capture this as a regression test
@@ -41,15 +41,15 @@ See `docs/verify-workflow.md` for the detailed procedure. Summary:
 2. **Plan checks** — decide what to verify (behavior, appearance, edge cases)
 3. **Build & install** — rebuild if source was modified, install on both iPhone and iPad simulators
 4. **Execute checks** — run the same checks across 4 variants (iPhone light/dark, iPad light/dark)
-5. **Record findings** — write `findings.json` (empty `[]` if no issues; array of objects if issues found)
-6. **Generate report** — report status is auto-detected from `findings.json`
+5. **Record findings** — use `sipi verify-session finding` for every issue
+6. **Generate report** — use `sipi verify-session finalize`
 7. **Summarize** — output the result path and findings summary
 
 ## Output
 
-Screenshots, `findings.json`, and a self-contained HTML report are saved under `.simpilot/verify/<timestamp>_<description>/`. See `docs/report.md` for the directory layout, naming rules, and the `findings.json` contract.
+Screenshots, `checks.json`, `findings.json`, and a self-contained HTML report are saved under `.simpilot/verify/<timestamp>_<description>/`. See `docs/report.md` for the directory layout, naming rules, and the `findings.json` contract.
 
-Generate the report with `sipi verify-report "$VERIFY_DIR" --title "Description"` — the sole report generator. Status is auto-detected from `findings.json`; do not pass `--status ok` manually.
+Generate the report with `sipi verify-session finalize "$VERIFY_DIR" --title "Description"` — the sole verification-session finalizer. `finalize` has no status flag — status is derived from `findings.json` (empty `[]` → All OK, any finding → Issues Found). To assert an OK result, record an empty findings array; never reach for `verify-report --status ok`, which only takes effect when `findings.json` is absent and is ignored (with a stderr warning) when a real findings file exists.
 
 ### Returning results to the caller
 

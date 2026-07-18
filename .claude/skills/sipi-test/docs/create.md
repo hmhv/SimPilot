@@ -1,63 +1,86 @@
 # Test Creation
 
-## Steps
+Create SimPilot v2 specs: explicit JSON that `sipi run-test` can execute without model interpretation.
 
-1. **Understand requirements**: Clarify the test target, purpose, and expected behavior. Ask if anything is unclear
-2. **Design the test**:
-   - Build & install (if `build` is in config.json; see run.md for details)
-   - Confirm screens in Simulator: `ui_screenshot` + `Read` + `ui_describe`
-   - Reference source code: use `Glob`/`Grep` to understand navigation structure and display conditions
-3. **Generate JSON and present to user** → save to `.simpilot/tests/<id>.json` after confirmation
-4. **Suggest "Would you like to run it now?"**
+## Workflow
 
-When asked to "create and run": create → save → run without waiting for confirmation. Build once.
+1. Understand the user goal and affected screen.
+2. Use `sipi describe-ui <udid>` and screenshots to observe the real UI.
+3. Prefer stable `AXUniqueId` values. Use labels only when unique and stable.
+4. Write `.simpilot/tests/<id>.json` using the v2 schema in `../references/json-reference.md`.
+5. Run `sipi validate .simpilot`.
+6. If asked to create and run, execute `sipi run-test .simpilot/tests/<id>.json --workspace .simpilot`.
 
-When asked to "start from the current screen": use screenshot + Read + `ui_describe` to understand the screen → design steps.
+## v2 Step Shape
 
-## Rules
+Use explicit action and verify objects:
 
-- `id` = filename (without extension) = kebab-case (e.g. `home-tab-switch`)
-- action/verify in natural language. Do not hardcode selectors or IDs
-- **1 action = 1 step** (to pinpoint failure location)
-- Recording AXLabel / accessibilityIdentifier in `note` improves execution accuracy. **Do not write coordinates** (they differ by device)
-- For structured hints, use `target` and `hints`. `note` is free text; `hints` are the best method per environment variant
-- `hints[].method` uses only `tap-id` / `tap-label` / `touch-coordinate`
-- If coordinates must be retained, store them as `hints[].method = "touch-coordinate"` rather than in `note`
-- Up to one hint per environment variant in `hints`. Prefer updating/replacing over adding new entries
-- Set `updated` when modifying a test
-- For elements without an accessibilityIdentifier, prefer a stable identifier — but treat adding `.accessibilityIdentifier("screen.element-name")` to source as a source change governed by `../references/test-fix-policy.md`: apply it only after the negative-control check there (confirm the test would still FAIL if the feature were broken), not reflexively because an id is missing
-- System UI (PhotosPicker, Share Sheet, SFSafariViewController, etc.) is inspectable through `sipi` (the native driver, via `ui_describe --deep`); include it only when stable on the target runtime, otherwise use pre-loaded data
+```json
+{
+  "id": "settings-toggle",
+  "title": "Settings Toggle",
+  "steps": [
+    {
+      "id": "open-settings",
+      "action": {
+        "type": "tap",
+        "selector": { "id": "tab.settings" }
+      },
+      "verify": {
+        "contains": ["Settings"],
+        "absent": ["Home only text"]
+      },
+      "wait": 3
+    }
+  ]
+}
+```
 
-## Step Types
+Here the step-level `"wait": 3` is the **verify poll timeout** — how long the harness re-polls `describe-ui` for the `verify` rows before failing the step (default 3s). It only matters for steps that have a `verify` block; it is not a pre-action sleep. To insert a deliberate pause, use a `wait` *action* (`{ "type": "wait", "duration": 1.0 }`).
 
-- **action + verify**: Perform action and validate result (standard)
-- **verify-only**: `{ "verify": "..." }` — check screen state only
-- **action-only**: `{ "action": "..." }` — action only; PASS on exit 0
+Do not write natural-language actions such as `"Tap Settings"`. The harness does not interpret prose.
 
-## Preconditions and optional steps
+## Action Types
 
-These are the canonical definitions; `run.md` points here for run-time behavior.
+- `tap`: requires `selector` or `point`
+- `long-press`: `selector` or `point`; optional `duration` hold (default 0.5s) — context menus, reorder handles
+- `type`: requires `text`; the focused field must already be active
+- `key`: requires USB HID `usage`
+- `key-combo`: requires `modifiers` (keycodes) and `key` — e.g. Cmd+A is `{ "modifiers": [227], "key": 4 }`
+- `key-sequence`: requires `keycodes`; optional `delay` between presses
+- `button`: requires `button` (`home`, `lock`, `side_button`, `app_switcher`, `siri`, `swipe_home`)
+- `swipe`: requires `start` and `end` points
+- `drag`: requires `start` and `end`; optional `steps` (1…1000) and `duration` — interpolated, smoother than `swipe`
+- `gesture`: requires `preset` (`scroll-*` / `swipe-from-*-edge`); optional `duration`
+- `slider`: requires `selector` (id/label) and `value` (0…100); optional `tolerance`. Drags then verifies AXValue
+- `orientation`: requires `orientation` (`portrait`/`landscape-left`/…). Use to test rotation
+- `crown`: requires `delta` (Apple Watch only)
+- `wait`: a sleep action; optional `duration` (default 1s). Distinct from the step-level `wait` field, which is the verify poll timeout in seconds (default 3s), not a sleep
 
-- **Preconditions** (`preconditions` on the test): checked with `ui_describe | grep` before the test starts. If a precondition is **not met**, the entire test is **SKIPPED, not FAILED** — an unmet precondition means the test does not apply to the current state, which is not a regression.
-- **Optional steps** (a step marked `"optional": true`): before executing the step, confirm the target element exists with `ui_describe`. If it is absent, the step is skipped (`passed: true, skipped: true`); the rest of the test continues.
+These let you test toggles/sliders/menus/gestures deterministically (e.g. `slider` instead of a fragile coordinate drag). See `../references/json-reference.md` for full JSON shapes.
 
-## Error Case Patterns
+## Selectors and Points
 
-Prepare at least one error case for every happy path case.
+Selector:
 
-| Pattern | ID suffix |
-|---------|--------------|
-| Validation error (empty input, invalid value) | `-empty`, `-invalid` |
-| Cancel / abort | `-cancel` |
-| Empty state / no data | `-no-results` |
-| Boundary value | `-boundary` |
+```json
+{ "id": "auth.sign-in" }
+{ "label": "Sign In" }
+{ "value": "42" }
+```
 
-## Test Updates
+Point:
 
-Load existing JSON → confirm in Simulator → update only the changed steps → set `updated` → confirm PASS by re-running.
+```json
+{ "x": 0.5, "y": 0.8, "unit": "norm" }
+{ "x": 200, "y": 700, "unit": "pixel" }
+```
 
-Do not over-accumulate `hints` manually. Prioritize updating/replacing existing hints for the same environment variant based on the method that passed verify during execution.
+Use coordinates only when no stable accessibility target exists.
 
-## Screenshots
+## Verify Rules
 
-One per step (after verify). `step-001.png`, `step-002.png`... (zero-padded to 3 digits).
+- `verify.contains` strings must represent the new state created by the action.
+- `verify.absent` strings are negative controls.
+- Avoid static chrome and labels that appear on both success and failure paths.
+- If a check cannot be made mechanically with `describe-ui`, use `sipi-verify` instead of `sipi-test`.

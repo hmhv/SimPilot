@@ -104,6 +104,54 @@ final class ReportGeneratorTests: XCTestCase {
         XCTAssertEqual(outPath, runDir.path + "/report.html")
         XCTAssertTrue(FileManager.default.fileExists(atPath: outPath),
                       "report.html should be written to the run dir")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: runDir.path + "/summary.json"),
+                      "summary.json should be written beside report.html")
+    }
+
+    func testTestRunSummaryAndFailureHighlights() throws {
+        let runDir = tempDir.appendingPathComponent("run-fail", isDirectory: true)
+        let testDir = runDir.appendingPathComponent("login-flow", isDirectory: true)
+        try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true)
+
+        let run: [String: Any] = [
+            "started": "2026-06-19T10:00:00+09:00",
+            "finished": "2026-06-19T10:00:09+09:00",
+            "device": "udid",
+            "device-name": "iPhone 16",
+            "device-runtime": "iOS 18.0",
+            "tests": [["id": "login-flow", "passed": false, "duration": 9.0]],
+            "summary": ["total": 1, "passed": 0, "failed": 1]
+        ]
+        try Data(JSONSerialization.data(withJSONObject: run))
+            .write(to: runDir.appendingPathComponent("run.json"))
+
+        let result: [String: Any] = [
+            "id": "login-flow",
+            "passed": false,
+            "duration": 9.0,
+            "steps": [[
+                "passed": false,
+                "action": "Tap Sign In",
+                "duration": 2.0,
+                "screenshot": "step-001.png",
+                "failure-type": "verify",
+                "attempted-methods": [["method": "tap-id", "value": "auth.sign-in"]],
+                "verify": [["check": "Dashboard appears", "found": false]]
+            ]]
+        ]
+        try Data(JSONSerialization.data(withJSONObject: result))
+            .write(to: testDir.appendingPathComponent("result.json"))
+
+        let summary = try ReportGenerator.testRunSummary(runDir: runDir.path)
+        XCTAssertEqual(summary["status"] as? String, "fail")
+        let failures = summary["top-failures"] as? [[String: Any]]
+        XCTAssertEqual(failures?.first?["test"] as? String, "login-flow")
+        XCTAssertEqual(failures?.first?["missing"] as? String, "Dashboard appears")
+        XCTAssertEqual(failures?.first?["screenshot"] as? String, "login-flow/step-001.png")
+
+        let html = try ReportGenerator.testReportHTML(runDir: runDir.path)
+        XCTAssertTrue(html.contains("Failure Highlights"), "failed runs should render failure highlights before the table")
+        XCTAssertTrue(html.contains("Dashboard appears"), "missing verify text should be shown in failure highlights")
     }
 
     func testTestReportMissingRunJSONThrows() {
@@ -138,6 +186,8 @@ final class ReportGeneratorTests: XCTestCase {
                       "expected the title in the page title")
         XCTAssertTrue(html.contains("status-ok"), "empty findings.json should be All OK")
         XCTAssertTrue(html.contains("All OK"), "expected the All OK status label")
+        XCTAssertTrue(html.contains("Findings"), "verify report should show findings above the screenshot grid")
+        XCTAssertTrue(html.contains("No findings recorded."), "empty findings should be explicit in the report")
         XCTAssertTrue(html.contains("iPhone Light"), "expected the variant column headers")
         XCTAssertTrue(html.contains("settings screen"), "expected the derived check description")
 
@@ -160,6 +210,25 @@ final class ReportGeneratorTests: XCTestCase {
         let html = try ReportGenerator.verifyReportHTML(verifyDir: verifyDir.path)
         XCTAssertTrue(html.contains("status-issue"), "missing findings.json must fail safe to Issues Found")
         XCTAssertTrue(html.contains("Issues Found"), "expected the Issues Found status label")
+        XCTAssertTrue(html.contains("findings.json is missing"), "missing findings should be called out before screenshots")
+    }
+
+    func testVerifyReportRendersFindingsBeforeGrid() throws {
+        let verifyDir = tempDir.appendingPathComponent("verify-findings", isDirectory: true)
+        let vdir = verifyDir.appendingPathComponent("ipad-dark", isDirectory: true)
+        try FileManager.default.createDirectory(at: vdir, withIntermediateDirectories: true)
+        try writePNG(to: vdir.appendingPathComponent("001_settings-screen.png"))
+        let findings: [[String: Any]] = [
+            ["check": "settings-screen", "variant": "ipad-dark", "issue": "Toggle label is clipped"]
+        ]
+        try Data(JSONSerialization.data(withJSONObject: findings))
+            .write(to: verifyDir.appendingPathComponent("findings.json"))
+
+        let html = try ReportGenerator.verifyReportHTML(verifyDir: verifyDir.path)
+        XCTAssertTrue(html.contains("Findings"), "findings section should be present")
+        XCTAssertTrue(html.contains("Toggle label is clipped"), "finding issue text should be rendered")
+        XCTAssertTrue(html.range(of: "Findings")!.lowerBound < html.range(of: "<table>")!.lowerBound,
+                      "findings should appear before the screenshot grid")
     }
 
     func testVerifyReportNonexistentDirThrows() {

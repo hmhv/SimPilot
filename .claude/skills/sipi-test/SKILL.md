@@ -6,56 +6,55 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 
 # iOS Simulator UI Test Automation
 
-Use SimPilot's native `sipi` driver (via the `ui-driver.md` shell prelude) to interact with apps on the simulator and manage test creation, execution, and results. All operations go through the Bash tool. See `references/json-reference.md` for JSON format details.
+Use SimPilot's deterministic v2 harness. Create explicit JSON specs, then run them with `sipi run-test` or `sipi run-suite`. Do not manually reconstruct the old Bash step loop.
 
 Read `references/test-fix-policy.md` before proposing or applying source-code changes.
 
 ## Core Principles
 
-This skill **creates tests based on facts observed and confirmed directly on the simulator**, then runs them under fixed rules so results can be trusted on re-run.
+This skill **creates tests based on facts observed and confirmed directly on the simulator**, then hands execution to `sipi` so results can be trusted on re-run.
 
-- Build steps from operations that actually succeeded on the real screen. Checking source code and adding `.accessibilityIdentifier()` are supplementary tools to stabilize real-screen verification — not the primary approach (procedure: `docs/create.md`)
-- Judge whether UI state is *meaningfully* correct for the action taken, not just "visible" or "found by grep". Use a skeptical mindset — expose weaknesses, do not force a PASS (procedure: `docs/run.md`)
+- Build v2 specs from operations that actually succeeded on the real screen. Checking source code and adding `.accessibilityIdentifier()` are supplementary tools to stabilize real-screen verification — not the primary approach (procedure: `docs/create.md`)
+- Judge whether UI state is *meaningfully* correct for the action taken, not just "visible". Use a skeptical mindset — expose weaknesses, do not force a PASS (procedure: `docs/run.md`)
 - When the root cause is in app code, propose and apply the smallest useful source change per `references/test-fix-policy.md`
 - **The value of a test is not "making it pass" but "being able to trust results when re-run under the same rules."** A FAIL that correctly catches a regression is more valuable than a forced PASS that hides one
 
 ## Run Integrity (hard rules)
 
-1. **RUN and FIX are separate phases.** During a RUN, do not edit test steps, verify strings, `config.json`, or app source. If verify fails, record FAIL and stop — never edit to make it pass. Fixes happen later, in an explicit FIX phase (`references/test-fix-policy.md`).
-2. **A retry re-executes the same action and re-checks the SAME verify string.** Changing the verify condition or target mid-run is a FIX, not a retry. Exhausting retries with the unchanged verify still failing is a FAIL.
-3. **A verify must assert a state that is ABSENT on the failure path** (negative control). Before trusting a PASS, confirm the matched `grep` would NOT also match if the feature were broken (e.g. don't grep static chrome or an always-present tab label).
+1. **RUN and FIX are separate phases.** During a RUN, do not edit test steps, verify strings, `config.json`, or app source. If verify fails, accept the harness result as FAIL. Fixes happen later, in an explicit FIX phase (`references/test-fix-policy.md`).
+2. **A retry re-executes the same action and re-checks the SAME verify object.** Changing `action` or `verify` mid-run is a FIX, not a retry.
+3. **A verify must assert a state that is ABSENT on the failure path** (negative control). Before trusting a PASS, confirm the `verify.contains` text would not also appear if the feature were broken.
 
 ## Preflight
 
 Read `../sipi-common/docs/preflight.md` and complete all checks before proceeding.
-Read `../sipi-common/docs/ui-driver.md` and define its shell prelude in every Bash call that inspects or taps UI.
 Confirm the native driver is ready with `sipi doctor` (exit 0). If it fails, report the failing capability and stop.
 
 ## Element Interaction Fallback Chain
 
-Use the shared element-interaction fallback chain defined in `../sipi-common/docs/patterns.md`. Read it before tapping or inspecting any UI control — some controls (Toggle, Menu, DisclosureGroup) return "success" from tap but do not actually change state, so a screenshot or tap result alone can look like a fake PASS.
+Use `sipi describe-ui` and screenshots during authoring to discover stable identifiers and text. The harness owns tap resolution, retry, wait, verify, screenshots, result JSON, trace, summary, and report generation.
 
 ## Test Creation
 
-See `docs/create.md` for the full procedure. Summary: understand requirements → build & check screen & review source → generate JSON → save → suggest execution. If asked to "create and run", proceed without waiting for confirmation.
+See `docs/create.md` for the full procedure. Summary: understand requirements → observe simulator → generate explicit v2 JSON → save → run with `sipi run-test`. If asked to "create and run", proceed without waiting for confirmation.
 
 ## Test Execution
 
-See `docs/run.md` for the full procedure, build, hint updates, failure recording, and error recovery. Key rules:
+See `docs/run.md` for the full procedure. Key command:
 
-- **1 Bash = 1 step** — batching multiple steps loses intermediate screenshots, making it impossible to pinpoint which step failed
-- **Continue with `;` on failure, not `&&`** — `&&` aborts the rest of the command, so the post-failure screenshot never gets saved
-- **verify uses `ui_describe | grep` only** — screenshots are subjective and produce non-reproducible results across different runs and reviewers
-- **Run is read-only on the spec** — see Run Integrity above; mark FAIL rather than editing to pass
-- Re-define `UDID` and `BUNDLE_ID` at the top of each Bash call (shell state does not persist between calls)
+```bash
+sipi run-test .simpilot/tests/<id>.json --workspace .simpilot
+sipi run-suite .simpilot/suites/<name>.json --workspace .simpilot
+```
+
+The harness writes `run.json`, per-test `result.json`, `trace.jsonl`, `summary.json`, screenshots, describe snapshots, and `report.html`.
 
 ## Saving and Displaying Results
 
-- Write result.json after each test; write run.json after all tests complete
-- **Key names must exactly match `references/json-reference.md`** — do not invent custom key names
-- **After saving, always run `sipi validate .simpilot` and fix issues until it shows `OK`** before generating the report
-- Generate `report.html`: `sipi report "$RUN_DIR"`
-- Open report: `open "$RUN_DIR/report.html"`
+- The harness writes `result.json` incrementally and `run.json` after each test.
+- **Key names must exactly match `references/json-reference.md`** — do not invent custom key names.
+- After saving specs, run `sipi validate .simpilot` and fix schema issues before executing.
+- After execution, open `"$RUN_DIR/report.html"` and inspect `"$RUN_DIR/summary.json"` for a compact result.
 
 ## Quality Audits
 
@@ -69,7 +68,7 @@ Beyond functional regression tests, this skill supports specialized quality audi
 
 Read the relevant doc before starting an audit.
 
-Device selection and suite execution are detailed in `docs/run.md` ("Device Resolution" and "Suite Execution Details").
+Device selection and suite execution are handled by `sipi run-test` / `sipi run-suite` flags documented in `docs/run.md`.
 
 ## References
 
@@ -78,15 +77,14 @@ Device selection and suite execution are detailed in `docs/run.md` ("Device Reso
 | File | Purpose |
 |------|---------|
 | `../sipi-common/docs/preflight.md` | Session setup checklist (includes `sipi doctor`) |
-| `../sipi-common/docs/ui-driver.md` | UI driver shell prelude and native bridge wrappers |
+| `references/json-reference.md` | v2 JSON schema |
 
 ### Read for specific operations
 
 | File | When |
 |------|------|
-| `../sipi-common/docs/patterns.md` | Before tapping or inspecting any UI control (fallback chain, control-specific patterns and known quirks) |
 | `docs/create.md` | Creating or updating tests |
-| `docs/run.md` | Running tests, hint updates, failure recording, results, device/suite selection |
+| `docs/run.md` | Running tests with the deterministic harness |
 | `docs/report.md` | Generating the HTML report |
 | `../sipi-common/docs/build.md` | Building or installing the app |
 | `../sipi-common/docs/troubleshooting.md` | When problems occur |

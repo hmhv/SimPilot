@@ -95,7 +95,7 @@ never go stale relative to the source tree. `SimCore` depends on `SimSkills`, so
 
 ```sh
 sipi describe-ui <udid> [--deep] [--expect "Text"]   # AX tree (default fast; grid on --deep/auto)
-sipi describe-point <udid> <x> <y>   # single objectAtPoint hit-test (cheap, no grid)
+sipi describe-point <udid> -x <x> -y <y>   # single objectAtPoint hit-test (cheap, no grid)
 ```
 
 ### Input
@@ -129,14 +129,27 @@ sipi list-simulators                 # device list for skills
 ### Reports and validation
 
 ```sh
+sipi run-test <test-json>             # deterministic v2 test harness
+sipi run-suite <suite-json>           # deterministic v2 suite harness
+sipi verify-session ...               # init/capture/finding/finalize verification artifacts
 sipi report <run-dir>                # generate report.html for a sipi-test run
 sipi verify-report <verify-dir>      # generate report.html for a sipi-verify run
 sipi validate <workspace>            # validate the JSON files in a .simpilot workspace
 ```
 
-Report generation lives **inside** the binary (`report` / `verify-report` /
-`validate`) so a single-binary install stays self-contained; the skill docs
-invoke `sipi report …` directly.
+Execution and report generation live **inside** the binary (`run-test`,
+`run-suite`, `verify-session`, `report`, `verify-report`, `validate`) so a
+single-binary install stays self-contained.
+
+The v2 test `action.type` vocabulary spans the same input surface as the ad-hoc
+CLI: `tap`, `long-press`, `type`, `key`, `key-combo`, `key-sequence`, `button`,
+`swipe`, `drag`, `gesture`, `slider`, `orientation`, `crown`, and `wait`. So
+toggles, sliders, gestures, modifier combos, and rotation are all expressible as
+deterministic saved steps — each case in `Harness.perform(action:)` reuses the
+same `NativeDriver` call as the matching CLI command. Two-finger `multitouch`
+stays ad-hoc-only (its stateful begin/end phases are not modeled as a single
+action). The full per-action JSON shapes are in
+[json-reference.md](../.claude/skills/sipi-test/references/json-reference.md).
 
 ### Diagnostics and lifecycle
 

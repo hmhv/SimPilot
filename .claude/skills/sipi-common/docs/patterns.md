@@ -21,6 +21,8 @@ Check the Quick Reference below first — some controls (Toggle, Menu, Disclosur
    c. verify → if fail, mark FAIL
 ```
 
+A `--label`/`--id`/`--value` selector tap (and `sipi slider`) automatically re-fetches the **deep** grid tree and retries when the fast frontmost tree has no match, so selector taps reach System UI without you passing `--deep`. Only a *true* not-found escalates; a multiple-match or invalid-frame error fails immediately — for a multiple-match, follow the error's advice (add `--element-type`, use `--id`, or fall to coordinates), do not re-tap blindly. So fall through to coordinates (step 3) only when a selector genuinely cannot resolve. `--value` on `tap` is an exact-string match (distinct from `slider --value`, which is a 0…100 percentage). `--deep` on `describe-ui` is for inspection only.
+
 ## Quick Reference
 
 Legend: **Works** = confirmed working / **Fake success** = returns "successfully" but no state change / **-** = does not work or unsupported
@@ -29,9 +31,9 @@ Legend: **Works** = confirmed working / **Fake success** = returns "successfully
 |--------|-----------|--------|---------|---------|-----------------|
 | Button | Works | Works | Works | - | Prefer `--label` |
 | Button in List/Form | Works | Works | Works | - | `--label` or `--id` |
-| Toggle | **Fake success** | **Fake success** | right edge -25pt | - | touch required (do not use `--label`/`--id`). `x = frame.x + frame.width - 25`, `y = frame.y + frame.height/2`. AXValue `"1"`=ON `"0"`=OFF |
+| Toggle | Works (redirects to switch) | Works | width-31 inset (auto) | - | Prefer `--label` (optionally `--element-type Switch`). The resolver sibling-redirects a row label to its single switch, and when the resolved switch is wider than 100pt it taps the trailing inset (`x + width - 31`, centerY) for you. Only hand-compute a `touch` if no selector resolves; then `x = frame.x + frame.width - 31`, `y = frame.y + frame.height/2`. If a selector tap reports success but AXValue does not flip, fall back to that `touch`. AXValue `"1"`=ON `"0"`=OFF |
 | Stepper +/- | Works | Works | Works | - | Use `--id` or touch if unstable |
-| Slider | - | - | - | drag within frame | `sipi slider $UDID --label "Name" --value N` (resolves, drags, verifies AXValue) |
+| Slider | - | - | - | drag within frame | `sipi slider $UDID --label "Name" --value N` (resolves, drags, then polls AXValue; non-zero exit if it cannot reach the target). Add `--element-type Slider` to disambiguate and `--tolerance 0.02` (±2%, the default) to set the accepted band |
 | Segmented Picker | - | - | coordinate calc | - | `AXTabGroup` (no label; not `AXHeading`). `frame.x + (width/count)*(index+0.5)` |
 | Menu (PopUpButton) | **Fake success** | **Fake success** | frame center | - | touch frame center → sleep 1-2s → select item with `--label`. **All methods fail inside List** |
 | Picker (in Form) | Works | Works | - | - | Tap `"Title, Value"` → select option with `--label` |
@@ -49,7 +51,23 @@ Legend: **Works** = confirmed working / **Fake success** = returns "successfully
 | Tab Bar (AXRadioButton) | Works | - | Works | - | iOS 18.1-18.4, all iPad versions |
 | Tab Bar (no children) | - | - | coordinate calc | - | iOS 18.6+/26 iPhone. Calculate from width/tab count |
 
-For key combos and modifier keys, use `sipi key` / `sipi key-combo` (or `native_key`).
+For single keys and modifier combos, use `sipi key` / `sipi key-combo` (or `native_key`); for an ordered burst of keycodes use `sipi key-sequence` (see below).
+
+## Driving primitives (reach for these before computing coordinates by hand)
+
+These first-class `sipi` commands are deterministic and usually beat hand-rolled coordinates. UDID comes first for all of them. Most are also expressible as saved v2 test actions (`long-press`, `slider`, `gesture`, `drag`, `key-combo`, `key-sequence`, `orientation`, `crown`) for `sipi-test` — see `../../sipi-test/references/json-reference.md`.
+
+| Need | Command |
+|------|---------|
+| Scroll a view / system edge swipe | `sipi gesture scroll-down $UDID` — presets `scroll-up`/`scroll-down`/`scroll-left`/`scroll-right`, `swipe-from-{left,right,top,bottom}-edge` (`--duration` optional) |
+| Precise reorder / handle / momentum drag | `sipi drag $UDID --start-x .. --start-y .. --end-x .. --end-y .. --steps 60` — interpolated touch-moves (`--steps` 1…1000, `--duration` default 0.6s); smoother than `swipe` |
+| Identify what sits at a coordinate / debug a mis-tap | `sipi describe-point $UDID -x .. -y ..` — single hit-test (`--pixel`/`--norm`); returns a one-element array, or `[]` if nothing is hit |
+| Disambiguate a label/value that matches >1 element | add `--element-type Button` / `--element-type Switch` / `--element-type Slider` to `tap`/`slider` (exact, case-sensitive describe-ui `type`, no `AX` prefix), e.g. `sipi tap $UDID --label "Notifications" --element-type Switch` |
+| Pinch / zoom (2-finger) | two stateful calls: `sipi multitouch $UDID 1 x1 y1 x2 y2` (begin/move) then `sipi multitouch $UDID 2 x1' y1' x2' y2'` (end) — phase `1`=begin/move, `2`=end (`--norm` 0…1 default) |
+| Apple Watch Digital Crown | `sipi crown $UDID <delta>` — sign sets direction (watchOS simulators only) |
+| Ordered HID keycode burst | `sipi key-sequence --keycodes 11,8,15,15,18 $UDID` — each pressed+released in order (`--delay` default 0.1s) |
+
+`describe-point` is the cheap way to confirm a computed coordinate (Toggle inset, Segmented Picker cell, headerless Tab Bar) actually lands on the intended element before a blind `touch`.
 
 ---
 
@@ -71,7 +89,7 @@ For key combos and modifier keys, use `sipi key` / `sipi key-combo` (or `native_
 ### Navigation (push/pop)
 
 - Back: find back button frame with `ui_describe` → `ui_tap_xy` / `native_tap` (most reliable)
-- `swipe-from-left-edge` may not work on iOS 18.1
+- Edge back-swipe: `sipi gesture swipe-from-left-edge $UDID` (may not work on iOS 18.1 — fall back to a back-button tap there)
 
 ### Modal / Sheet
 
@@ -85,7 +103,8 @@ For key combos and modifier keys, use `sipi key` / `sipi key-combo` (or `native_
 
 ### Scrolling
 
-- Scroll with `native_swipe 0.5 0.7 0.5 0.3` (or `sipi swipe $UDID --norm --start-x 0.5 --start-y 0.7 --end-x 0.5 --end-y 0.3`)
+- Prefer the preset: `sipi gesture scroll-down $UDID` / `scroll-up` (also `scroll-left`/`scroll-right`). Use `native_swipe 0.5 0.7 0.5 0.3` (or `sipi swipe ...`) only when you need a precise start/end the preset cannot express
+- System-edge gestures (back-swipe, Control Center, Notification Center): `sipi gesture swipe-from-left-edge $UDID` (and `swipe-from-{right,top,bottom}-edge`)
 - After scrolling, verify elements with `ui_describe` before tapping
 - Return to top: swipe 2-3 times or tap status bar (y=20)
 
@@ -111,7 +130,7 @@ For key combos and modifier keys, use `sipi key` / `sipi key-combo` (or `native_
 
 ## Device Settings
 
-Dark mode and Dynamic Type use `xcrun simctl ui $UDID appearance light|dark` and the Settings app (no native driver needed). For rotation, use `native_orientation portrait|landscape-left|landscape-right` (or `sipi orientation`). Wait `sleep 3` after rotation.
+Dark mode and Dynamic Type use `xcrun simctl ui $UDID appearance light|dark` and the Settings app (no native driver needed). For rotation, use `native_orientation <portrait|portrait-upside-down|landscape-left|landscape-right|face-up|face-down>` (wraps `sipi orientation --set`). Wait `sleep 3` after rotation to let it settle, then optionally confirm it landed with `sipi orientation $UDID --json` (reads `{ orientation, raw }`).
 
 ---
 
@@ -139,7 +158,8 @@ Dark mode and Dynamic Type use `xcrun simctl ui $UDID appearance light|dark` and
 | FileImporter | Separate process UI. Inspect with `ui_describe`; if controls are not stable, close with `ui_key 41` (Esc) |
 | Share Sheet | Separate process UI. Inspect with `ui_describe`; close with `ui_tap_label` on a visible label or downward `sipi swipe` (or `native_swipe`) |
 | `.borderless` Button in List (iOS 26) | `tap --label`/`--id`/`touch` all give fake success. Workaround: remove `.borderless` or tap the entire row |
-| Drag & Drop / Pinch / Rotation | touch supports down/up and basic swipe interpolation; complex multi-finger move is not supported |
+| Drag & Drop (single finger / reorder / handle) | Use `sipi drag $UDID --steps 60` for interpolated touch-moves (1…1000 steps) — smoother and more reliable than `swipe` |
+| Pinch / Rotation (2-finger) | `sipi multitouch` drives 2-finger phases (pinch/zoom directly; rotation is possible but manual — compute the rotated endpoints). Moves with more than 2 fingers are not supported |
 | Menu in List (iOS 18.x) | List row absorbs gestures. All methods fail |
 | iPad iOS 26 describe-ui | May return `DockFolderViewService` |
 | iPad confirmationDialog | Cannot tap buttons inside popover |

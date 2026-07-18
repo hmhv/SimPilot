@@ -61,6 +61,8 @@ printf 'SIPI=%q\n' "$SIPI"   # prints a ready-to-paste line, e.g. SIPI=/Users/yo
 
 The resolver prefers `sipi` on `PATH`, then the install location (`~/.local/bin/sipi`, where `install.sh` puts it but `sipi setup` only prints PATH advice), then a release build inside the checkout (`.build/release/sipi`), building it on demand. If it cannot find `sipi` it hard-fails; if `"$SIPI" doctor` still fails, report the failing capability from its output and stop.
 
+On a failure, re-run `"$SIPI" doctor --json` to read the structured probe (each check has `name`/`ok`/`detail`, plus a top-level `allCorePresent`) and name the exact missing capability before stopping. Use plain `doctor` as the exit-code gate; `--json` is the diagnosis step.
+
 ## 1.5 UI Driver
 
 Read `ui-driver.md` before the first UI interaction. Use its shell prelude at the top of every Bash call that calls `ui_describe`, `ui_tap_label`, `ui_tap_id`, or `native_*`.
@@ -72,6 +74,8 @@ The UI driver uses the native `sipi` binary by default; it sees both the frontmo
 ```bash
 xcrun simctl list devices booted
 ```
+
+Alternatively, list simulators natively: `"$SIPI" devices` or `"$SIPI" list-simulators` (both default to JSON and emit a per-device `"booted"` boolean — filter for `booted: true`, the same way the driver resolves the booted device). `"$SIPI" list-simulators --format axe` is a pipe-table whose `state` column is text (`Booted`), handy for name extraction. `"$SIPI" version --json` emits `{ "version": ... }` for capability gating. `xcrun simctl list devices booted` remains an equivalent fallback.
 
 If none found, attempt to boot one. If device selection is specified, resolve the model/runtime first.
 

@@ -8,8 +8,8 @@ The top-level README is translated. Skill docs and code remain in English.
 
 ## What it does
 
-- **`/sipi-test`** — UI test automation on the iOS Simulator. Define tests in natural language; the skill automates interaction and verification. Supports regression suites, multi-device runs, and quality audits (accessibility, localization, appearance).
-- **`/sipi-verify`** — Post-implementation verification on the iOS Simulator. Confirm that a feature or fix works correctly after code changes.
+- **`/sipi-test`** — UI test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness.
+- **`/sipi-verify`** — Post-implementation verification on the iOS Simulator. `sipi verify-session` owns screenshots, findings, and report generation.
 
 Results are saved in `.simpilot/` with HTML reports for browser viewing.
 
@@ -67,8 +67,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 ```text
 /sipi-test Create a test for the home screen tab switching
 /sipi-test Create a test that logs in and opens settings
+/sipi-test Create a test that sets the brightness slider to 80% and toggles notifications
 /sipi-test Create a test from the current screen
 ```
+
+Saved tests drive the full interaction surface — taps, toggles, sliders, gestures, drags, long-press, key combos, and rotation — as deterministic steps, not just taps and swipes.
 
 **Run tests:**
 ```text
@@ -80,7 +83,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test Run tests with the regression-profile device set
 ```
 
-When multiple devices are specified, tests run in parallel. If `.simpilot/config.json` includes a `build` entry, the app is built before running.
+Test execution is handled by the deterministic `sipi` harness. Build/install the app before running, or point `config.json` at an already-installed bundle ID.
 
 **View results:**
 ```text
@@ -125,13 +128,19 @@ SimPilot uses a standard directory layout under `.simpilot/`:
   runs/                        # Test run results (sipi-test)
     <run-id>/
       run.json                 # Run summary
+      summary.json             # Compact agent/CI summary
       report.html              # HTML report (open in browser)
       <test-id>/
         result.json            # Test result
+        trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
+        step-NNN.describe-before.json
+        step-NNN.describe-after.json
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      checks.json
+      findings.json
       report.html
 ```
 

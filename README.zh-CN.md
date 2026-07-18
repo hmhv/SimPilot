@@ -68,8 +68,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 ```text
 /sipi-test 创建一个首页标签切换测试
 /sipi-test 创建一个登录后打开设置的测试
+/sipi-test 创建一个把亮度滑块设为 80% 并切换通知开关的测试
 /sipi-test 从当前界面创建测试
 ```
+
+保存的测试以确定性步骤驱动完整的交互面——点按、开关切换、滑块、手势、拖拽、长按、组合键和旋转——而不仅是点按和滑动。
 
 **运行测试:**
 ```text
@@ -126,13 +129,19 @@ SimPilot 在 `.simpilot/` 下使用如下目录结构:
   runs/                        # Test run results (sipi-test)
     <run-id>/
       run.json                 # Run summary
+      summary.json             # Compact agent/CI summary
       report.html              # HTML report (open in browser)
       <test-id>/
         result.json            # Test result
+        trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
+        step-NNN.describe-before.json
+        step-NNN.describe-after.json
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      checks.json
+      findings.json
       report.html
 ```
 

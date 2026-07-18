@@ -68,8 +68,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 ```text
 /sipi-test 홈 화면 탭 전환 테스트를 만들어줘
 /sipi-test 로그인 후 설정을 여는 테스트를 만들어줘
+/sipi-test 밝기 슬라이더를 80%로 설정하고 알림을 토글하는 테스트를 만들어줘
 /sipi-test 현재 화면에서 테스트를 만들어줘
 ```
+
+저장된 테스트는 탭과 스와이프뿐 아니라 탭·토글·슬라이더·제스처·드래그·길게 누르기·키 조합·회전까지 결정적 단계로 실행합니다.
 
 **테스트 실행:**
 ```text
@@ -126,13 +129,19 @@ SimPilot은 `.simpilot/` 아래에 다음 구조를 사용합니다.
   runs/                        # Test run results (sipi-test)
     <run-id>/
       run.json                 # Run summary
+      summary.json             # Compact agent/CI summary
       report.html              # HTML report (open in browser)
       <test-id>/
         result.json            # Test result
+        trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
+        step-NNN.describe-before.json
+        step-NNN.describe-after.json
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      checks.json
+      findings.json
       report.html
 ```
 

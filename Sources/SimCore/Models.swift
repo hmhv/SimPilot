@@ -58,7 +58,7 @@ public enum TouchPhase: Int, Codable, Sendable {
 }
 
 /// A hardware button the driver can press.
-public enum HardwareButton: String, Codable, Sendable {
+public enum HardwareButton: String, Codable, Sendable, CaseIterable {
     case home
     case lock
     case sideButton = "side_button"

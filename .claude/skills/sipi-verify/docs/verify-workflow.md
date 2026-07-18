@@ -1,157 +1,86 @@
 # Verification Workflow
 
+Use `sipi verify-session` for all artifacts. Do not hand-create the verify directory, `findings.json`, or report.
+
 ## 1. Understand the Change
 
-Determine what was changed and what needs to be verified.
+Read the user request, diff, or latest commit and identify:
 
-### If context is provided by the user
-- Use the description to identify affected screens, components, and behaviors
-- Read relevant source files if needed for deeper understanding
+- Screens to visit
+- Behaviors to trigger
+- Visual states to compare
+- Edge cases worth checking
 
-### If no context is provided (auto-detect)
-- Run `git diff HEAD` or `git diff --cached` to see recent changes
-- If no uncommitted changes, check `git log -1 --stat` for the latest commit
-- Identify which screens and components are affected from the changed files
-- If the changes are unclear, ask the user what to verify
-
-### Output of this step
-A mental checklist:
-- Which screen(s) to navigate to
-- What behavior to trigger
-- What the expected result should be
-- Any edge cases worth checking (empty state, invalid input, boundary values)
-
-## 2. Plan Checks
-
-State the plan briefly before executing. Example:
-
-```
-Verification plan:
-1. Navigate to Settings screen → confirm new toggle appears
-2. Toggle on → verify label changes to "Enabled"
-3. Toggle off → verify it reverts
-4. Kill and relaunch → verify state persisted
-
-Variants: iPhone light/dark, iPad light/dark
-```
-
-Keep it short — 3-7 check items is typical. Don't over-plan; this is exploratory.
-
-## 3. Build & Install
-
-If source code was modified (the common case after implementing/fixing):
-
-1. Follow `../../sipi-common/docs/build.md` to rebuild
-2. Install on both iPhone and iPad simulators
-3. Prepare the output directory (see `report.md` for structure)
-
-If only verifying an already-installed app, skip the build.
-
-## 4. Execute Checks
-
-Run the same checks across all 4 variants in this order:
-
-1. **iPhone + light** → all check items → save screenshots to `iphone-light/`
-2. **iPhone + dark** → switch appearance → same checks → save to `iphone-dark/`
-3. **iPad + light** → boot iPad, switch to light → same checks → save to `ipad-light/`
-4. **iPad + dark** → switch appearance → same checks → save to `ipad-dark/`
-
-### Per-variant procedure
-
-At the start of each variant, set the device and appearance:
+## 2. Initialize Session
 
 ```bash
-UDID=<device-udid>
-xcrun simctl ui $UDID appearance light  # or dark
-sleep 2
+sipi verify-session init "<kebab-case-description>"
 ```
 
-Also include the `../../sipi-common/docs/ui-driver.md` shell prelude in this same Bash call before the first UI operation.
+The command prints:
 
-For each check item:
-
-1. **Navigate** to the relevant screen
-   - Use `ui_describe` to confirm current location
-   - Navigate using the fallback chain from `../../sipi-common/docs/patterns.md`
-
-2. **Perform the action**
-   - Trigger the behavior being verified
-   - Allow time for animations (`sleep 1-2`)
-
-3. **Capture screenshot**
-   - `ui_screenshot "$VERIFY_DIR/<variant>/NNN_<description>.png"`
-   - Use zero-padded 3-digit numbering: `001`, `002`, ...
-   - Description in kebab-case: `001_settings-screen.png`, `002_toggle-on.png`
-   - Same numbering and names across all 4 variants
-
-4. **Observe and note**
-   - Read the screenshot to assess visual correctness
-   - Use `ui_describe` when element state needs confirmation
-   - Note any issues found for the report
-
-### Screenshot naming
-
-Screenshots must use the same number and name across all variants so the report can align them in a grid:
-
-```
-iphone-light/001_settings-screen.png
-iphone-dark/001_settings-screen.png
-ipad-light/001_settings-screen.png
-ipad-dark/001_settings-screen.png
+```text
+Verify results: <absolute path>
 ```
 
-### Adapt as you go
+Use that path as `VERIFY_DIR`.
 
-This is exploratory — if you notice something unexpected while checking, investigate it. Add extra screenshots as needed (they'll appear in the report as extra rows).
+## 3. Capture Variants
 
-## 5. Record Findings
-
-Before generating the report, write `findings.json` in the verify directory. This file drives the report status badge and prevents reporting "All OK" when issues exist.
-
-Before writing an empty `[]` (all-OK), confirm for the SPECIFIC changed behavior that you observed the NEW state via `ui_describe` (not the screenshot alone), and can state why that state would be absent if the change had not worked. Appearance/visual checks remain screenshot-first and exploratory.
+Capture the same indexed check across variants:
 
 ```bash
-# No issues found — write empty array
-echo '[]' > "$VERIFY_DIR/findings.json"
-
-# Issues found — write array of objects
-cat > "$VERIFY_DIR/findings.json" << 'EOF'
-[
-  { "check": "toggle-on", "variant": "ipad-dark", "issue": "toggle label clipped" }
-]
-EOF
+sipi verify-session capture "$VERIFY_DIR" iphone-light "settings-screen" --index 1 --device "$IPHONE_UDID" --appearance light
+sipi verify-session capture "$VERIFY_DIR" iphone-dark  "settings-screen" --index 1 --device "$IPHONE_UDID" --appearance dark
+sipi verify-session capture "$VERIFY_DIR" ipad-light   "settings-screen" --index 1 --device "$IPAD_UDID" --appearance light
+sipi verify-session capture "$VERIFY_DIR" ipad-dark    "settings-screen" --index 1 --device "$IPAD_UDID" --appearance dark
 ```
 
-`sipi verify-report` reads `findings.json` to auto-determine the status badge:
-- Empty array `[]` → "All OK"
-- Non-empty array → "Issues Found"
-- Missing file + `--status ok` → prints a warning (status is caller-asserted without verification)
-- Missing file + no flag → defaults to "Issues Found" (fail-safe)
+The command writes aligned filenames such as `001_settings-screen.png` and updates `checks.json`.
 
-## 6. Generate Report
+### Recording motion (optional)
 
-After all 4 variants are complete and findings are recorded, generate `report.html`:
+When the change is only observable in motion (animation, transition, gesture flow), record video as an extra artifact:
 
 ```bash
-sipi verify-report "$VERIFY_DIR" --title "Description"
+sipi record-video "$IPHONE_UDID" "$VERIFY_DIR/clip.mp4" &   # blocks until SIGINT
+REC=$!
+# ...perform the flow with the ui_*/native_* helpers...
+kill -INT "$REC"   # finalizes the H.264 .mp4
+```
+
+The verify `report.html` embeds only the PNG grid and `findings.json` has a fixed `{check, variant, issue}` schema — neither links the video. Surface the clip path **out-of-band** in your final response (alongside the `Verify results:` path), and mention it inside a finding's free-text `issue` only when it documents an actual motion bug. Keep the default screenshot-first flow unchanged.
+
+## 4. Record Findings
+
+For every issue:
+
+```bash
+sipi verify-session finding "$VERIFY_DIR" \
+  --check "settings-screen" \
+  --variant "ipad-dark" \
+  --issue "Toggle label is clipped"
+```
+
+If no issues are found, leave `findings.json` as the empty array created by `init`.
+
+Before leaving it empty, confirm the changed behavior through `describe-ui` when behavior matters. Visual checks can remain screenshot-first.
+
+## 5. Finalize
+
+```bash
+sipi verify-session finalize "$VERIFY_DIR" --title "Description"
 open "$VERIFY_DIR/report.html"
 ```
 
-Do not pass `--status ok` manually. Let `sipi verify-report` read `findings.json` to determine the status. The `--status` flag exists only as a fallback when `findings.json` cannot be written.
+Return:
 
-`sipi verify-report` is the single path for producing `report.html`: it reads the screenshots from each variant directory, embeds them as Base64 data URIs, and generates a self-contained comparison grid. See `report.md` for the directory layout and the `findings.json` contract.
+```text
+Verify results: <absolute path to $VERIFY_DIR>
+```
 
-## 7. Summarize and Return Results
+## Notes
 
-After opening the report, provide a brief summary **and output the result path**:
-
-1. **Output the result path** (required — calling skills depend on this):
-   ```
-   Verify results: <absolute path to $VERIFY_DIR>
-   ```
-
-2. **Summarize findings**:
-   - **All OK**: "Verification complete — all 4 variants look good. Report opened in browser."
-   - **Issues found**: list each issue with which variant(s) are affected
-   - **Skipped variants**: if you dropped a device class, state which and why
-   - **Regression candidate**: if the verified behavior is worth protecting, suggest the user run `/sipi-test` to capture this as a regression test
+- Use the same `--index` and check name across variants so the report grid aligns.
+- Add extra checks with the next index.
+- Skipped variants must be explained in the final response.

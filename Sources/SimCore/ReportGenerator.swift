@@ -9,10 +9,11 @@
 // machine, no $SKILL_ROOT script resolution). The skill docs now call
 // `sipi report` / `sipi verify-report`.
 //
-// Output shape is preserved byte-for-byte from the original scripts: the same
-// HTML structure, inline CSS/JS, Base64 PNG embedding, verify-status
-// auto-detection from findings.json, and the verify thumbnail max-width:220px
-// sizing fix. Pure Foundation — no SimBridge, no Process(), unit-testable.
+// The reports remain self-contained HTML with inline CSS/JS, Base64 PNG
+// embedding, verify-status auto-detection from findings.json, and the verify
+// thumbnail max-width:220px sizing fix. Test reports also emit summary.json for
+// agent/CI consumption. Pure Foundation: no SimBridge, no Process(),
+// unit-testable.
 
 import Foundation
 
@@ -103,6 +104,7 @@ public enum ReportGenerator {
 
         // Detail sections
         var details = ""
+        var failureHighlights = ""
         for entry in tests {
             let tid = entry["id"] as? String ?? ""
             let b = badge(entry)
@@ -135,6 +137,13 @@ public enum ReportGenerator {
                     let checks = renderVerify(step["verify"] as? [Any] ?? [])
                     let methods = renderMethods(step["attempted-methods"] as? [Any] ?? [])
                     let snapshot = esc(step["describe-ui-snapshot"] as? String ?? "")
+                    let missing = esc(firstMissingVerify(step["verify"] as? [Any] ?? []) ?? "")
+                    failureHighlights += "<div class=\"failure-card\"><div><span class=\"badge badge-fail\">FAIL</span> <strong>\(esc(tid))</strong> step \(n)</div>"
+                    failureHighlights += "<p>\(action)</p>"
+                    if !ft.isEmpty { failureHighlights += "<dl><dt>Failure Type</dt><dd>\(ft)</dd></dl>" }
+                    if !missing.isEmpty { failureHighlights += "<dl><dt>Missing Verify</dt><dd>\(missing)</dd></dl>" }
+                    if !methods.isEmpty { failureHighlights += "<dl><dt>Attempted Methods</dt><dd>\(methods)</dd></dl>" }
+                    failureHighlights += "</div>\n"
                     failedHTML += "<div class=\"step-info\"><h4>Step \(n): \(action)</h4><dl>"
                     failedHTML += "<dt>Failure Type</dt><dd>\(ft)</dd>"
                     failedHTML += "<dt>Verify</dt><dd>\(checks)</dd>"
@@ -164,15 +173,24 @@ public enum ReportGenerator {
         if review > 0 { summaryHTML += "<span class=\"summary-item summary-review\">\(review) review</span>" }
         if failed > 0 { summaryHTML += "<span class=\"summary-item summary-fail\">\(failed) failed</span>" }
 
+        let failureSection = failureHighlights.isEmpty
+            ? ""
+            : "<section class=\"failures\"><h2>Failure Highlights</h2>\(failureHighlights)</section>"
+
         let css = """
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f5f5f7;color:#1d1d1f;padding:24px}
         h1{font-size:24px;font-weight:600;margin-bottom:4px}
+        h2{font-size:18px;font-weight:600;margin-bottom:12px}
         .meta{color:#86868b;font-size:14px;margin-bottom:16px}
         .summary{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
         .summary-item{padding:8px 16px;border-radius:10px;font-size:14px;font-weight:600}
         .summary-pass{background:#d4edda;color:#155724}.summary-fail{background:#f8d7da;color:#721c24}
         .summary-review{background:#fff3cd;color:#856404}.summary-total{background:#e2e3e5;color:#383d41}
+        .failures{background:#fff;border-left:4px solid #dc3545;border-radius:8px;padding:16px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+        .failure-card{border-top:1px solid #f0f0f0;padding:12px 0;font-size:13px;line-height:1.5}
+        .failure-card:first-of-type{border-top:0;padding-top:0}.failure-card p{margin-top:6px}
+        .failure-card dl{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;margin-top:6px}.failure-card dt{color:#86868b;font-weight:600}.failure-card dd{margin:0}
         table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px}
         thead th{background:#f5f5f7;padding:12px 16px;font-size:13px;font-weight:600;text-align:left;border-bottom:1px solid #e5e5e5}
         tbody td{padding:10px 16px;border-bottom:1px solid #f0f0f0;font-size:14px;vertical-align:middle}
@@ -214,6 +232,7 @@ public enum ReportGenerator {
         <h1>\(suiteName)</h1>
         <p class="meta">\(deviceName) &middot; \(deviceRuntime) &middot; \(commit) &middot; \(started)</p>
         <div class="summary">\(summaryHTML)</div>
+        \(failureSection)
         <table><thead><tr><th>Status</th><th>Test</th><th>Duration</th><th>Notes</th></tr></thead>
         <tbody>\(tableRows)</tbody></table>
         \(details)
@@ -233,6 +252,100 @@ public enum ReportGenerator {
         let outPath = runDir + "/report.html"
         do {
             try html.write(toFile: outPath, atomically: true, encoding: .utf8)
+        } catch {
+            throw ReportError("Failed to write \(outPath): \(error.localizedDescription)")
+        }
+        try writeTestRunSummary(runDir: runDir)
+        return outPath
+    }
+
+    /// Build the compact machine-readable summary for a test run. This is meant
+    /// for agents and CI so they do not need to scrape the heavier HTML report.
+    public static func testRunSummary(runDir: String) throws -> [String: Any] {
+        guard let run = loadJSON(runDir + "/run.json") else {
+            throw ReportError("\(runDir)/run.json: not found or invalid")
+        }
+
+        let tests = run["tests"] as? [JSON] ?? []
+        let summary = run["summary"] as? JSON ?? [:]
+        let total = summary["total"] as? Int ?? tests.count
+        let passed = summary["passed"] as? Int ?? tests.filter { $0["passed"] as? Bool == true }.count
+        let failed = summary["failed"] as? Int ?? tests.filter { $0["passed"] as? Bool == false }.count
+        let review = summary["review"] as? Int ?? tests.filter { $0["review"] as? Bool == true }.count
+        let skipped = tests.filter { $0["skipped"] as? Bool == true }.count
+        let status: String
+        if failed > 0 {
+            status = "fail"
+        } else if review > 0 {
+            status = "review"
+        } else if total == 0 {
+            status = "empty"
+        } else {
+            status = "pass"
+        }
+
+        var topFailures: [[String: Any]] = []
+        for entry in tests {
+            guard entry["passed"] as? Bool == false,
+                  let tid = entry["id"] as? String,
+                  !tid.contains(".."), !tid.contains("/") else { continue }
+            let resultPath = runDir + "/" + tid + "/result.json"
+            guard let result = loadJSON(resultPath),
+                  let steps = result["steps"] as? [JSON] else { continue }
+            for (index, step) in steps.enumerated() where step["passed"] as? Bool == false {
+                var failure: [String: Any] = [
+                    "test": tid,
+                    "step": index + 1,
+                    "failure-type": step["failure-type"] as? String ?? "",
+                    "action": step["action"] as? String ?? "(verify-only)"
+                ]
+                if let verify = step["verify"] as? [Any] {
+                    if let missing = firstMissingVerify(verify) {
+                        failure["missing"] = missing
+                        failure["verify"] = missing
+                    }
+                    if let matched = firstMatchedVerify(verify) {
+                        failure["matched"] = matched
+                    }
+                }
+                if let screenshot = step["screenshot"] as? String {
+                    failure["screenshot"] = tid + "/" + screenshot
+                }
+                topFailures.append(failure)
+                break
+            }
+        }
+
+        return [
+            "status": status,
+            "run-id": URL(fileURLWithPath: runDir).lastPathComponent,
+            "started": run["started"] as? String ?? "",
+            "finished": run["finished"] as? String ?? "",
+            "device": [
+                "name": run["device-name"] as? String ?? "",
+                "runtime": run["device-runtime"] as? String ?? "",
+                "udid": run["device"] as? String ?? ""
+            ],
+            "counts": [
+                "total": total,
+                "passed": passed,
+                "failed": failed,
+                "review": review,
+                "skipped": skipped
+            ],
+            "top-failures": topFailures,
+            "report": "report.html"
+        ]
+    }
+
+    /// Write `<runDir>/summary.json` and return its path.
+    @discardableResult
+    public static func writeTestRunSummary(runDir: String) throws -> String {
+        let summary = try testRunSummary(runDir: runDir)
+        let data = try JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys])
+        let outPath = runDir + "/summary.json"
+        do {
+            try data.write(to: URL(fileURLWithPath: outPath))
         } catch {
             throw ReportError("Failed to write \(outPath): \(error.localizedDescription)")
         }
@@ -257,6 +370,26 @@ public enum ReportGenerator {
             let check = esc(v["check"] as? String ?? "")
             return "<div class=\"verify-check\"><span class=\"\(cls)\">\(icon)</span> \(check)</div>"
         }.joined(separator: "\n")
+    }
+
+    private static func firstMissingVerify(_ checks: [Any]) -> String? {
+        for item in checks {
+            guard let verify = item as? JSON else { continue }
+            if verify["found"] as? Bool == false {
+                return verify["check"] as? String
+            }
+        }
+        return nil
+    }
+
+    private static func firstMatchedVerify(_ checks: [Any]) -> String? {
+        for item in checks {
+            guard let verify = item as? JSON else { continue }
+            if verify["found"] as? Bool == true {
+                return verify["grep-match"] as? String ?? verify["check"] as? String
+            }
+        }
+        return nil
     }
 
     private static func renderMethods(_ methods: [Any]) -> String {
@@ -356,6 +489,7 @@ public enum ReportGenerator {
 
         let statusClass = status == "ok" ? "status-ok" : "status-issue"
         let statusLabel = status == "ok" ? "All OK" : "Issues Found"
+        let findingsHTML = renderFindingsHTML(findingsPath: findingsPath)
 
         var rows = ""
         for check in checks {
@@ -384,6 +518,9 @@ public enum ReportGenerator {
         .meta{color:#86868b;font-size:14px;margin-bottom:24px}
         .status{display:inline-block;padding:2px 10px;border-radius:12px;font-size:13px;font-weight:500;margin-left:8px}
         .status-ok{background:#d4edda;color:#155724}.status-issue{background:#f8d7da;color:#721c24}
+        .findings{background:#fff;border-radius:8px;padding:16px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+        .findings h2{font-size:17px;margin-bottom:10px}.findings ul{padding-left:20px}.findings li{margin:6px 0;font-size:14px;line-height:1.4}
+        .findings .empty{color:#155724}.findings .warn{color:#721c24}
         table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
         thead th{background:#f5f5f7;padding:12px 8px;font-size:13px;font-weight:600;text-align:center;border-bottom:1px solid #e5e5e5}
         thead th:first-child{text-align:left;padding-left:16px}
@@ -409,6 +546,7 @@ public enum ReportGenerator {
         <body>
         <h1>\(esc(title)) <span class="status \(statusClass)">\(statusLabel)</span></h1>
         <p class="meta">\(dirName)</p>
+        \(findingsHTML)
         <table><thead><tr><th>Check</th><th>iPhone Light</th><th>iPhone Dark</th><th>iPad Light</th><th>iPad Dark</th></tr></thead>
         <tbody>\(rows)</tbody></table>
         <div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" src="" alt=""></div>
@@ -417,6 +555,27 @@ public enum ReportGenerator {
         """
 
         return html
+    }
+
+    private static func renderFindingsHTML(findingsPath: String) -> String {
+        guard FileManager.default.fileExists(atPath: findingsPath) else {
+            return "<section class=\"findings\"><h2>Findings</h2><p class=\"warn\">findings.json is missing; status is fail-safe.</p></section>"
+        }
+        guard let data = FileManager.default.contents(atPath: findingsPath),
+              let parsed = try? JSONSerialization.jsonObject(with: data),
+              let findings = parsed as? [[String: Any]] else {
+            return "<section class=\"findings\"><h2>Findings</h2><p class=\"warn\">findings.json is invalid; status is fail-safe.</p></section>"
+        }
+        if findings.isEmpty {
+            return "<section class=\"findings\"><h2>Findings</h2><p class=\"empty\">No findings recorded.</p></section>"
+        }
+        let items = findings.map { finding -> String in
+            let check = esc(finding["check"] as? String ?? "finding")
+            let variant = esc(finding["variant"] as? String ?? "all variants")
+            let issue = esc(finding["issue"] as? String ?? "")
+            return "<li><strong>\(check)</strong> <span>\(variant)</span>: \(issue)</li>"
+        }.joined()
+        return "<section class=\"findings\"><h2>Findings</h2><ul>\(items)</ul></section>"
     }
 
     /// Generate the verify report and write it to `<verifyDir>/report.html`.

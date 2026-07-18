@@ -68,8 +68,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 ```text
 /sipi-test Crea una prueba para cambiar pestañas en la pantalla principal
 /sipi-test Crea una prueba que inicie sesión y abra ajustes
+/sipi-test Crea una prueba que ajuste el deslizador de brillo al 80% y active las notificaciones
 /sipi-test Crea una prueba desde la pantalla actual
 ```
+
+Las pruebas guardadas controlan toda la superficie de interacción —toques, interruptores, deslizadores, gestos, arrastres, pulsación larga, combinaciones de teclas y rotación— como pasos deterministas, no solo toques y deslizamientos.
 
 **Ejecutar pruebas:**
 ```text
@@ -126,13 +129,19 @@ SimPilot usa esta estructura estándar dentro de `.simpilot/`:
   runs/                        # Test run results (sipi-test)
     <run-id>/
       run.json                 # Run summary
+      summary.json             # Compact agent/CI summary
       report.html              # HTML report (open in browser)
       <test-id>/
         result.json            # Test result
+        trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
+        step-NNN.describe-before.json
+        step-NNN.describe-after.json
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      checks.json
+      findings.json
       report.html
 ```
 

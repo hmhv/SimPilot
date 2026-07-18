@@ -1,6 +1,12 @@
 # JSON File Reference
 
-Specification for JSON files under `.simpilot/`. For everyday usage, see the project README.
+Specification for SimPilot v2 files under `.simpilot/`.
+
+## Common Rules
+
+- Test ids use kebab-case.
+- Run/result timestamps use ISO 8601 with timezone offset.
+- Test steps use explicit objects. Natural-language action strings are not valid v2 specs.
 
 ## Directory Structure
 
@@ -9,222 +15,243 @@ Specification for JSON files under `.simpilot/`. For everyday usage, see the pro
   config.json
   tests/<id>.json
   suites/<name>.json
-  devices/<name>.json
   runs/<run-id>/
     run.json
+    summary.json
+    trace.jsonl
     report.html
     <test-id>/
       result.json
+      trace.jsonl
       step-NNN.png
-      recording.mp4
+      step-NNN.describe-before.json
+      step-NNN.describe-after.json
   verify/<timestamp>_<description>/
+    checks.json
+    findings.json
     report.html
 ```
 
-- `tests/`, `suites/`, and `devices/` are files intended for manual editing
-- `runs/` and `verify/` are typically listed in `.gitignore`
-- `verify/` output structure is defined in the sipi-verify skill (`../../sipi-verify/docs/report.md`)
-
-## Common Rules
-
-- Test IDs use kebab-case
-- `tests/<id>.json` must have an `id` field matching the filename
-- `suites/<name>.json` and `devices/<name>.json` must have names matching their filenames
-- Run/result timestamps use ISO 8601 with timezone offset
-  - Example: `2026-03-07T11:03:24-08:00`
-
-### Prohibited custom keys
-
-`sipi validate` rejects unknown keys, so do not invent fields. Use the keys defined in this document exactly. Common mistaken keys the validator rejects (with the correct key in parentheses):
-
-- `timestamp` (use `started` / `finished` in `run.json`)
-- `total_tests` (use `summary.total`)
-- `results` (use `tests` in `run.json`, `steps` in `result.json`)
-- `test_id` (use `id`)
-- `status` (use the `passed` / `review` / `skipped` booleans; the report derives the display status from the Status Display table)
-- `duration_seconds` (use `duration`)
-- `ios_version` (use `device-runtime`)
-- a display name in `device` — `device` is the UDID; the display name goes in `device-name`
-
-This file is the single authority for keys; `../docs/run.md` and `../SKILL.md` point here rather than re-listing them.
-
 ## config.json
-
-Path: `.simpilot/config.json`
 
 ```json
 {
   "app": "com.example.myapp",
-  "step-delay": 0.5,
-  "max-retries": 2,
-  "keep-runs": 20,
-  "build": {
-    "project": "MyApp.xcodeproj",
-    "scheme": "MyApp"
-  }
+  "step-delay": 0.3,
+  "max-retries": 1,
+  "build": { "project": "MyApp.xcodeproj", "scheme": "MyApp" }
 }
 ```
 
-### Fields
+Fields:
 
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `app` | string | Yes | - | Bundle ID of the app under test |
-| `step-delay` | number | No | `0.5` | Wait time in seconds between steps |
-| `max-retries` | int | No | `2` | Number of retries for a failing step |
-| `keep-runs` | int | No | `20` | Number of run results to retain |
-| `record-video` | bool | No | `false` | Set to `true` to record video |
-| `build` | object | No | - | Pre-run build configuration |
+| Field | Type | Required |
+|---|---|:---:|
+| `app` | string | Yes |
+| `step-delay` | number | No |
+| `max-retries` | int | No |
+| `keep-runs` | int | No |
+| `record-video` | bool | No |
+| `build` | object (`project` / `scheme` / `configuration`) | No |
 
-### build
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `project` | string | No | auto-detected | `.xcodeproj` or `.xcworkspace` |
-| `scheme` | string | No | auto-detected | Build scheme |
-| `configuration` | string | No | `"Debug"` | Build configuration |
-
-- If `build` is present, the app is built before running
-- Auto-detection order for `project`: `.xcworkspace` → `.xcodeproj` → `Package.swift`
-
+The harness (`run-test` / `run-suite`) consumes only `app`, `step-delay`, and `max-retries`. `build` is load-bearing for the build step (see `../../sipi-common/docs/build.md`; all sub-keys are optional, and an empty `"build": {}` enables auto-detection). `keep-runs` and `record-video` are accepted by `sipi validate` but are not acted on by the deterministic runner.
 
 ## tests/<id>.json
 
-Path: `.simpilot/tests/<id>.json`
-
-One file per test.
-
 ```json
 {
-  "id": "home-tab-switch",
-  "title": "Home Tab Switching",
-  "tags": ["smoke", "navigation"],
+  "id": "login-flow",
+  "title": "Login Flow",
+  "tags": ["smoke"],
   "steps": [
     {
-      "verify": "Home screen is displayed",
-      "target": {
-        "screen": "home",
-        "texts": ["Home"]
-      }
-    },
-    {
-      "action": "Tap the Settings tab",
-      "verify": "Settings screen appears",
-      "target": {
-        "role": "tab",
-        "ids": ["tab.settings"],
-        "texts": ["Settings"],
-        "screen": "root-tabs"
+      "id": "tap-sign-in",
+      "action": {
+        "type": "tap",
+        "selector": { "id": "auth.sign-in" }
       },
-      "hints": [
-        {
-          "device-class": "iphone",
-          "device-name": "iPhone 16 Pro",
-          "ios": "18.3",
-          "orientation": "portrait",
-          "method": "tap-id",
-          "value": "tab.settings",
-          "last-used": "2026-03-04T10:15:00-08:00"
-        }
-      ]
+      "verify": {
+        "contains": ["Dashboard"],
+        "absent": ["Sign In"]
+      },
+      "wait": 3
     }
-  ],
-  "created": "2026-03-04"
+  ]
 }
 ```
 
-### Fields
+Top-level fields:
 
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `id` | string | Yes | - | Test ID |
-| `title` | string | Yes | - | Display name |
-| `app` | string | No | `app` from `config.json` | Per-test override |
-| `tags` | string[] | No | `[]` | Tags |
-| `steps` | Step[] | Yes | - | Step definitions |
-| `preconditions` | string[] or object[] | No | `[]` | Preconditions before execution |
-| `created` | string | No | - | Creation date (`YYYY-MM-DD`) |
-| `updated` | string | No | - | Last updated date (`YYYY-MM-DD`) |
+| Field | Type | Required |
+|---|---|:---:|
+| `id` | string | Yes |
+| `title` | string | Yes |
+| `app` | string | No |
+| `tags` | string[] | No |
+| `steps` | Step[] | Yes |
+| `created` | string | No |
+| `updated` | string | No |
 
-### Step
+Step fields:
 
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `action` | string | No | - | Operation to perform |
-| `verify` | string | No | - | Verification condition |
-| `optional` | bool | No | `false` | Skip if the target is not found |
-| `note` | string | No | - | Additional notes |
-| `target` | object | No | - | Hints for locating the UI element |
-| `hints` | Hint[] | No | `[]` | Known-good interaction methods recorded from earlier runs |
+| Field | Type | Required |
+|---|---|:---:|
+| `id` | string | No |
+| `action` | Action | No* |
+| `verify` | Verify | No* |
+| `optional` | bool | No |
+| `wait` | number | No |
+| `note` | string | No |
 
-- Omitting both `action` and `verify` is not allowed
-- No `action` means verify-only
-- No `verify` means action-only
+\* At least one of `action` or `verify` is required.
 
-### preconditions
+## Action
 
-String form:
+`tap` with selector:
 
 ```json
-["Logged-out state is visible"]
+{ "type": "tap", "selector": { "id": "tab.settings" } }
 ```
 
-Object form:
+`tap` with coordinate:
 
 ```json
-[
-  {
-    "check": "Login screen is visible",
-    "grep": "login_button"
-  }
-]
+{ "type": "tap", "point": { "x": 0.5, "y": 0.8, "unit": "norm" } }
 ```
 
-| Field | Type | Required | Description |
-|---|---|:---:|---|
-| `check` | string | Yes* | Human-readable condition |
-| `description` | string | Yes* | Alias for `check` |
-| `grep` | string | No | Optional search hint |
+`type`:
 
-\* One of `check` or `description` is required.
+```json
+{ "type": "type", "text": "hello@example.com" }
+```
 
-### target
+`key`:
 
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `role` | string | No | - | UI element type |
-| `ids` | string[] | No | `[]` | Candidate accessibilityIdentifiers |
-| `texts` | string[] | No | `[]` | Candidate display strings |
-| `screen` | string | No | - | Screen name |
-| `within` | string | No | - | Search scope hint |
+```json
+{ "type": "key", "usage": 40 }
+```
 
-### Hint
+`button`:
 
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `device-class` | string | No | - | `iphone` / `ipad` etc. |
-| `device-name` | string | No | - | Device name at the time of success |
-| `ios` | string | No | - | iOS version at the time of success |
-| `orientation` | string | No | - | `portrait` / `landscape` |
-| `method` | string | Yes | - | `tap-id` / `tap-label` / `touch-coordinate` |
-| `value` | string | No | - | Value corresponding to the method |
-| `last-used` | string | No | - | Timestamp of last successful use |
-| `note` | string | No | - | Additional notes |
+```json
+{ "type": "button", "button": "home" }
+```
 
-- Only one hint is retained per environment variant
-- An environment variant is defined by `device-class` + `device-name` + `ios` + `orientation`
-- Updated only on successful verification
-- Retention priority: `tap-id` > `tap-label` > `touch-coordinate`
+`swipe`:
+
+```json
+{
+  "type": "swipe",
+  "start": { "x": 0.5, "y": 0.8, "unit": "norm" },
+  "end": { "x": 0.5, "y": 0.2, "unit": "norm" },
+  "duration": 0.3
+}
+```
+
+`wait`:
+
+```json
+{ "type": "wait", "duration": 1.0 }
+```
+
+### Extended actions
+
+These drive the richer `sipi` primitives as deterministic, saved test steps.
+
+`long-press` (selector or `point`; `duration` is the hold in seconds, default 0.5) — context menus, reorder handles:
+
+```json
+{ "type": "long-press", "selector": { "label": "Photo" }, "duration": 0.6 }
+```
+
+`slider` (requires `selector` with `id` or `label`, and `value` 0…100; optional `tolerance` normalized 0…1, default 0.02). Resolves the slider, drags the thumb, then polls AXValue — the step fails if it cannot reach the target:
+
+```json
+{ "type": "slider", "selector": { "label": "Volume", "element-type": "Slider" }, "value": 75 }
+```
+
+`gesture` (`preset` is one of `scroll-up`/`scroll-down`/`scroll-left`/`scroll-right`/`swipe-from-{left,right,top,bottom}-edge`; optional `duration`):
+
+```json
+{ "type": "gesture", "preset": "scroll-down" }
+```
+
+`drag` (interpolated point-to-point; `steps` 1…1000 default 60, `duration` default 0.6) — smoother/more reliable than `swipe`:
+
+```json
+{ "type": "drag", "start": { "x": 0.5, "y": 0.7 }, "end": { "x": 0.5, "y": 0.3 }, "steps": 60 }
+```
+
+`key-combo` (hold `modifiers` keycodes, press `key`, release in LIFO order) — e.g. Cmd+A (227,4):
+
+```json
+{ "type": "key-combo", "modifiers": [227], "key": 4 }
+```
+
+`key-sequence` (press+release each keycode in order; optional `delay` between presses, default 0.1s):
+
+```json
+{ "type": "key-sequence", "keycodes": [11, 8, 15, 15, 18], "delay": 0.1 }
+```
+
+`orientation` (`portrait` | `portrait-upside-down` | `landscape-left` | `landscape-right` | `face-up` | `face-down`):
+
+```json
+{ "type": "orientation", "orientation": "landscape-left" }
+```
+
+`crown` (Digital Crown rotation delta; Apple Watch simulators only):
+
+```json
+{ "type": "crown", "delta": 40 }
+```
+
+All keycodes are USB HID usage codes 0…255. `long-press`/`slider` selectors honor the same fast→deep resolution and `optional` skip as `tap`.
+
+## Selector
+
+Exactly one of:
+
+```json
+{ "id": "auth.sign-in" }
+{ "label": "Sign In" }
+{ "value": "42" }
+```
+
+Optional selector field:
+
+| Field | Type | Description |
+|---|---|---|
+| `element-type` | string | Restrict match to an accessibility type such as `Button` or `Switch` |
+
+## Point
+
+```json
+{ "x": 0.5, "y": 0.8, "unit": "norm" }
+{ "x": 200, "y": 700, "unit": "pixel" }
+```
+
+`unit` is either `norm` (normalized 0...1, the default) or `pixel` (logical screen points — the same coordinate space as describe-ui `frame`, not device/retina pixels). `sipi validate` rejects any other `unit`, `norm` coordinates outside 0...1, and negative `pixel` coordinates.
+
+## Verify
+
+```json
+{
+  "contains": ["Settings"],
+  "absent": ["Home only text"]
+}
+```
+
+- `contains`: every string must appear in `describe-ui`.
+- `absent`: every string must be absent from `describe-ui`.
+- Use strings that prove the new state, not static chrome.
 
 ## suites/<name>.json
-
-Path: `.simpilot/suites/<name>.json`
 
 ```json
 {
   "name": "regression",
-  "description": "Core regression test suite",
-  "tests": ["app-launch", "settings-toggle", "tab-navigation"],
+  "tests": ["app-launch", "settings-toggle"],
   "settings": {
     "stop-on-failure": false,
     "reset-between-tests": true
@@ -232,221 +259,87 @@ Path: `.simpilot/suites/<name>.json`
 }
 ```
 
-### Fields
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `name` | string | Yes | - | Suite name |
-| `description` | string | No | - | Description |
-| `tests` | string[] | Yes | - | Ordered list of test IDs to run |
-| `settings` | object | No | - | Execution settings |
-
-### settings
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `stop-on-failure` | bool | No | `false` | Stop the suite on first failure |
-| `reset-between-tests` | bool | No | `true` | Relaunch the app between tests |
-
-## devices/<name>.json
-
-Path: `.simpilot/devices/<name>.json`
-
-```json
-{
-  "name": "regression",
-  "description": "iOS 17 and 18 baseline regression devices",
-  "devices": [
-    { "model": "iPhone 16 Pro" },
-    { "model": "iPhone 15", "runtime": "iOS 17" },
-    { "runtime": "iOS 18.3" }
-  ]
-}
-```
-
-### Fields
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `name` | string | Yes | - | Device set name |
-| `description` | string | No | - | Description |
-| `devices` | Device[] | Yes | - | List of device conditions |
-
-### Device
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `model` | string | Conditional | - | Device model name |
-| `runtime` | string | Conditional | - | e.g. `iOS 18.3` |
-| `udid` | string | Conditional | - | Simulator UDID |
-
-- At least one of `model` / `runtime`, or `udid` is required
-- `model` alone uses the latest available runtime
-- `runtime` alone selects from booted or available devices
-- Specifying both `model` and `runtime` is an exact match
-- Shortened versions like `iOS 17` match the latest `17.x`
+Required: `name`, `tests` (array of test ids, each resolved to `<workspace>/tests/<id>.json`). Optional: `description`, `settings` (object with optional `stop-on-failure` (bool, default `false`) and `reset-between-tests` (bool, default `true`)). The file must be named `<name>.json` — `sipi validate` enforces that the filename matches `name`.
 
 ## result.json
 
-Path: `.simpilot/runs/<run-id>/<test-id>/result.json`
+The harness writes `result.json`; do not author it manually.
 
-```json
-{
-  "id": "home-tab-switch",
-  "passed": false,
-  "duration": 12.3,
-  "steps": [
-    {
-      "action": "Tap the Settings tab",
-      "passed": true,
-      "duration": 3.1,
-      "screenshot": "step-001.png",
-      "verify": [
-        { "check": "Settings screen appears", "found": true }
-      ]
-    },
-    {
-      "action": "Tap the Home tab",
-      "passed": false,
-      "duration": 2.0,
-      "screenshot": "step-002.png",
-      "verify": [
-        { "check": "Return to home screen", "found": false }
-      ],
-      "failure-type": "verify",
-      "describe-ui-snapshot": "AXLabel: Settings\nAXLabel: General\n...",
-      "attempted-methods": [
-        { "method": "tap-label", "value": "Home" },
-        { "method": "tap-id", "value": "tab.home" },
-        { "method": "touch-coordinate", "value": "40,832" }
-      ]
-    }
-  ]
-}
-```
+Important fields:
 
-### Fields
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `id` | string | Yes | - | Test ID |
-| `passed` | bool | Yes | - | Overall pass/fail result |
-| `review` | bool | No | `false` | Includes a step with deferred judgment |
-| `skipped` | bool | No | `false` | The entire test was skipped |
-| `duration` | number | Yes | - | Total elapsed time |
-| `video` | string | No | - | Video filename |
-| `steps` | ResultStep[] | Yes | - | List of step results (1:1 with test definition steps) |
-
-The `steps` array must have the same length as the test definition's `steps`. Every test step produces exactly one result entry, including optional steps that were skipped and verify-only steps.
-
-### ResultStep
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `action` | string | No | - | Operation that was performed |
-| `passed` | bool | Yes | - | Step pass/fail |
-| `duration` | number | No | - | Elapsed time |
-| `screenshot` | string | No | - | Screenshot filename (single post-step capture, e.g. `step-001.png`) |
-| `screenshots` | { before?: string, after?: string } | No | - | Before/after screenshot pair for visual diff steps. Use instead of `screenshot` when both a pre-action and post-action capture are needed |
-| `verify` | Verify[] | No | - | Verification results; always array format in result.json |
-| `note` | string | No | - | Additional notes |
-| `review` | bool | No | `false` | Judgment deferred |
-| `skipped` | bool | No | `false` | Optional step was skipped |
-| `failure-type` | string | No | - | `action` / `verify` / `timeout` |
-| `describe-ui-snapshot` | string | No | - | `describe-ui` output at failure (up to 50 lines) |
-| `attempted-methods` | AttemptedMethod[] | No | - | Interaction methods that were tried |
-
-### Verify
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `check` | string | Yes | - | Verification condition |
-| `found` | bool | Yes | - | Whether a match was found |
-| `grep-match` | string | No | - | The actual string that was matched. **Strongly recommended** for any passed check so the PASS is auditable — but it is not schema-required |
-
-### AttemptedMethod
-
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `method` | string | Yes | - | `tap-label` / `tap-id` / `touch-coordinate` / `input` |
-| `value` | string | No | - | Target value |
-
-### Status Display
-
-| Condition | Report Display |
+| Field | Type |
 |---|---|
-| `passed: true` | PASS |
-| `passed: true, review: true` | REVIEW |
-| `passed: false` | FAIL |
-| `passed: true, skipped: true` | SKIP |
+| `id` | string |
+| `passed` | bool |
+| `review` | bool |
+| `duration` | number |
+| `steps` | ResultStep[] |
 
-`review: true` is used only when the outcome cannot be determined as either success or failure.
+Each result step may include:
 
-## run.json
+- `passed`
+- `duration`
+- `action`
+- `screenshot`
+- `screenshots.before`
+- `screenshots.after`
+- `verify`
+- `attempted-methods`
+- `failure-type` — `action` (selector/element resolution failure, or a thrown step error) or `verify` (a verify row not satisfied after the wait deadline, or a verify-only step that failed). `sipi validate` also accepts `timeout`, but the current harness never emits it — a wait-deadline verify miss is reported as `verify`.
+- `describe-ui-snapshot`
+- `skipped`
+- `note`
 
-Path: `.simpilot/runs/<run-id>/run.json`
+## summary.json
+
+`summary.json` is the compact result for agents and CI:
 
 ```json
 {
-  "started": "2026-03-02T14:30:22-08:00",
-  "finished": "2026-03-02T14:31:05-08:00",
-  "device": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
-  "device-name": "iPhone 16 Pro",
-  "device-runtime": "iOS 18.3",
-  "session": "2026-03-02_143022",
-  "profile": "regression",
-  "commit": "abc1234",
-  "tests": [
-    { "id": "app-launch", "passed": true, "duration": 3.2 },
-    { "id": "settings-toggle", "passed": true, "review": true, "duration": 5.4 },
-    { "id": "tab-navigation", "passed": false, "duration": 8.1 }
-  ],
-  "summary": {
-    "total": 3,
-    "passed": 2,
+  "status": "fail",
+  "run-id": "2026-06-26_104522_iphone16_abc1234",
+  "started": "2026-06-26T10:45:22.123+09:00",
+  "finished": "2026-06-26T10:46:12.456+09:00",
+  "device": { "name": "iPhone 16 Pro", "runtime": "iOS 26.0", "udid": "..." },
+  "counts": {
+    "total": 1,
+    "passed": 0,
     "failed": 1,
-    "review": 1
-  }
+    "review": 0,
+    "skipped": 0
+  },
+  "top-failures": [
+    {
+      "test": "login-flow",
+      "step": 1,
+      "failure-type": "verify",
+      "action": "tap auth.sign-in",
+      "missing": "contains: Dashboard",
+      "screenshot": "login-flow/step-001.png"
+    }
+  ],
+  "report": "report.html"
 }
 ```
 
-### Fields
+`status` is the gate field (`pass` | `fail` | `review` | `empty`; see [Status Display](#status-display)). `started`, `finished` (ISO 8601 with offset), `device`, and `report` are always present. In each `top-failures` entry `action` is always present (defaults to `(verify-only)` when the step has no action); `missing`/`verify`, `matched`, and `screenshot` appear only when applicable.
 
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `started` | string | Yes | - | Run start timestamp |
-| `finished` | string | No | - | Run end timestamp |
-| `device` | string | Yes | - | Simulator UDID |
-| `device-name` | string | No | - | Device name |
-| `device-runtime` | string | No | - | iOS version |
-| `session` | string | No | - | Session ID |
-| `suite` | string | No | - | Suite name used |
-| `profile` | string | No | - | Device set name used |
-| `commit` | string | No | - | Abbreviated git commit from `git rev-parse --short` (>= 7 chars; `-dirty` suffix appended when the working tree is dirty) |
-| `build-error` | string | No | - | Build failure summary |
-| `tests` | TestEntry[] | Yes | - | Summary of test results |
-| `summary` | Summary | Yes | - | Aggregated counts |
+## Status Display
 
-### TestEntry
+Two related but distinct status mappings (the badge is per step/test; `status` is the run-level gate).
 
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `id` | string | Yes | - | Test ID |
-| `passed` | bool | Yes | - | Test pass/fail |
-| `review` | bool | No | `false` | Includes a REVIEW result |
-| `skipped` | bool | No | `false` | Test was skipped |
-| `duration` | number | Yes | - | Elapsed time |
+**Per-step / per-test badge** (evaluated in this order):
 
-### Summary
+1. `passed && skipped` → **SKIP**
+2. else `!passed` → **FAIL**
+3. else `review` → **REVIEW**
+4. else → **PASS**
 
-| Field | Type | Required | Default | Description |
-|---|---|:---:|---|---|
-| `total` | int | Yes | - | Total count |
-| `passed` | int | Yes | - | Number passed |
-| `failed` | int | Yes | - | Number failed |
-| `review` | int | No | `0` | Number in REVIEW |
+**Run-level `summary.json` `status`** (evaluated in this order — ordering matters: a failed step is `fail` even when a step is also marked review):
 
-## Type Conventions
+1. `failed > 0` → `fail`
+2. else `review > 0` → `review`
+3. else `total == 0` → `empty`
+4. else → `pass`
 
-- `int` and `number` in this document: JSON has a single `number` type. `int` indicates values that should be whole numbers; `number` allows decimals
-- `bool` fields (`passed`, `review`, `skipped`, `optional`, etc.) must be JSON booleans (`true`/`false`), not strings
+(The verify skill's report uses a separate "All OK" / "Issues Found" pill driven by `findings.json`; that is a different command and is not this table — see `../../sipi-verify/docs/report.md`.)

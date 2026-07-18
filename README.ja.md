@@ -68,8 +68,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 ```text
 /sipi-test ホーム画面のタブ切り替えテストを作成して
 /sipi-test ログインして設定を開くテストを作成して
+/sipi-test 明るさスライダーを80%に設定して通知をトグルするテストを作成して
 /sipi-test 今の画面からテストを作成して
 ```
+
+保存したテストは、タップやスワイプだけでなく、タップ・トグル・スライダー・ジェスチャー・ドラッグ・長押し・キー操作・回転まで決定論的なステップとして実行します。
 
 **テスト実行:**
 ```text
@@ -126,13 +129,19 @@ SimPilot は `.simpilot/` 配下に次の構成を使います。
   runs/                        # Test run results (sipi-test)
     <run-id>/
       run.json                 # Run summary
+      summary.json             # Compact agent/CI summary
       report.html              # HTML report (open in browser)
       <test-id>/
         result.json            # Test result
+        trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
+        step-NNN.describe-before.json
+        step-NNN.describe-after.json
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      checks.json
+      findings.json
       report.html
 ```
 

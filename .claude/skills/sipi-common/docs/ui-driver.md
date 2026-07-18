@@ -28,8 +28,18 @@ native_button()      { "$SIPI" button "$UDID" "$1"; }
 native_key()         { "$SIPI" key "$1" "$UDID"; }
 native_orientation() { "$SIPI" orientation "$UDID" --set "$1"; }
 native_screenshot()  { "$SIPI" screenshot "$UDID" "$1"; }
+native_type()        { "$SIPI" type "$UDID" "$1"; }
+native_drag()        { "$SIPI" drag "$UDID" --norm --start-x "$1" --start-y "$2" --end-x "$3" --end-y "$4"; }
+native_gesture()     { "$SIPI" gesture "$1" "$UDID"; }   # preset: scroll-up/down/left/right, swipe-from-*-edge
+
+# Frame-derived coordinates are logical points (pixel space) — use the --pixel wrappers, matching ui_tap_xy.
+ui_touch_xy()        { "$SIPI" touch "$UDID" --pixel -x "$1" -y "$2" "${@:3}"; }              # add --down/--up/--delay as needed
+ui_long_press_xy()   { "$SIPI" touch "$UDID" --pixel -x "$1" -y "$2" --down --up --delay "${3:-1.5}"; }
+ui_describe_point()  { "$SIPI" describe-point "$UDID" --pixel -x "$1" -y "$2"; }
 ```
 
 Use `ui_describe`, `ui_tap_label`, `ui_tap_id`, `ui_key`, and `ui_screenshot` as the default path. They drive the native `sipi` binary, which sees both the frontmost app tree and System UI (PhotosPicker, Share Sheet, SFSafariViewController). Pass `ui_describe --expect "Text"` when a subsequent grep is looking for specific text; this signals `sipi describe-ui` to auto-trigger its deeper grid pass when the fast frontmost tree does not contain the expected text.
 
-Use `native_tap`, `native_swipe`, `native_button`, `native_key`, `native_orientation`, or `native_screenshot` when a step already has normalized coordinates, needs high-throughput simulator input, or needs Simulator-only operations.
+Use `native_tap`, `native_swipe`, `native_drag`, `native_gesture`, `native_button`, `native_key`, `native_type`, `native_orientation`, or `native_screenshot` when a step already has normalized coordinates, needs high-throughput simulator input, or needs Simulator-only operations.
+
+Use the `--pixel` helpers — `ui_touch_xy`, `ui_long_press_xy`, and `ui_describe_point` — with **frame-derived** coordinates (the logical points `describe-ui` reports in `frame`, the same space as `ui_tap_xy`). `ui_describe_point` returns a single-element array (or `[]` when nothing is hit) and `--pixel` is bounds-checked, so it errors cleanly instead of mis-targeting — use it to confirm a computed coordinate before a blind `ui_touch_xy`. (Do not feed frame-derived points to a `--norm` wrapper; the 0…1 bounds check will hard-error.)

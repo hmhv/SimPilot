@@ -14,14 +14,14 @@
 
 | Problem | Solution |
 |---------|----------|
-| tap has no effect / element not found | Check with `ui_describe` → use `ui_tap_id` or coordinates. Close any overlays first |
+| tap has no effect / element not found | Check with `ui_describe` → use `ui_tap_id` or coordinates. Close any overlays first. Before a blind coordinate tap, confirm what is actually at the spot with `ui_describe_point` (`sipi describe-point --pixel`) |
 | tap succeeds but no state change | Toggle/Menu/DisclosureGroup → use the correct method from `patterns.md` |
 | Screenshot is black | Verify Booted state. Locked → `native_button home` (or `sipi button $UDID home`). Still launching → add sleep |
 | App crashed | Check home screen with `ui_describe` → relaunch with `xcrun simctl launch $UDID $BUNDLE_ID` → mark the step FAIL |
 | Keyboard not shown / type has no effect | Tap by coordinate to focus. Non-US characters via clipboard |
 | Cannot interact with alert | Verify labels with `ui_describe`. Add sleep 0.5. Fall back to coordinates if not visible |
 | Scroll position off | Use `sipi swipe` (or `native_swipe`) to control amount. Verify with `ui_describe` after scrolling |
-| hints failing every time | Check that environment variants (device-class / device-name / ios / orientation) are correct. Update to a stronger method on success |
+| v2 selector doesn't resolve | Prefer `selector.id`; the runner tries the fast AX tree, then the deep grid. Confirm the id/label with `sipi describe-ui`. `sipi validate` and `run-test` reject a selector that is not exactly one of id / label / value |
 
 ## Build
 
@@ -36,7 +36,7 @@
 
 | Problem | Solution |
 |---------|----------|
-| Execution stalls midway | `&&` chaining is prohibited (see `../../sipi-test/docs/run.md`). Use `;` or `\|\|` |
+| Execution stalls midway | In a single ad-hoc Bash call, avoid `&&` chaining of `sipi` commands — one non-zero exit short-circuits the rest. Use `;` or `\|\|` so later commands still run. (Saved tests do not have this issue: `sipi run-test`/`run-suite` own the step loop.) |
 | result.json missing | Verify that each test writes immediately upon completion |
 | iPad launches slowly | iPhone `sleep 2` → iPad `sleep 4` |
 | Section header uppercase | Use `grep -qi "pinned"` for case-insensitive matching |

@@ -19,7 +19,7 @@ Judge whether each screen is semantically correct for assistive technology users
 1. Confirm preflight is complete.
 2. Ask the app to navigate screen by screen or run the user-provided flow.
 3. For each screen:
-   - run `ui_describe`
+   - run `ui_describe --expect "<text you expect on this screen>"` so the fast tree auto-escalates to the deep grid pass (surfacing System UI) only when the expected text is missing
    - capture `ui_screenshot`
    - inspect element roles, labels, identifiers, and ordering
 4. When the issue is unclear from simulator output alone, inspect the relevant source code.
@@ -83,7 +83,7 @@ When tab items cannot be tapped by label, use coordinate-based tapping. See `../
 
 ## System UI scope
 
-The following system-provided UI runs in a separate process. It is inspectable with `ui_describe` when the native bridge is available, but it is not app-owned UI. Do not report missing labels as app accessibility defects unless the app supplies or configures that content:
+The following system-provided UI runs in a separate process. It is only surfaced by the deep grid pass (`ui_describe --deep`); the default fast `ui_describe` shows the frontmost app tree only. To check for a specific system control without the full deep cost, use `ui_describe --expect "<text>"`, which auto-triggers the deep pass on a miss. Even when surfaced, it is not app-owned UI. Do not report missing labels as app accessibility defects unless the app supplies or configures that content:
 
 - **ColorPicker** - system color picker sheet
 - **PhotosPicker** - system photo library picker

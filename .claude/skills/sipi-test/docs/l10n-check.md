@@ -13,7 +13,7 @@ Judge whether each localized UI is semantically correct: the wording matches the
    - switch simulator language in `Settings.app`
    - relaunch the app
    - navigate to each target screen
-   - run `ui_describe`
+   - run `ui_describe` (add `--expect "<expected localized string>"` to deterministically confirm a translation rendered — presence only; it does not assert absence or change the exit code, so keep the manual scan in step 3 for the untranslated/clipped checks)
    - save `ui_screenshot`
 3. Compare locale outputs for:
    - untranslated labels
