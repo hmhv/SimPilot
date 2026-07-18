@@ -1,6 +1,6 @@
 ---
 name: sipi-test
-description: Regression testing and quality audits on the iOS Simulator. Handles test creation, execution, suite management, accessibility audit, appearance verification, and localization check. Use for "run the regression suite", "create a test for login", "audit accessibility", "check dark mode", "verify the Japanese localization", etc. Also use when the user asks to audit accessibility, verify translations, or compare light/dark mode — even if they don't mention "test" explicitly. This produces repeatable, saved JSON tests/suites you can re-run; for a one-off check right after a code change, use sipi-verify instead.
+description: Regression testing and quality audits on the iOS Simulator. Creates and runs saved JSON tests for UI flows, error messages, offline/timeouts, permissions, deep links, push notifications, location, accessibility, appearance, and localization. Use for requests such as "run the regression suite", "test the network error UI", "deny Photos access", "open this deep link", "send a push", "audit accessibility", "check dark mode", or "verify the Japanese localization". Use sipi-verify instead for a one-off post-change visual check.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
@@ -17,6 +17,7 @@ This skill **creates tests based on facts observed and confirmed directly on the
 - Build v2 specs from operations that actually succeeded on the real screen. Checking source code and adding `.accessibilityIdentifier()` are supplementary tools to stabilize real-screen verification — not the primary approach (procedure: `docs/create.md`)
 - Judge whether UI state is *meaningfully* correct for the action taken, not just "visible". Use a skeptical mindset — expose weaknesses, do not force a PASS (procedure: `docs/run.md`)
 - When the root cause is in app code, propose and apply the smallest useful source change per `references/test-fix-policy.md`
+- Use real simulator controls for permissions, links, pushes, location, appearance, and configured network conditions; read `references/adverse-state-testing.md` for adverse/error-state tests
 - **The value of a test is not "making it pass" but "being able to trust results when re-run under the same rules."** A FAIL that correctly catches a regression is more valuable than a forced PASS that hides one
 
 ## Run Integrity (hard rules)
@@ -94,6 +95,7 @@ Device selection and suite execution are handled by `sipi run-test` / `sipi run-
 | File | When |
 |------|------|
 | `references/test-fix-policy.md` | Any source-code change for test stability |
+| `references/adverse-state-testing.md` | Network errors, offline/timeout UI, permissions, deep links, push, location, and system-state controls |
 | `references/a11y-best-practices.md` | Accessibility fixes |
 | `references/appearance-fix-policy.md` | Appearance / Dark Mode fixes |
 | `references/l10n-fix-policy.md` | Localization fixes |

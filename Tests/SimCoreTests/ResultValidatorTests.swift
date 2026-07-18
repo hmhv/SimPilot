@@ -616,4 +616,63 @@ final class ResultValidatorTests: XCTestCase {
         XCTAssertFalse(outcome.isValid)
         XCTAssertTrue(outcome.errors.contains { $0.contains("max-retries must be between 0 and 10") }, "\(outcome.errors)")
     }
+
+    // MARK: - Simulator test controls and network provider
+
+    func testSimulatorControlActionsValidate() throws {
+        let outcome = try validateSpec(id: "simulator-controls", steps: [
+            ["action": ["type": "open-url", "url": "myapp://settings"]],
+            ["action": ["type": "privacy", "operation": "reset", "service": "photos"]],
+            ["action": ["type": "push", "payload": ["aps": ["alert": "Hello"]]]],
+            ["action": ["type": "location", "operation": "set", "latitude": 35.6812, "longitude": 139.7671]],
+            ["action": ["type": "location", "operation": "clear"]],
+            ["action": ["type": "appearance", "appearance": "dark"]],
+            ["action": ["type": "content-size", "content-size": "accessibility-large"]],
+            ["action": ["type": "increase-contrast", "enabled": true]],
+            ["action": ["type": "status-bar", "operation": "override", "arguments": ["--time", "9:41"]]],
+            ["action": ["type": "status-bar", "operation": "clear"]],
+            ["action": [
+                "type": "launch",
+                "arguments": ["--fixture"],
+                "environment": ["API_MODE": "fixture"]
+            ]],
+            ["action": ["type": "terminate"]],
+            ["action": ["type": "network-condition", "operation": "apply", "profile": "packet-loss-100"]],
+            ["action": ["type": "network-condition", "operation": "clear"]]
+        ])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testInvalidSimulatorControlShapesAreRejected() throws {
+        let outcome = try validateSpec(id: "invalid-controls", steps: [
+            ["action": ["type": "open-url", "url": "not a url"]],
+            ["action": ["type": "push", "payload": ["message": "missing aps"]]],
+            ["action": ["type": "location", "operation": "set", "latitude": 91, "longitude": 0]],
+            ["action": ["type": "appearance", "appearance": "sepia"]],
+            ["action": ["type": "network-condition", "operation": "apply", "profile": "100% Loss"]],
+            ["action": ["type": "launch", "environment": ["SIMCTL_CHILD_API": "bad"]]]
+        ])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("absolute url") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("aps object") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("latitude") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("appearance") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("profile") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("environment key") }, "\(outcome.errors)")
+    }
+
+    func testNetworkConditionProviderMustBeAbsolute() throws {
+        let valid = try configOutcome([
+            "app": "com.x",
+            "network-condition-provider": "/usr/local/bin/sipi-network-provider"
+        ], "provider-absolute")
+        XCTAssertTrue(valid.isValid, "\(valid.errors)")
+
+        let invalid = try configOutcome([
+            "app": "com.x",
+            "network-condition-provider": "./provider"
+        ], "provider-relative")
+        XCTAssertFalse(invalid.isValid)
+        XCTAssertTrue(invalid.errors.contains { $0.contains("absolute path") }, "\(invalid.errors)")
+    }
 }

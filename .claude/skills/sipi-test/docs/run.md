@@ -24,6 +24,12 @@ Useful flags:
 - `--retries <n>`: override retry count
 - `--no-launch`: run from current app state
 
+Network profiles require a configured provider. Check it before a run that uses `network-condition`:
+
+```bash
+sipi network-condition status
+```
+
 ## Harness Semantics
 
 For each step, the harness:
@@ -38,6 +44,8 @@ For each step, the harness:
 8. Appends `trace.jsonl`.
 
 `trace.jsonl` is appended live throughout the run (run-start, per-step events, run-finish). After the run completes, the harness writes the final `run.json`, then generates `summary.json` and `report.html`.
+
+The harness also restores temporary simulator state it owns: appearance, content size, Increase Contrast, simulated location, status-bar overrides, and active provider-backed network conditions. In a suite with `reset-between-tests` enabled (the default), this state is restored between tests as well, so one test does not leak appearance/Dynamic Type/location/network state into the next; a between-test restore failure is traced and the run continues, then retried by the strict end-of-run cleanup. Privacy authorization is not automatically restored because simctl cannot safely read the previous state.
 
 ## Failure Rules
 

@@ -20,11 +20,44 @@ private struct HarnessConfig: Decodable {
     var app: String?
     var stepDelay: Double?
     var maxRetries: Int?
+    var networkConditionProvider: String?
 
     enum CodingKeys: String, CodingKey {
         case app
         case stepDelay = "step-delay"
         case maxRetries = "max-retries"
+        case networkConditionProvider = "network-condition-provider"
+    }
+}
+
+private enum HarnessJSONValue: Codable {
+    case object([String: HarnessJSONValue])
+    case array([HarnessJSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([HarnessJSONValue].self) { self = .array(value) }
+        else { self = .object(try container.decode([String: HarnessJSONValue].self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
     }
 }
 
@@ -66,6 +99,28 @@ private struct HarnessAction: Decodable {
     var steps: Int?           // drag interpolated move count
     var orientation: String?  // orientation set name
     var delta: Double?        // crown rotation delta
+    // Simulator test controls.
+    var url: String?              // open-url
+    var operation: String?        // privacy/location/status-bar/network-condition
+    var service: String?          // privacy service
+    var bundleID: String?         // per-action app override
+    var latitude: Double?         // location set
+    var longitude: Double?        // location set
+    var appearance: String?       // appearance light/dark
+    var contentSize: String?      // Dynamic Type category
+    var enabled: Bool?            // increase-contrast
+    var payload: HarnessJSONValue? // push payload
+    var profile: String?          // network-condition profile
+    var arguments: [String]?      // launch argv or status-bar override args
+    var environment: [String: String]? // launch environment (without SIMCTL_CHILD_)
+
+    enum CodingKeys: String, CodingKey {
+        case type, selector, point, text, usage, button, start, end, duration
+        case value, tolerance, preset, modifiers, key, keycodes, delay, steps, orientation, delta
+        case url, operation, service, latitude, longitude, appearance, enabled, payload, profile, arguments, environment
+        case bundleID = "bundle-id"
+        case contentSize = "content-size"
+    }
 }
 
 private struct HarnessSelector: Decodable {
@@ -177,6 +232,13 @@ private final class HarnessRunner {
     private let runTrace: TraceWriter
     private let started = Date()
     private var runEntries: [[String: Any]] = []
+    private var initialAppearance: String?
+    private var initialContentSize: String?
+    private var initialIncreaseContrast: String?
+    private var locationWasModified = false
+    private var statusBarWasModified = false
+    private var activeNetworkConditionBundleID: String?
+    private var environmentWasCleaned = false
 
     init(options: HarnessRunOptions) throws {
         self.options = options
@@ -226,6 +288,11 @@ private final class HarnessRunner {
     }
 
     func run(tests: [HarnessTest]) throws -> String {
+        defer {
+            if !environmentWasCleaned {
+                try? cleanupEnvironment()
+            }
+        }
         try writeRunJSON(finished: nil)
 
         for test in tests {
@@ -238,15 +305,109 @@ private final class HarnessRunner {
                 "duration": result.duration
             ].filterJSON())
             try writeRunJSON(finished: nil)
+            // Restore harness-owned simulator state between tests so it starts
+            // each test from the captured baseline. Best-effort: a failure is
+            // traced and the run continues; the strict end-of-run cleanup retries
+            // and surfaces any residue.
+            if options.resetBetweenTests {
+                resetSimulatorStateBetweenTests()
+            }
             if options.stopOnFailure && !result.passed {
                 break
             }
         }
 
+        // Finalize the run report before cleanup so a cleanup failure (which is
+        // intentionally surfaced as a throw) can never discard run.json,
+        // summary.json, or report.html.
         try writeRunJSON(finished: Date())
         try ReportGenerator.writeTestReport(runDir: runDir)
         runTrace.event("run-finish", fields: ["run-dir": runDir])
+        try cleanupEnvironment()
+        environmentWasCleaned = true
         return runDir
+    }
+
+    /// Restore simulator-wide state that the harness owns back to the values it
+    /// captured before the first mutation, clearing the associated tracking as
+    /// each item succeeds. Permission changes are intentionally not restored
+    /// because simctl has no safe readback for their prior authorization state.
+    /// Returns the list of restore failures (empty on full success) so callers
+    /// decide whether to surface them as a throw or record and continue.
+    @discardableResult
+    private func restoreSimulatorState() -> [String] {
+        var failures: [String] = []
+
+        if let activeNetworkConditionBundleID {
+            do {
+                let provider = try NetworkConditionProvider.resolve(
+                    configuredPath: config.networkConditionProvider
+                )
+                try provider.clear(udid: udid, bundleID: activeNetworkConditionBundleID)
+                self.activeNetworkConditionBundleID = nil
+                runTrace.event("network-condition-clear", fields: ["automatic": true])
+            } catch {
+                failures.append("network condition: \(error)")
+            }
+        }
+
+        if locationWasModified {
+            do { try SimShell.clearLocation(udid: udid); locationWasModified = false }
+            catch { failures.append("location: \(error)") }
+        }
+        if statusBarWasModified {
+            do { try SimShell.statusBarClear(udid: udid); statusBarWasModified = false }
+            catch { failures.append("status bar: \(error)") }
+        }
+        if let initialAppearance, ["light", "dark"].contains(initialAppearance) {
+            do { try SimShell.setAppearance(udid: udid, appearance: initialAppearance); self.initialAppearance = nil }
+            catch { failures.append("appearance: \(error)") }
+        }
+        if let initialContentSize,
+           !["unknown", "unsupported"].contains(initialContentSize) {
+            do { try SimShell.setContentSize(udid: udid, contentSize: initialContentSize); self.initialContentSize = nil }
+            catch { failures.append("content size: \(error)") }
+        }
+        if let initialIncreaseContrast,
+           ["enabled", "disabled"].contains(initialIncreaseContrast) {
+            do {
+                try SimShell.setIncreaseContrast(
+                    udid: udid,
+                    enabled: initialIncreaseContrast == "enabled"
+                )
+                self.initialIncreaseContrast = nil
+            } catch {
+                failures.append("increase contrast: \(error)")
+            }
+        }
+
+        return failures
+    }
+
+    /// Strict, end-of-run restore. A residual failure is surfaced as a throw so a
+    /// leaked condition (e.g. an active network profile) is never silently
+    /// ignored — even when every test passed.
+    private func cleanupEnvironment() throws {
+        let failures = restoreSimulatorState()
+        if !failures.isEmpty {
+            runTrace.event("environment-cleanup-failed", fields: ["failures": failures])
+            throw HarnessError("Environment cleanup failed: " + failures.joined(separator: "; "))
+        }
+        runTrace.event("environment-cleanup", fields: ["succeeded": true])
+    }
+
+    /// Best-effort restore between tests when `reset-between-tests` is enabled, so
+    /// state a test set (appearance, Dynamic Type, location, status bar, network
+    /// condition) does not leak into the next test. A failure is recorded and the
+    /// suite continues; the residual tracking is retried and surfaced by the
+    /// strict end-of-run cleanup.
+    private func resetSimulatorStateBetweenTests() {
+        let failures = restoreSimulatorState()
+        if failures.isEmpty {
+            runTrace.event("reset-between-tests", fields: ["restored": true])
+        } else {
+            runTrace.event("reset-between-tests-failed", fields: ["failures": failures])
+        }
     }
 
     private struct TestResult {
@@ -504,6 +665,154 @@ private final class HarnessRunner {
             }
             try driver.setOrientation(orientation, udid: udid)
             return ["method": "input", "value": "orientation:\(name)"]
+
+        case "open-url":
+            guard let url = action.url, URL(string: url)?.scheme != nil else {
+                throw HarnessError("open-url action requires an absolute URL.")
+            }
+            try SimShell.openURL(udid: udid, url: url)
+            return ["method": "simctl", "value": "open-url:\(url)"]
+
+        case "privacy":
+            guard let operation = action.operation,
+                  ["grant", "revoke", "reset"].contains(operation),
+                  let service = action.service, !service.isEmpty else {
+                throw HarnessError("privacy action requires operation (grant/revoke/reset) and service.")
+            }
+            let targetBundleID = action.bundleID ?? bundleID
+            switch operation {
+            case "grant": try SimShell.grantPrivacy(udid: udid, service: service, bundleID: targetBundleID)
+            case "revoke": try SimShell.revokePrivacy(udid: udid, service: service, bundleID: targetBundleID)
+            default:
+                try SimShell.resetPrivacy(
+                    udid: udid,
+                    service: service,
+                    bundleID: targetBundleID
+                )
+            }
+            return ["method": "simctl", "value": "privacy:\(operation):\(service)"]
+
+        case "push":
+            guard let payload = action.payload else {
+                throw HarnessError("push action requires an inline payload object.")
+            }
+            let payloadData = try JSONEncoder().encode(payload)
+            guard payloadData.count <= 4096 else {
+                throw HarnessError("push payload must not exceed 4096 bytes.")
+            }
+            try SimShell.push(
+                udid: udid,
+                bundleID: action.bundleID ?? bundleID,
+                payload: payloadData
+            )
+            return ["method": "simctl", "value": "push"]
+
+        case "location":
+            guard let operation = action.operation, ["set", "clear"].contains(operation) else {
+                throw HarnessError("location action requires operation set or clear.")
+            }
+            if operation == "clear" {
+                try SimShell.clearLocation(udid: udid)
+                locationWasModified = false
+            } else {
+                guard let latitude = action.latitude, let longitude = action.longitude else {
+                    throw HarnessError("location set requires latitude and longitude.")
+                }
+                try SimShell.setLocation(udid: udid, latitude: latitude, longitude: longitude)
+                locationWasModified = true
+            }
+            return ["method": "simctl", "value": "location:\(operation)"]
+
+        case "appearance":
+            guard let appearance = action.appearance, ["light", "dark"].contains(appearance) else {
+                throw HarnessError("appearance action requires light or dark.")
+            }
+            if initialAppearance == nil { initialAppearance = try SimShell.appearance(udid: udid) }
+            try SimShell.setAppearance(udid: udid, appearance: appearance)
+            return ["method": "simctl", "value": "appearance:\(appearance)"]
+
+        case "content-size":
+            guard let contentSize = action.contentSize, !contentSize.isEmpty else {
+                throw HarnessError("content-size action requires content-size.")
+            }
+            if initialContentSize == nil { initialContentSize = try SimShell.contentSize(udid: udid) }
+            try SimShell.setContentSize(udid: udid, contentSize: contentSize)
+            return ["method": "simctl", "value": "content-size:\(contentSize)"]
+
+        case "increase-contrast":
+            guard let enabled = action.enabled else {
+                throw HarnessError("increase-contrast action requires enabled.")
+            }
+            if initialIncreaseContrast == nil {
+                initialIncreaseContrast = try SimShell.increaseContrast(udid: udid)
+            }
+            try SimShell.setIncreaseContrast(udid: udid, enabled: enabled)
+            return ["method": "simctl", "value": "increase-contrast:\(enabled)"]
+
+        case "status-bar":
+            guard let operation = action.operation, ["override", "clear"].contains(operation) else {
+                throw HarnessError("status-bar action requires operation override or clear.")
+            }
+            if operation == "clear" {
+                try SimShell.statusBarClear(udid: udid)
+                statusBarWasModified = false
+            } else {
+                guard let arguments = action.arguments, !arguments.isEmpty else {
+                    throw HarnessError("status-bar override requires arguments.")
+                }
+                try SimShell.statusBarOverride(udid: udid, arguments: arguments)
+                statusBarWasModified = true
+            }
+            return ["method": "simctl", "value": "status-bar:\(operation)"]
+
+        case "launch":
+            let targetBundleID = action.bundleID ?? bundleID
+            _ = try SimShell.launch(
+                udid: udid,
+                bundleID: targetBundleID,
+                arguments: action.arguments ?? [],
+                environment: action.environment ?? [:],
+                terminateRunning: true
+            )
+            return ["method": "simctl", "value": "launch:\(targetBundleID)"]
+
+        case "terminate":
+            let targetBundleID = action.bundleID ?? bundleID
+            try SimShell.terminate(udid: udid, bundleID: targetBundleID)
+            return ["method": "simctl", "value": "terminate:\(targetBundleID)"]
+
+        case "network-condition":
+            guard let operation = action.operation, ["apply", "clear"].contains(operation) else {
+                throw HarnessError("network-condition action requires operation apply or clear.")
+            }
+            let targetBundleID = action.bundleID ?? bundleID
+            let provider = try NetworkConditionProvider.resolve(
+                configuredPath: config.networkConditionProvider
+            )
+            if operation == "clear" {
+                try provider.clear(udid: udid, bundleID: targetBundleID)
+                // Only drop tracking when this clear targets the bundle that
+                // actually holds the active condition; clearing a different
+                // bundle must not skip end-of-run cleanup of the real one.
+                if activeNetworkConditionBundleID == targetBundleID {
+                    activeNetworkConditionBundleID = nil
+                }
+                runTrace.event("network-condition-clear", fields: ["bundle-id": targetBundleID])
+            } else {
+                guard let profile = action.profile else {
+                    throw HarnessError("network-condition apply requires profile.")
+                }
+                if let activeNetworkConditionBundleID,
+                   activeNetworkConditionBundleID != targetBundleID {
+                    try provider.clear(udid: udid, bundleID: activeNetworkConditionBundleID)
+                }
+                // Track before invoking the provider so automatic cleanup still
+                // clears a condition when apply partially succeeds but exits nonzero.
+                activeNetworkConditionBundleID = targetBundleID
+                try provider.apply(profile: profile, udid: udid, bundleID: targetBundleID)
+                runTrace.event("network-condition-apply", fields: ["bundle-id": targetBundleID, "profile": profile])
+            }
+            return ["method": "network-condition", "value": operation]
 
         case "crown":
             guard let delta = action.delta else { throw HarnessError("crown action requires delta.") }
@@ -779,6 +1088,28 @@ private final class HarnessRunner {
             return "slider"
         case "orientation":
             return "orientation \(action.orientation ?? "")"
+        case "open-url":
+            return "open-url \(action.url ?? "")"
+        case "privacy":
+            return "privacy \(action.operation ?? "") \(action.service ?? "")"
+        case "push":
+            return "push \(action.bundleID ?? bundleID)"
+        case "location":
+            return "location \(action.operation ?? "")"
+        case "appearance":
+            return "appearance \(action.appearance ?? "")"
+        case "content-size":
+            return "content-size \(action.contentSize ?? "")"
+        case "increase-contrast":
+            return "increase-contrast \(action.enabled.map { String($0) } ?? "")"
+        case "status-bar":
+            return "status-bar \(action.operation ?? "")"
+        case "launch":
+            return "launch \(action.bundleID ?? bundleID)"
+        case "terminate":
+            return "terminate \(action.bundleID ?? bundleID)"
+        case "network-condition":
+            return "network-condition \(action.operation ?? "") \(action.profile ?? "")"
         case "crown":
             return "crown \(action.delta ?? 0)"
         case "wait":
@@ -851,7 +1182,14 @@ private final class HarnessRunner {
 
     private static func loadConfig(workspace: String) throws -> HarnessConfig {
         let path = workspace + "/config.json"
-        guard FileManager.default.fileExists(atPath: path) else { return HarnessConfig(app: nil, stepDelay: nil, maxRetries: nil) }
+        guard FileManager.default.fileExists(atPath: path) else {
+            return HarnessConfig(
+                app: nil,
+                stepDelay: nil,
+                maxRetries: nil,
+                networkConditionProvider: nil
+            )
+        }
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
         return try JSONDecoder().decode(HarnessConfig.self, from: data)
     }

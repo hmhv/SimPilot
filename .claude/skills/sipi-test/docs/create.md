@@ -56,8 +56,11 @@ Do not write natural-language actions such as `"Tap Settings"`. The harness does
 - `orientation`: requires `orientation` (`portrait`/`landscape-left`/…). Use to test rotation
 - `crown`: requires `delta` (Apple Watch only)
 - `wait`: a sleep action; optional `duration` (default 1s). Distinct from the step-level `wait` field, which is the verify poll timeout in seconds (default 3s), not a sleep
+- Simulator controls: `privacy`, `open-url`, `push`, `location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`, `launch`, `terminate`, and provider-backed `network-condition`
 
 These let you test toggles/sliders/menus/gestures deterministically (e.g. `slider` instead of a fragile coordinate drag). See `../references/json-reference.md` for full JSON shapes.
+
+For network failures, permission denial, deep links, pushes, location, or other externally controlled error states, read `../references/adverse-state-testing.md` before writing the spec.
 
 ## Selectors and Points
 

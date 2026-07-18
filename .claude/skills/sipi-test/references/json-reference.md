@@ -39,6 +39,7 @@ Specification for SimPilot v2 files under `.simpilot/`.
   "app": "com.example.myapp",
   "step-delay": 0.3,
   "max-retries": 1,
+  "network-condition-provider": "/absolute/path/to/provider",
   "build": { "project": "MyApp.xcodeproj", "scheme": "MyApp" }
 }
 ```
@@ -52,6 +53,7 @@ Fields:
 | `max-retries` | int | No |
 | `keep-runs` | int | No |
 | `record-video` | bool | No |
+| `network-condition-provider` | absolute path string | No |
 | `build` | object (`project` / `scheme` / `configuration`) | No |
 
 The harness (`run-test` / `run-suite`) consumes only `app`, `step-delay`, and `max-retries`. `build` is load-bearing for the build step (see `../../sipi-common/docs/build.md`; all sub-keys are optional, and an empty `"build": {}` enables auto-detection). `keep-runs` and `record-video` are accepted by `sipi validate` but are not acted on by the deterministic runner.
@@ -207,6 +209,64 @@ These drive the richer `sipi` primitives as deterministic, saved test steps.
 ```
 
 All keycodes are USB HID usage codes 0…255. `long-press`/`slider` selectors honor the same fast→deep resolution and `optional` skip as `tap`.
+
+### Simulator-control actions
+
+Open a deep link or universal link through the system:
+
+```json
+{ "type": "open-url", "url": "myapp://settings" }
+```
+
+Set permission state (`operation`: `grant`, `revoke`, or `reset`). `bundle-id` defaults to the test app; harness privacy actions are always app-scoped, including `reset all`:
+
+```json
+{ "type": "privacy", "operation": "revoke", "service": "photos" }
+```
+
+Send an inline Simulator remote notification. The payload must contain an `aps` object and encode to at most 4096 bytes:
+
+```json
+{ "type": "push", "payload": { "aps": { "alert": "New message" } } }
+```
+
+Set or clear location:
+
+```json
+{ "type": "location", "operation": "set", "latitude": 35.6812, "longitude": 139.7671 }
+{ "type": "location", "operation": "clear" }
+```
+
+Change UI environment settings:
+
+```json
+{ "type": "appearance", "appearance": "dark" }
+{ "type": "content-size", "content-size": "accessibility-large" }
+{ "type": "increase-contrast", "enabled": true }
+```
+
+Override or clear screenshot-only status-bar values. `arguments` are passed as separate arguments to `simctl status_bar ... override`; they do not change actual connectivity or battery state:
+
+```json
+{ "type": "status-bar", "operation": "override", "arguments": ["--time", "9:41", "--batteryLevel", "100"] }
+{ "type": "status-bar", "operation": "clear" }
+```
+
+Restart or terminate an app. Launch environment keys omit the `SIMCTL_CHILD_` prefix; SimPilot adds it safely:
+
+```json
+{ "type": "launch", "arguments": ["--fixture"], "environment": { "API_MODE": "fixture" } }
+{ "type": "terminate" }
+```
+
+Apply or clear a profile through the configured external provider:
+
+```json
+{ "type": "network-condition", "operation": "apply", "profile": "packet-loss-100" }
+{ "type": "network-condition", "operation": "clear" }
+```
+
+`bundle-id` optionally overrides the configured app for `privacy`, `push`, `launch`, `terminate`, and `network-condition`. See `adverse-state-testing.md` for provider capability checks, cleanup, and the difference between request failure and `NWPathMonitor` path loss.
 
 ## Selector
 

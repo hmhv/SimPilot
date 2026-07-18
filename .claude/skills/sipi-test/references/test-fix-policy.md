@@ -20,20 +20,23 @@ Prefer app changes that make the UI more observable and more deterministic.
 
 When the root cause is in app code, prefer the smallest useful change, in this order:
 
-1. add or correct stable identifiers and labels
-2. replace fragile custom interactions with standard controls when local and safe
-3. add deterministic seed data, debug hooks, or launch paths that improve repeatability
-4. adjust layout or timing only when the root cause is clearly in app code
+1. add a stable `accessibilityIdentifier` when targeting is the only problem
+2. correct accessibility labels, hints, or traits when the change improves the released app
+3. propose any other source change and wait for explicit approval
 
-If the fix is local, low-risk, and improves repeatability without masking a real bug, implement it (see "Implement Directly When"); do not implement changes whose main effect is hiding a defect or making the test pass without improving the product.
+Do not add seed data, debug hooks, launch paths, networking switches, or business-logic branches without approval. Explain the smallest change that would make the scenario testable and ask whether to implement it.
 
 ## Good Fixes
 
 - add `accessibilityIdentifier` to controls that are hard to target
 - replace fragile coordinate-only interaction with a stable identifier
-- use standard SwiftUI/UIKit controls instead of custom gesture wrappers when local
-- add seed data or a stable initial state for repeatable test setup
-- expose a debug-only navigation hook when the production flow is too expensive to repeat
+- correct a missing accessibility label or trait that helps actual assistive-technology users
+
+The following can be good proposals, but require approval before implementation:
+
+- replace a custom gesture wrapper with a standard control
+- add seed data or a stable initial state
+- expose a debug-only navigation or networking hook
 
 ## Avoid
 
@@ -45,12 +48,16 @@ If the fix is local, low-risk, and improves repeatability without masking a real
 
 ## Implement Directly When
 
-- the identifier or label to add is obvious
-- the source change is local and low-risk
-- the change improves repeatability without changing product meaning
+- the change is limited to an obvious `accessibilityIdentifier`, including one used only for testing; or
+- an accessibility label, hint, or trait change clearly improves the released app
+
+Still keep RUN and FIX separate and preserve the original failing result.
 
 ## Stop And Ask When
 
-- the change affects navigation, analytics, auth, payments, or permissions
+- any source change is not limited to the accessibility cases above
+- the change affects navigation, networking, state injection, seed data, analytics, auth, payments, or permissions
 - the proposed debug hook has product or security implications
 - multiple valid identifiers or labels exist and wording matters
+
+Use a concrete proposal: "This scenario is not externally controllable. Adding <small change> would make it testable without changing production behavior. Do you want me to implement it?"

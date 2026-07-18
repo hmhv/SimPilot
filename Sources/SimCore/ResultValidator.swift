@@ -38,7 +38,10 @@ public enum ResultValidator {
     // MARK: - Schema Definitions
 
     private static let configRequired: Set<String> = ["app"]
-    private static let configOptional: Set<String> = ["step-delay", "max-retries", "keep-runs", "record-video", "build"]
+    private static let configOptional: Set<String> = [
+        "step-delay", "max-retries", "keep-runs", "record-video", "build",
+        "network-condition-provider"
+    ]
     private static let buildOptional: Set<String> = ["project", "scheme", "configuration"]
 
     private static let testRequired: Set<String> = ["id", "title", "steps"]
@@ -46,14 +49,18 @@ public enum ResultValidator {
     private static let testStepOptional: Set<String> = ["id", "action", "verify", "optional", "wait", "note"]
     private static let testActionOptional: Set<String> = [
         "type", "selector", "point", "text", "usage", "button", "start", "end", "duration",
-        "value", "tolerance", "preset", "modifiers", "key", "keycodes", "delay", "steps", "orientation", "delta"
+        "value", "tolerance", "preset", "modifiers", "key", "keycodes", "delay", "steps", "orientation", "delta",
+        "url", "operation", "service", "bundle-id", "latitude", "longitude", "appearance", "content-size",
+        "enabled", "payload", "profile", "arguments", "environment"
     ]
     private static let testSelectorOptional: Set<String> = ["id", "label", "value", "element-type"]
     private static let testPointOptional: Set<String> = ["x", "y", "unit"]
     private static let testVerifyOptional: Set<String> = ["contains", "absent"]
     private static let testActionTypes: Set<String> = [
         "tap", "type", "key", "button", "swipe", "wait",
-        "long-press", "slider", "gesture", "key-combo", "key-sequence", "drag", "orientation", "crown"
+        "long-press", "slider", "gesture", "key-combo", "key-sequence", "drag", "orientation", "crown",
+        "open-url", "privacy", "push", "location", "appearance", "content-size", "increase-contrast",
+        "status-bar", "launch", "terminate", "network-condition"
     ]
 
     private static let suiteRequired: Set<String> = ["name", "tests"]
@@ -81,7 +88,9 @@ public enum ResultValidator {
     private static let resultFailureTypes: Set<String> = ["action", "verify", "timeout"]
     private static let attemptedMethodRequired: Set<String> = ["method"]
     private static let attemptedMethodOptional: Set<String> = ["value"]
-    private static let attemptedMethodTypes: Set<String> = ["tap-label", "tap-id", "tap-value", "touch-coordinate", "input"]
+    private static let attemptedMethodTypes: Set<String> = [
+        "tap-label", "tap-id", "tap-value", "touch-coordinate", "input", "simctl", "network-condition"
+    ]
     private static let screenshotsOptional: Set<String> = ["before", "after"]
     private static let verifyRequired: Set<String> = ["check", "found"]
     private static let verifyOptional: Set<String> = ["grep-match"]
@@ -210,6 +219,11 @@ public enum ResultValidator {
         checkInteger(path, data, "max-retries", diag)
         checkInteger(path, data, "keep-runs", diag)
         checkBool(path, data, "record-video", diag)
+        checkString(path, data, "network-condition-provider", diag)
+        if let provider = data["network-condition-provider"] as? String,
+           !provider.hasPrefix("/") {
+            diag.errors.append("\(path): network-condition-provider must be an absolute path")
+        }
         // Practical bounds: a huge max-retries would loop ~forever and a huge
         // step-delay would stall each retry for over an hour. (The runner also
         // clamps these, since run-test does not validate config.)
@@ -306,8 +320,23 @@ public enum ResultValidator {
         checkString(path, a, "button", prefix: ordinal + ".", diag)
         checkString(path, a, "preset", prefix: ordinal + ".", diag)
         checkString(path, a, "orientation", prefix: ordinal + ".", diag)
-        for numField in ["duration", "delay", "value", "tolerance", "delta"] {
+        for stringField in ["url", "operation", "service", "bundle-id", "appearance", "content-size", "profile"] {
+            checkString(path, a, stringField, prefix: ordinal + ".", diag)
+        }
+        for numField in ["duration", "delay", "value", "tolerance", "delta", "latitude", "longitude"] {
             checkNumber(path, a, numField, prefix: ordinal + ".", diag)
+        }
+        checkBool(path, a, "enabled", prefix: ordinal + ".", diag)
+        checkStringArray(path, a, "arguments", prefix: ordinal + ".", diag)
+        if let environment = a["environment"] {
+            if let values = environment as? JSON,
+               values.values.allSatisfy({ $0 is String }) {
+                for key in values.keys where !isEnvironmentKey(key) {
+                    diag.errors.append("\(path): \(ordinal).environment key '\(key)' is invalid")
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal).environment must be an object of string values")
+            }
         }
         for intField in ["usage", "key", "steps"] {
             checkInteger(path, a, intField, prefix: ordinal + ".", diag)
@@ -406,6 +435,121 @@ public enum ResultValidator {
             } else {
                 diag.errors.append("\(path): \(ordinal) (orientation) requires an orientation name")
             }
+        case "open-url":
+            if let url = a["url"] as? String,
+               let components = URLComponents(string: url),
+               components.scheme != nil {
+                // Valid absolute URL/deep link.
+            } else {
+                diag.errors.append("\(path): \(ordinal) (open-url) requires an absolute url")
+            }
+        case "privacy":
+            let operations = ["grant", "revoke", "reset"]
+            if let operation = a["operation"] as? String, operations.contains(operation) {
+                // Valid.
+            } else {
+                diag.errors.append("\(path): \(ordinal).operation (privacy) must be grant, revoke, or reset")
+            }
+            if let service = a["service"] as? String, !service.isEmpty {
+                // simctl owns the evolving service list.
+            } else {
+                diag.errors.append("\(path): \(ordinal) (privacy) requires service")
+            }
+        case "push":
+            guard let payload = a["payload"] as? JSON else {
+                diag.errors.append("\(path): \(ordinal) (push) requires a payload object")
+                break
+            }
+            if !(payload["aps"] is JSON) {
+                diag.errors.append("\(path): \(ordinal).payload must contain an aps object")
+            }
+            if JSONSerialization.isValidJSONObject(payload),
+               let data = try? JSONSerialization.data(withJSONObject: payload),
+               data.count > 4096 {
+                diag.errors.append("\(path): \(ordinal).payload must not exceed 4096 bytes")
+            }
+        case "location":
+            guard let operation = a["operation"] as? String,
+                  ["set", "clear"].contains(operation) else {
+                diag.errors.append("\(path): \(ordinal).operation (location) must be set or clear")
+                break
+            }
+            if operation == "set" {
+                guard let latitude = numberValue(a["latitude"]),
+                      let longitude = numberValue(a["longitude"]) else {
+                    diag.errors.append("\(path): \(ordinal) (location set) requires latitude and longitude")
+                    break
+                }
+                if !(-90...90).contains(latitude) {
+                    diag.errors.append("\(path): \(ordinal).latitude must be between -90 and 90")
+                }
+                if !(-180...180).contains(longitude) {
+                    diag.errors.append("\(path): \(ordinal).longitude must be between -180 and 180")
+                }
+            } else if a["latitude"] != nil || a["longitude"] != nil {
+                diag.errors.append("\(path): \(ordinal) (location clear) must not include latitude or longitude")
+            }
+        case "appearance":
+            if let appearance = a["appearance"] as? String,
+               ["light", "dark"].contains(appearance) {
+                // Valid.
+            } else {
+                diag.errors.append("\(path): \(ordinal).appearance must be light or dark")
+            }
+        case "content-size":
+            let sizes = [
+                "extra-small", "small", "medium", "large", "extra-large",
+                "extra-extra-large", "extra-extra-extra-large", "accessibility-medium",
+                "accessibility-large", "accessibility-extra-large",
+                "accessibility-extra-extra-large", "accessibility-extra-extra-extra-large"
+            ]
+            if let contentSize = a["content-size"] as? String, sizes.contains(contentSize) {
+                // Valid. Increment/decrement are intentionally excluded because they are not deterministic.
+            } else {
+                diag.errors.append("\(path): \(ordinal).content-size is not a supported deterministic size")
+            }
+        case "increase-contrast":
+            if a["enabled"] == nil || !isJSONBoolean(a["enabled"]!) {
+                diag.errors.append("\(path): \(ordinal) (increase-contrast) requires enabled bool")
+            }
+        case "status-bar":
+            guard let operation = a["operation"] as? String,
+                  ["override", "clear"].contains(operation) else {
+                diag.errors.append("\(path): \(ordinal).operation (status-bar) must be override or clear")
+                break
+            }
+            let arguments = a["arguments"] as? [String]
+            if operation == "override" && (arguments?.isEmpty ?? true) {
+                diag.errors.append("\(path): \(ordinal) (status-bar override) requires arguments")
+            }
+            if operation == "clear" && arguments != nil {
+                diag.errors.append("\(path): \(ordinal) (status-bar clear) must not include arguments")
+            }
+            if let arguments, arguments.count > 20 || arguments.contains(where: { $0.isEmpty || $0.count > 256 }) {
+                diag.errors.append("\(path): \(ordinal).arguments contains too many or invalid values")
+            }
+        case "launch":
+            if let arguments = a["arguments"] as? [String],
+               arguments.count > 100 || arguments.contains(where: { $0.count > 4096 }) {
+                diag.errors.append("\(path): \(ordinal).arguments contains too many or oversized values")
+            }
+        case "terminate":
+            break
+        case "network-condition":
+            guard let operation = a["operation"] as? String,
+                  ["apply", "clear"].contains(operation) else {
+                diag.errors.append("\(path): \(ordinal).operation (network-condition) must be apply or clear")
+                break
+            }
+            if operation == "apply" {
+                if let profile = a["profile"] as? String, isKebab(profile) {
+                    // Valid provider profile id.
+                } else {
+                    diag.errors.append("\(path): \(ordinal).profile must be kebab-case for apply")
+                }
+            } else if a["profile"] != nil {
+                diag.errors.append("\(path): \(ordinal) (network-condition clear) must not include profile")
+            }
         case "crown":
             if numberValue(a["delta"]) == nil { diag.errors.append("\(path): \(ordinal) (crown) requires a numeric delta") }
         case "wait":
@@ -454,6 +598,11 @@ public enum ResultValidator {
     private static func numberValue(_ value: Any?) -> Double? {
         guard let value, value is NSNumber, !isJSONBoolean(value) else { return nil }
         return (value as! NSNumber).doubleValue
+    }
+
+    private static func isEnvironmentKey(_ value: String) -> Bool {
+        guard !value.hasPrefix("SIMCTL_CHILD_"), value.count <= 128 else { return false }
+        return value.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil
     }
 
     private static func requireKeycode(_ path: String, _ a: JSON, _ field: String, ordinal: String, _ diag: Diagnostics) {

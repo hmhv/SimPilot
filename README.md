@@ -8,7 +8,7 @@ The top-level README is translated. Skill docs and code remain in English.
 
 ## What it does
 
-- **`/sipi-test`** — UI test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness.
+- **`/sipi-test`** — UI and adverse-state test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness. Saved tests can control permissions, deep links, push notifications, location, appearance, Dynamic Type, Increase Contrast, launch environment, and an explicitly configured network-condition provider.
 - **`/sipi-verify`** — Post-implementation verification on the iOS Simulator. `sipi verify-session` owns screenshots, findings, and report generation.
 
 Results are saved in `.simpilot/` with HTML reports for browser viewing.
@@ -72,6 +72,8 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 ```
 
 Saved tests drive the full interaction surface — taps, toggles, sliders, gestures, drags, long-press, key combos, and rotation — as deterministic steps, not just taps and swipes.
+
+They can also create real Simulator-controlled error preconditions such as denied permissions, deep links, push delivery, simulated coordinates, and provider-backed offline/latency profiles. SimPilot does not bundle or imitate a proprietary network conditioner: check `sipi network-condition status` before using a network profile.
 
 **Run tests:**
 ```text

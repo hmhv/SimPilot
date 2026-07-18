@@ -38,10 +38,17 @@ public enum SimShell {
     /// writes `stdin` to the child's standard input first. Throws on launch
     /// failure; a non-zero exit is reported via `SimShellResult.exitCode` so
     /// callers can decide how to handle it.
-    private static func run(_ args: [String], stdin: Data? = nil) throws -> SimShellResult {
+    private static func run(
+        _ args: [String],
+        stdin: Data? = nil,
+        environment: [String: String] = [:]
+    ) throws -> SimShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["simctl"] + args
+        if !environment.isEmpty {
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        }
 
         let outPipe = Pipe()
         let errPipe = Pipe()
@@ -82,8 +89,12 @@ public enum SimShell {
     /// Run `xcrun simctl <args>` and throw `SimShellError.nonZeroExit` on a
     /// non-zero exit. Returns the captured stdout for callers that want it.
     @discardableResult
-    private static func runChecked(_ args: [String], stdin: Data? = nil) throws -> String {
-        let result = try run(args, stdin: stdin)
+    private static func runChecked(
+        _ args: [String],
+        stdin: Data? = nil,
+        environment: [String: String] = [:]
+    ) throws -> String {
+        let result = try run(args, stdin: stdin, environment: environment)
         guard result.succeeded else {
             throw SimShellError.nonZeroExit(
                 command: "xcrun simctl " + args.joined(separator: " "),
@@ -143,9 +154,22 @@ public enum SimShell {
     /// Launch `bundleID` on `udid` (must be booted). Returns simctl's stdout
     /// (typically `<bundleID>: <pid>`).
     @discardableResult
-    public static func launch(udid: String, bundleID: String, arguments: [String] = []) throws -> String {
+    public static func launch(
+        udid: String,
+        bundleID: String,
+        arguments: [String] = [],
+        environment: [String: String] = [:],
+        terminateRunning: Bool = false
+    ) throws -> String {
         try requireBooted(udid)
-        return try runChecked(["launch", udid, bundleID] + arguments)
+        let childEnvironment = Dictionary(uniqueKeysWithValues: environment.map {
+            ("SIMCTL_CHILD_" + $0.key, $0.value)
+        })
+        let options = terminateRunning ? ["--terminate-running-process"] : []
+        return try runChecked(
+            ["launch"] + options + [udid, bundleID] + arguments,
+            environment: childEnvironment
+        )
     }
 
     /// Terminate `bundleID` on `udid` (must be booted).
@@ -176,10 +200,43 @@ public enum SimShell {
         try runChecked(["privacy", udid, "grant", service, bundleID])
     }
 
+    /// Revoke a privacy permission for `bundleID` on `udid`.
+    public static func revokePrivacy(udid: String, service: String, bundleID: String) throws {
+        try requireBooted(udid)
+        try runChecked(["privacy", udid, "revoke", service, bundleID])
+    }
+
+    /// Reset a privacy permission. `bundleID` is optional only for reset, matching simctl.
+    public static func resetPrivacy(udid: String, service: String, bundleID: String? = nil) throws {
+        try requireBooted(udid)
+        var args = ["privacy", udid, "reset", service]
+        if let bundleID, !bundleID.isEmpty { args.append(bundleID) }
+        try runChecked(args)
+    }
+
     /// Open `url` on `udid` (must be booted) — deep links, https, etc.
     public static func openURL(udid: String, url: String) throws {
         try requireBooted(udid)
         try runChecked(["openurl", udid, url])
+    }
+
+    /// Send an inline APNs JSON payload to an installed simulator app.
+    public static func push(udid: String, bundleID: String, payload: Data) throws {
+        try requireBooted(udid)
+        try runChecked(["push", udid, bundleID, "-"], stdin: payload)
+    }
+
+    /// Set one simulated coordinate.
+    public static func setLocation(udid: String, latitude: Double, longitude: Double) throws {
+        try requireBooted(udid)
+        let coordinate = String(format: "%.8f,%.8f", locale: Locale(identifier: "en_US_POSIX"), latitude, longitude)
+        try runChecked(["location", udid, "set", coordinate])
+    }
+
+    /// Clear the active simulated location or route.
+    public static func clearLocation(udid: String) throws {
+        try requireBooted(udid)
+        try runChecked(["location", udid, "clear"])
     }
 
     /// Set the UI appearance (`light` / `dark`) on `udid`. Note: `appearance` is
@@ -197,6 +254,32 @@ public enum SimShell {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Set the preferred content size category used by Dynamic Type.
+    public static func setContentSize(udid: String, contentSize: String) throws {
+        try requireBooted(udid)
+        try runChecked(["ui", udid, "content_size", contentSize])
+    }
+
+    /// Read the preferred content size category.
+    public static func contentSize(udid: String) throws -> String {
+        try requireBooted(udid)
+        return try runChecked(["ui", udid, "content_size"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Enable or disable Increase Contrast.
+    public static func setIncreaseContrast(udid: String, enabled: Bool) throws {
+        try requireBooted(udid)
+        try runChecked(["ui", udid, "increase_contrast", enabled ? "enabled" : "disabled"])
+    }
+
+    /// Read Increase Contrast as `enabled`, `disabled`, `unsupported`, or `unknown`.
+    public static func increaseContrast(udid: String) throws -> String {
+        try requireBooted(udid)
+        return try runChecked(["ui", udid, "increase_contrast"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Override the status bar on `udid` (must be booted). `arguments` are the
     /// raw `simctl status_bar <udid> override` flags (e.g. `--time`, `--batteryLevel`).
     public static func statusBarOverride(udid: String, arguments: [String]) throws {
@@ -208,6 +291,12 @@ public enum SimShell {
     public static func statusBarClear(udid: String) throws {
         try requireBooted(udid)
         try runChecked(["status_bar", udid, "clear"])
+    }
+
+    /// Return simctl's current status-bar override description.
+    public static func statusBarList(udid: String) throws -> String {
+        try requireBooted(udid)
+        return try runChecked(["status_bar", udid, "list"])
     }
 
     // MARK: - Pasteboard (non-US `type` paste path)

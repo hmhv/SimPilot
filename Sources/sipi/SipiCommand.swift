@@ -41,6 +41,7 @@ struct Sipi: ParsableCommand {
             Crown.self,
             Screenshot.self,
             RecordVideo.self,
+            NetworkCondition.self,
             RunTest.self,
             RunSuite.self,
             VerifySession.self,

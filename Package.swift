@@ -123,6 +123,11 @@ let package = Package(
             name: "SimShell",
             path: "Sources/SimShell"
         ),
+        .testTarget(
+            name: "SimShellTests",
+            dependencies: ["SimShell"],
+            path: "Tests/SimShellTests"
+        ),
         // Umbrella CLI; the sole native simulator driver for the package.
         .executableTarget(
             name: "sipi",

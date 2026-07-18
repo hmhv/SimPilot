@@ -3,6 +3,7 @@
 .swiftpm/
 *.app
 DerivedData/
+**/.derived-data/
 *.xcuserstate
 Runner/Runner.xcodeproj/xcuserdata/
 .DS_Store
