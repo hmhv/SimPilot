@@ -39,6 +39,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// `xcode-select -p`, else `/Applications/Xcode.app/Contents/Developer`.
 + (NSString *)defaultDeveloperDir;
 
+/// Resolve the SimulatorKit binary for the selected Xcode. Xcode 27 and later
+/// place it in Contents/SharedFrameworks; older Xcodes place it below the
+/// developer directory. Returns the classic path when neither exists so a
+/// subsequent dlopen failure remains actionable.
++ (NSString *)simulatorKitPathForDeveloperDir:(NSString *)developerDir;
+
 /// Force-load CoreSimulator from disk. Returns NO and fills `error` on failure.
 + (BOOL)loadCoreSimulator:(NSError **)error;
 

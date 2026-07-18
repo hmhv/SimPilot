@@ -202,6 +202,23 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
     return cached;
 }
 
++ (NSString *)simulatorKitPathForDeveloperDir:(NSString *)developerDir {
+    // Xcode 27 moved SimulatorKit out of Contents/Developer and into
+    // Contents/SharedFrameworks. Prefer that location when present, retain the
+    // Xcode 26-and-earlier path, and return the classic path as the diagnostic
+    // fallback when neither binary exists.
+    NSString *classicPath = [[developerDir stringByAppendingPathComponent:
+        @"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"]
+        stringByStandardizingPath];
+    NSString *sharedPath = [[developerDir stringByAppendingPathComponent:
+        @"../SharedFrameworks/SimulatorKit.framework/SimulatorKit"]
+        stringByStandardizingPath];
+    NSFileManager *fileManager = NSFileManager.defaultManager;
+    if ([fileManager fileExistsAtPath:sharedPath]) return sharedPath;
+    if ([fileManager fileExistsAtPath:classicPath]) return classicPath;
+    return classicPath;
+}
+
 + (BOOL)loadCoreSimulator:(NSError **)error {
     // Memoize only success. dlopen is refcounted and idempotent, so retrying
     // after a transient first failure is cheap and lets a later call (e.g. the
@@ -365,8 +382,7 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
     // surfaces as an actionable NSError, not a crash.
     NSError *e = nil;
     if (![self loadCoreSimulator:&e]) { if (error) *error = e; return NO; }
-    NSString *simKitPath = [developerDir stringByAppendingPathComponent:
-                            @"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"];
+    NSString *simKitPath = [self simulatorKitPathForDeveloperDir:developerDir];
     if (!SPDlopen(simKitPath, @"SimulatorKit", &e)) { if (error) *error = e; return NO; }
 
     id device = SPCopySimDeviceForUDID(udid, developerDir, error);
@@ -685,8 +701,7 @@ static mach_port_t SPLookupMachPort(id device, NSString *name, NSError **error) 
     // dlsym's, so doctor reports exactly what the input paths will find at
     // runtime. SimulatorKit must be loaded first or every lookup is NULL; on a
     // dlopen failure there is nothing to probe, so return an empty dictionary.
-    NSString *simKitPath = [developerDir stringByAppendingPathComponent:
-                            @"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"];
+    NSString *simKitPath = [self simulatorKitPathForDeveloperDir:developerDir];
     if (!SPDlopen(simKitPath, @"SimulatorKit", NULL)) return @{};
     return @{
         @"mouse":    @(dlsym(RTLD_DEFAULT, "IndigoHIDMessageForMouseNSEvent") != NULL),
@@ -1209,8 +1224,7 @@ typedef void * (*SPIndigoCrownFunc)(double);
 
     NSError *e = nil;
     if (!SPDlopen(kCoreSimulatorPath, @"CoreSimulator", &e)) { if (error) *error = e; return NO; }
-    NSString *simKitPath = [developerDir stringByAppendingPathComponent:
-                            @"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"];
+    NSString *simKitPath = [SPSimBridge simulatorKitPathForDeveloperDir:developerDir];
     if (!SPDlopen(simKitPath, @"SimulatorKit", &e)) { if (error) *error = e; return NO; }
 
     id device = SPCopySimDeviceForUDID(udid, developerDir, error);
@@ -1517,8 +1531,7 @@ static id SPPerformNoArg(id target, NSString *selectorName) {
     _developerDir = [developerDir copy];
     NSError *e = nil;
     if (!SPDlopen(kCoreSimulatorPath, @"CoreSimulator", &e)) { if (error) *error = e; return NO; }
-    NSString *simKitPath = [developerDir stringByAppendingPathComponent:
-                            @"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"];
+    NSString *simKitPath = [SPSimBridge simulatorKitPathForDeveloperDir:developerDir];
     if (!SPDlopen(simKitPath, @"SimulatorKit", &e)) { if (error) *error = e; return NO; }
 
     id device = SPCopySimDeviceForUDID(udid, developerDir, error);

@@ -122,8 +122,7 @@ private struct DoctorReport {
         }
 
         // 2. SimulatorKit dlopen + HID client class (Indigo HID path).
-        let simKitPath = (developerDir as NSString)
-            .appendingPathComponent("Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit")
+        let simKitPath = SPSimBridge.simulatorKitPath(forDeveloperDir: developerDir)
         let simKitExists = FileManager.default.fileExists(atPath: simKitPath)
         let simKitLoaded = simKitExists
             && dlopen(simKitPath, RTLD_NOW) != nil

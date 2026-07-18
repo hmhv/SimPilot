@@ -78,6 +78,13 @@ let package = Package(
             dependencies: ["SimCore", "SimSkills"],
             path: "Tests/SimCoreTests"
         ),
+        // Filesystem-only contract tests for private-framework path resolution.
+        // These do not load the private frameworks or require a simulator.
+        .testTarget(
+            name: "SimBridgeTests",
+            dependencies: ["SimBridge"],
+            path: "Tests/SimBridgeTests"
+        ),
         // The one SimDriver implementation today. Wires SimCore value types to
         // the existing SimBridge (CSimBridge) ObjC APIs.
         .target(
