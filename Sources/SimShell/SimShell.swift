@@ -299,7 +299,7 @@ public enum SimShell {
         return try runChecked(["status_bar", udid, "list"])
     }
 
-    // MARK: - Pasteboard (non-US `type` paste path)
+    // MARK: - Pasteboard (`type` paste path)
 
     /// Read the simulator's pasteboard via `simctl pbpaste`. Returns the raw
     /// contents (may be empty). Throws on a non-zero exit so the caller can

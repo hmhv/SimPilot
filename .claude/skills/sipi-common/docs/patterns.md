@@ -98,7 +98,7 @@ These first-class `sipi` commands are deterministic and usually beat hand-rolled
 
 ### Text Input
 
-- Tap the field to focus it first, then type with `sipi type $UDID "text"` (the UDID comes first, then the text; quote text with spaces or newlines). US-keyboard characters are injected as HID key events; any text with accented letters, non-Latin scripts, or emoji automatically falls back to pasting via the simulator pasteboard (sipi saves and restores the prior pasteboard contents)
+- Tap the field to focus it first, then type with `sipi type $UDID "text"` (the UDID comes first, then the text; quote text with spaces or newlines). By default the text is entered by pasting through the simulator pasteboard (Cmd+V), which is independent of the guest keyboard layout and input language — the reliable default. sipi saves and restores the prior pasteboard contents. Add `--keyboard` to inject US-keyboard HID key events instead (US-representable characters only; accented/non-Latin/emoji text is rejected in keyboard mode)
 - Clear existing: select-all then delete via `sipi key-combo --modifiers 227 --key 4 $UDID` (Cmd+A, 227=Cmd 4=A) then `sipi key 42 $UDID` (Backspace)
 
 ### Scrolling

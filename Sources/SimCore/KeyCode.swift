@@ -6,8 +6,9 @@
 //
 // A Foundation-only lift. The character <-> USB HID usage-code table and the
 // shift wrapper are reproduced verbatim. NOTE: this table assumes a US
-// keyboard layout; characters outside it map to keyCode 0 (unsupported). The
-// CLI handles non-US text through a `simctl pbcopy` + Cmd+V path.
+// keyboard layout; characters outside it map to keyCode 0 (unsupported). It
+// backs keyboard-mode `type` only; the default `type` pastes text via a
+// `simctl pbcopy` + Cmd+V path, which is layout/IME independent.
 
 import Foundation
 

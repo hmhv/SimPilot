@@ -44,7 +44,7 @@ Do not write natural-language actions such as `"Tap Settings"`. The harness does
 
 - `tap`: requires `selector` or `point`
 - `long-press`: `selector` or `point`; optional `duration` hold (default 0.5s) — context menus, reorder handles
-- `type`: requires `text`; the focused field must already be active
+- `type`: requires `text`; the focused field must already be active. Enters text by pasting (pasteboard/Cmd+V) by default — layout/language independent; add `"input-method": "keyboard"` only when a field needs real keystrokes (US-representable text only)
 - `key`: requires USB HID `usage`
 - `key-combo`: requires `modifiers` (keycodes) and `key` — e.g. Cmd+A is `{ "modifiers": [227], "key": 4 }`
 - `key-sequence`: requires `keycodes`; optional `delay` between presses

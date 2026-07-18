@@ -19,8 +19,8 @@
 import Foundation
 
 public enum KeyInput {
-    /// USB HID usage code for Left Command (GUI). Used by the non-US `type`
-    /// paste path (Cmd+V).
+    /// USB HID usage code for Left Command (GUI). Used by the `type` paste path
+    /// (Cmd+V).
     public static let leftCommandUsage = 227
     /// USB HID usage code for the V key (paste target with Cmd held).
     public static let vUsage = 25
@@ -53,7 +53,7 @@ public enum KeyInput {
         return events
     }
 
-    /// Cmd+V paste combo — used by the non-US `type` fallback after focus is
+    /// Cmd+V paste combo — used by the default `type` paste path after focus is
     /// established and text is on the simulator pasteboard.
     public static func pasteCombo() -> [HIDKeyEvent] {
         keyCombo(modifiers: [leftCommandUsage], key: vUsage)

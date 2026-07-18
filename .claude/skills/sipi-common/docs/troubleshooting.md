@@ -18,7 +18,7 @@
 | tap succeeds but no state change | Toggle/Menu/DisclosureGroup → use the correct method from `patterns.md` |
 | Screenshot is black | Verify Booted state. Locked → `native_button home` (or `sipi button $UDID home`). Still launching → add sleep |
 | App crashed | Check home screen with `ui_describe` → relaunch with `xcrun simctl launch $UDID $BUNDLE_ID` → mark the step FAIL |
-| Keyboard not shown / type has no effect | Tap by coordinate to focus. Non-US characters via clipboard |
+| Keyboard not shown / type has no effect | Tap by coordinate to focus first. `sipi type` pastes via the pasteboard by default (layout/IME independent); `--keyboard` mode can be eaten by a non-US layout or missing keyboard |
 | Cannot interact with alert | Verify labels with `ui_describe`. Add sleep 0.5. Fall back to coordinates if not visible |
 | Scroll position off | Use `sipi swipe` (or `native_swipe`) to control amount. Verify with `ui_describe` after scrolling |
 | v2 selector doesn't resolve | Prefer `selector.id`; the runner tries the fast AX tree, then the deep grid. Confirm the id/label with `sipi describe-ui`. `sipi validate` and `run-test` reject a selector that is not exactly one of id / label / value |

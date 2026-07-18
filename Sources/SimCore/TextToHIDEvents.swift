@@ -11,8 +11,9 @@
 // the Left Shift usage code (225) are reproduced verbatim.
 //
 // NOTE: KeyCode's table assumes a US keyboard layout, so characters outside it
-// are unsupported here. The CLI handles non-US text through a `simctl pbcopy` +
-// Cmd+V path.
+// are unsupported here. This path is used only for keyboard-mode `type`
+// (`--keyboard` / `"input-method": "keyboard"`); the default `type` pastes text
+// via `simctl pbcopy` + Cmd+V, which is layout/IME independent.
 
 import Foundation
 

@@ -113,6 +113,7 @@ private struct HarnessAction: Decodable {
     var profile: String?          // network-condition profile
     var arguments: [String]?      // launch argv or status-bar override args
     var environment: [String: String]? // launch environment (without SIMCTL_CHILD_)
+    var inputMethod: String?      // type: paste (default) or keyboard
 
     enum CodingKeys: String, CodingKey {
         case type, selector, point, text, usage, button, start, end, duration
@@ -120,6 +121,7 @@ private struct HarnessAction: Decodable {
         case url, operation, service, latitude, longitude, appearance, enabled, payload, profile, arguments, environment
         case bundleID = "bundle-id"
         case contentSize = "content-size"
+        case inputMethod = "input-method"
     }
 }
 
@@ -587,8 +589,9 @@ private final class HarnessRunner {
 
         case "type":
             guard let text = action.text else { throw HarnessError("type action requires text.") }
-            try typeText(text)
-            return ["method": "input", "value": "focused-field"]
+            let method = try resolveInputMethod(action.inputMethod)
+            try TextInput.insert(text, method: method, driver: driver, udid: udid)
+            return ["method": "input", "value": method.rawValue]
 
         case "key":
             guard let usage = action.usage else { throw HarnessError("key action requires usage.") }
@@ -982,20 +985,14 @@ private final class HarnessRunner {
         usleep(UInt32(min(max(micros, 0), Double(UInt32.max))))
     }
 
-    private func typeText(_ text: String) throws {
-        if TextToHIDEvents.validateText(text) {
-            for event in try TextToHIDEvents.convertTextToHIDEvents(text) {
-                try driver.key(usage: event.usage, down: event.down, udid: udid)
-                usleep(12 * 1000)
-            }
-            return
+    /// Resolve the `type` action's text-entry method, defaulting to paste so
+    /// input is independent of the guest keyboard layout and input language.
+    private func resolveInputMethod(_ raw: String?) throws -> TextInputMethod {
+        guard let raw else { return .paste }
+        guard let method = TextInputMethod(rawValue: raw) else {
+            throw HarnessError("type input-method must be 'paste' or 'keyboard'.")
         }
-        let saved = try? SimShell.pbpaste(udid: udid)
-        try SimShell.pbcopy(text, udid: udid)
-        for event in KeyInput.pasteCombo() {
-            try driver.key(usage: event.usage, down: event.down, udid: udid)
-        }
-        if let saved { try? SimShell.pbcopy(saved, udid: udid) }
+        return method
     }
 
     private func resolvingRoots(query: AccessibilityQuery, elementType: String?) throws -> [AXNode] {

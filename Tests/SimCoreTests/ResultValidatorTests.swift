@@ -675,4 +675,31 @@ final class ResultValidatorTests: XCTestCase {
         XCTAssertFalse(invalid.isValid)
         XCTAssertTrue(invalid.errors.contains { $0.contains("absolute path") }, "\(invalid.errors)")
     }
+
+    // MARK: - type input-method
+
+    func testTypeInputMethodValidValues() throws {
+        let outcome = try validateSpec(id: "type-input-method", steps: [
+            ["action": ["type": "type", "text": "こんにちは"]],
+            ["action": ["type": "type", "text": "hello", "input-method": "paste"]],
+            ["action": ["type": "type", "text": "1234", "input-method": "keyboard"]]
+        ])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testTypeInvalidInputMethodIsRejected() throws {
+        let outcome = try validateSpec(id: "type-input-method-bad", steps: [
+            ["action": ["type": "type", "text": "hello", "input-method": "voice"]]
+        ])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("input-method must be paste or keyboard") }, "\(outcome.errors)")
+    }
+
+    func testTypeKeyboardMethodRejectsNonUSText() throws {
+        let outcome = try validateSpec(id: "type-keyboard-non-us", steps: [
+            ["action": ["type": "type", "text": "こんにちは", "input-method": "keyboard"]]
+        ])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("keyboard") && $0.contains("non-US") }, "\(outcome.errors)")
+    }
 }

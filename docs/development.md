@@ -102,7 +102,7 @@ sipi describe-point <udid> -x <x> -y <y>   # single objectAtPoint hit-test (chea
 
 ```sh
 sipi tap <udid> ...                  # tap by --label / --id / --value, or coordinates
-sipi type <udid> "text"              # KeyCode → HID (non-US via simctl pbcopy + Cmd+V)
+sipi type <udid> "text"              # paste via simctl pbcopy + Cmd+V (default); --keyboard = KeyCode → HID (US only)
 sipi key / key-sequence / key-combo  # HID keys, sequences, modifier combos
 sipi swipe / touch / drag / gesture  # HID touch phases + gesture presets
 sipi multitouch <udid> <phase> ...   # two-finger touch phase (e.g. pinch)

@@ -51,7 +51,7 @@ public enum ResultValidator {
         "type", "selector", "point", "text", "usage", "button", "start", "end", "duration",
         "value", "tolerance", "preset", "modifiers", "key", "keycodes", "delay", "steps", "orientation", "delta",
         "url", "operation", "service", "bundle-id", "latitude", "longitude", "appearance", "content-size",
-        "enabled", "payload", "profile", "arguments", "environment"
+        "enabled", "payload", "profile", "arguments", "environment", "input-method"
     ]
     private static let testSelectorOptional: Set<String> = ["id", "label", "value", "element-type"]
     private static let testPointOptional: Set<String> = ["x", "y", "unit"]
@@ -320,7 +320,7 @@ public enum ResultValidator {
         checkString(path, a, "button", prefix: ordinal + ".", diag)
         checkString(path, a, "preset", prefix: ordinal + ".", diag)
         checkString(path, a, "orientation", prefix: ordinal + ".", diag)
-        for stringField in ["url", "operation", "service", "bundle-id", "appearance", "content-size", "profile"] {
+        for stringField in ["url", "operation", "service", "bundle-id", "appearance", "content-size", "profile", "input-method"] {
             checkString(path, a, stringField, prefix: ordinal + ".", diag)
         }
         for numField in ["duration", "delay", "value", "tolerance", "delta", "latitude", "longitude"] {
@@ -380,6 +380,13 @@ public enum ResultValidator {
             }
         case "type":
             if !(a["text"] is String) { diag.errors.append("\(path): \(ordinal) (type) requires a text string") }
+            if let method = a["input-method"] as? String {
+                if !["paste", "keyboard"].contains(method) {
+                    diag.errors.append("\(path): \(ordinal).input-method must be paste or keyboard")
+                } else if method == "keyboard", let text = a["text"] as? String, !TextToHIDEvents.validateText(text) {
+                    diag.errors.append("\(path): \(ordinal) (type) input-method 'keyboard' cannot type non-US-keyboard text; use paste")
+                }
+            }
         case "key":
             requireKeycode(path, a, "usage", ordinal: ordinal, diag)
         case "key-combo":

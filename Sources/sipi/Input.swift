@@ -3,10 +3,11 @@
 // `sipi` input surface. Mirrors AXe's input commands on top of the native
 // driver:
 //
-//   type           Map US-keyboard chars -> HID via SimCore TextToHIDEvents and
-//                  inject them. Non-US text falls back to `simctl pbcopy` + Cmd+V
-//                  (requires the field to be focused first; clobbers + restores
-//                  the simulator pasteboard — see §6.10). `--stdin` / `--file`.
+//   type           Enter text into the focused field. Pastes via `simctl pbcopy`
+//                  + Cmd+V by default (layout/IME independent; clobbers + restores
+//                  the simulator pasteboard — see §6.10). `--keyboard` injects
+//                  US-keyboard HID via SimCore TextToHIDEvents instead (US text
+//                  only). `--stdin` / `--file`.
 //   key            Press one HID keycode (optionally held for --duration).
 //   key-sequence   Press a comma-separated list of keycodes in order.
 //   key-combo      Hold modifiers, press the key, release modifiers in LIFO order.
@@ -77,19 +78,21 @@ extension Sipi {
     struct TypeText: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "type",
-            abstract: "Type text into the focused field via HID; non-US text pastes via the pasteboard.",
+            abstract: "Enter text into the focused field. Pastes via the pasteboard by default; --keyboard injects HID keystrokes.",
             discussion: """
             Input sources (exactly one): a positional text argument, --stdin, or --file.
 
-            US-keyboard characters (A-Z a-z 0-9 and !@#$%^&*()_+-={}[]|\\:";'<>?,./`~)
-            are injected directly as HID key events. Any text containing other
-            characters (accented letters, non-Latin scripts, emoji) falls back to
-            copying the text onto the simulator pasteboard and pressing Cmd+V.
+            By default the text is copied onto the simulator pasteboard and pasted
+            with Cmd+V. Paste is independent of the guest keyboard layout and input
+            language/IME, which makes it far more reliable than keystroke injection.
+            It pastes into the FIRST RESPONDER, so the target field must already be
+            focused (tap it first), and it CLOBBERS the simulator pasteboard — sipi
+            saves the prior contents and restores them afterward on a best-effort basis.
 
-            The paste fallback pastes into the FIRST RESPONDER, so the target field
-            must already be focused (tap it first). It CLOBBERS the simulator
-            pasteboard; sipi saves the prior contents and restores them afterward
-            on a best-effort basis.
+            Pass --keyboard to inject US-keyboard HID key events instead, for the rare
+            field that must receive real per-character keystrokes. Keyboard mode only
+            supports US-keyboard characters (A-Z a-z 0-9 and !@#$%^&*()_+-={}[]|\\:";'<>?,./`~);
+            text with accented letters, non-Latin scripts, or emoji is rejected — use paste.
             """
         )
 
@@ -104,6 +107,9 @@ extension Sipi {
 
         @Option(name: .customLong("file"), help: "Read the text from this file.")
         var inputFile: String?
+
+        @Flag(name: .customLong("keyboard"), help: "Inject US-keyboard HID keystrokes instead of pasting (US-representable text only).")
+        var useKeyboard = false
 
         func validate() throws {
             let sources = [text != nil, useStdin, inputFile != nil].filter { $0 }.count
@@ -132,40 +138,13 @@ extension Sipi {
             }
 
             let driver = NativeDriver()
-
-            if TextToHIDEvents.validateText(inputText) {
-                let events = try TextToHIDEvents.convertTextToHIDEvents(inputText)
-                for event in events {
-                    try driver.key(usage: event.usage, down: event.down, udid: udid)
-                    // Pace the events: sent back-to-back with no gap, the guest
-                    // keyboard coalesces and drops trailing characters (e.g.
-                    // "hello" lands as "hel"). A short inter-event delay lets each
-                    // keystroke register while staying fast for normal-length text.
-                    usleep(12 * 1000)
-                }
-                print("ok")
-                return
-            }
-
-            // Non-US path: paste via the simulator pasteboard + Cmd+V. The field
-            // must already be focused; we clobber the pasteboard, so save and
-            // restore the prior contents on a best-effort basis (§6.10).
-            emitError("[sipi] text contains non-US characters; pasting via the simulator pasteboard (the field must be focused; the pasteboard is clobbered and restored).")
-
-            let saved = try? SimShell.pbpaste(udid: udid)
+            let method: TextInputMethod = useKeyboard ? .keyboard : .paste
             do {
-                try SimShell.pbcopy(inputText, udid: udid)
-            } catch {
-                throw ValidationError("Failed to copy text onto the simulator pasteboard: \(error.localizedDescription)")
-            }
-
-            for event in KeyInput.pasteCombo() {
-                try driver.key(usage: event.usage, down: event.down, udid: udid)
-            }
-
-            if let saved {
-                // Best-effort restore of the user's prior pasteboard.
-                try? SimShell.pbcopy(saved, udid: udid)
+                try TextInput.insert(inputText, method: method, driver: driver, udid: udid)
+            } catch let error as TextInputError {
+                throw ValidationError(error.description)
+            } catch let error as SimShellError {
+                throw ValidationError("Failed to enter text via the simulator pasteboard: \(error)")
             }
             print("ok")
         }

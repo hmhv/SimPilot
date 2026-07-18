@@ -121,10 +121,21 @@ Step fields:
 { "type": "tap", "point": { "x": 0.5, "y": 0.8, "unit": "norm" } }
 ```
 
-`type`:
+`type` (the field must already be focused — tap it first):
 
 ```json
 { "type": "type", "text": "hello@example.com" }
+```
+
+By default `type` enters text by pasting it through the simulator pasteboard
+(Cmd+V), which is independent of the guest keyboard layout and input language —
+far more reliable than keystroke injection. Add `"input-method": "keyboard"` only
+for a field that must receive real per-character keystrokes; keyboard mode
+supports US-keyboard characters only and is rejected for accented/non-Latin/emoji
+text. Pasting clobbers and best-effort restores the simulator pasteboard.
+
+```json
+{ "type": "type", "text": "1234", "input-method": "keyboard" }
 ```
 
 `key`:

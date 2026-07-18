@@ -161,6 +161,7 @@ private extension NWInterface.InterfaceType {
 
 struct ContentView: View {
     @State private var model = NetworkProbeModel()
+    @State private var typedText = ""
 
     var body: some View {
         NavigationStack {
@@ -174,6 +175,7 @@ struct ContentView: View {
                     locationStatus: model.locationStatus
                 )
                 NetworkRequestSection(model: model)
+                TextEntrySection(text: $typedText)
             }
             .navigationTitle("Network Probe")
         }
@@ -226,6 +228,23 @@ private struct NetworkRequestSection: View {
                 .accessibilityIdentifier("network-probe.request-details")
             Button("Run Request") { model.runRequest() }
                 .accessibilityIdentifier("network-probe.run-request")
+        }
+    }
+}
+
+private struct TextEntrySection: View {
+    @Binding var text: String
+
+    var body: some View {
+        Section("Text Input") {
+            TextField("Enter text", text: $text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("text-input.field")
+            // Echo the field's current value so a saved test can assert on the
+            // exact entered text ("Typed, <value>") through describe-ui.
+            LabeledContent("Typed", value: text)
+                .accessibilityIdentifier("text-input.echo")
         }
     }
 }
