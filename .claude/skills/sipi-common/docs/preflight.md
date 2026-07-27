@@ -63,6 +63,8 @@ The resolver prefers `sipi` on `PATH`, then the install location (`~/.local/bin/
 
 On a failure, re-run `"$SIPI" doctor --json` to read the structured probe (each check has `name`/`ok`/`detail`, plus a top-level `allCorePresent`) and name the exact missing capability before stopping. Use plain `doctor` as the exit-code gate; `--json` is the diagnosis step.
 
+`doctor` also prints informational `notes` (a string array in `--json`) that never affect the exit code: which `sipi` binary answered and when it was built/installed, and — when the working directory is inside a SimPilot checkout — a warning if the checkout's HEAD commit is NEWER than that binary. **Act on that warning before doing any verification work**: a stale install returns the old behavior while reporting the same version number, so a fix that is present in the source can look broken on the simulator. Rebuild and reinstall (`swift build -c release`, then replace the binary on `PATH`), then re-run `doctor`. The notes also name the command that opens a device window (`sipi open-ui`) — sipi itself needs no window.
+
 ## 1.5 UI Driver
 
 Read `ui-driver.md` before the first UI interaction. Use its shell prelude at the top of every Bash call that calls `ui_describe`, `ui_tap_label`, `ui_tap_id`, or `native_*`.

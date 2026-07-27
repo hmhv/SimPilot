@@ -11,6 +11,8 @@
 //                  no grid pass.
 //   tap            `--label` / `--id` / `--value` resolve to an activation point
 //                  via the SimCore resolver; or `-x`/`-y` for a direct point.
+//   set-text       Resolve the same way, then WRITE the element's accessibility
+//                  value — text entry with no keyboard, pasteboard, or focus.
 //
 // All describe output is the SimCore describe-ui JSON contract (top-level array,
 // spaced-colon pretty-print). HID taps go through the native driver in
@@ -45,6 +47,77 @@ private func normalized(_ point: Point, in frame: AXNode.Frame) -> Point? {
     )
 }
 
+/// The accessibility value the GUEST currently reports for the element at
+/// `logical` (a point in describe-ui coordinates), read in a fresh child process.
+///
+/// `set-text` uses this to decide whether a write actually took. It must not read
+/// in-process: the translator that performed the write can serve its cached
+/// element back, which makes an ignored write look successful (a `StaticText`
+/// accepts the setter, echoes the value, and drops it). Returns nil when the
+/// child read fails or finds nothing at the point.
+///
+/// Pass `screen` when the caller already fetched a tree (resolving the target
+/// does), so this does not pay for another tree fetch just to learn the screen
+/// frame; the geometry cannot change inside one action.
+func guestValue(udid: String, at logical: Point, screen: AXNode.Frame? = nil) -> String? {
+    let frame: AXNode.Frame?
+    if let screen {
+        frame = screen
+    } else {
+        frame = (try? ChildTree.nodes(udid: udid, deep: false)).flatMap(screenFrame(of:))
+    }
+    guard let frame,
+          let normalizedPoint = normalized(logical, in: frame),
+          let nodes = try? ChildTree.spawnPointNodes(
+              udid: udid, x: normalizedPoint.x, y: normalizedPoint.y
+          ),
+          let node = nodes.first
+    else { return nil }
+    return node.AXValue
+}
+
+/// What the guest reports after a `set-text` write.
+enum SetTextOutcome {
+    case matched
+    /// The app reports something else — nil when the element could not be read.
+    case mismatch(observed: String?)
+
+    /// The value to show a human, or a marker when nothing could be read.
+    var observedDescription: String {
+        switch self {
+        case .matched: return "(matched)"
+        case .mismatch(let observed):
+            guard let observed else { return "(unreadable)" }
+            return "'\(observed)'"
+        }
+    }
+}
+
+/// Confirm a `set-text` write landed, from the guest's own point of view. Shared
+/// by the `set-text` command and the harness action so both judge a write the
+/// same way.
+///
+/// Polls rather than reading once: the write crosses an XPC boundary into the
+/// app, so an immediate read can still see the previous value, and a single
+/// hiccup in the child read would otherwise fail a step whose write succeeded.
+/// The happy path costs exactly one child read.
+func verifySetText(
+    udid: String,
+    at logical: Point,
+    expected: String,
+    screen: AXNode.Frame? = nil,
+    attempts: Int = 3,
+    delay: TimeInterval = 0.2
+) -> SetTextOutcome {
+    var observed: String?
+    for attempt in 1...max(1, attempts) {
+        observed = guestValue(udid: udid, at: logical, screen: screen)
+        if observed == expected { return .matched }
+        if attempt < attempts { Thread.sleep(forTimeInterval: delay) }
+    }
+    return .mismatch(observed: observed)
+}
+
 /// The logical screen size (describe-ui root frame) for pixel->normalized
 /// conversion in the direct-point `tap` path (Gate 4). Read via ChildTree, which
 /// fetches in-process (repeated in-process fetches now return the full tree) and
@@ -70,8 +143,10 @@ private func tapScreenSize(udid: String) -> ScreenSize? {
 enum ChildTree {
     /// A serialized tree is "degenerate" when it is empty or a single root with
     /// no children and no label — the shape the pre-fix second in-process fetch
-    /// produced. Used to decide whether to fall back to the child-process spawn.
-    private static func isDegenerate(_ roots: [AXNode]) -> Bool {
+    /// produced. Used to decide whether to fall back to the child-process spawn,
+    /// and by the harness to tell "the app is not reachable yet" from "the
+    /// selector is genuinely absent".
+    static func isDegenerate(_ roots: [AXNode]) -> Bool {
         guard let root = roots.first, roots.count == 1 else { return roots.isEmpty }
         let label = root.AXLabel ?? ""
         return label.isEmpty && (root.children?.isEmpty ?? true)
@@ -116,9 +191,28 @@ enum ChildTree {
     }
 
     /// The child-process tree decoded back into AXNodes.
-    private static func spawnNodes(udid: String, deep: Bool) throws -> [AXNode] {
+    static func spawnNodes(udid: String, deep: Bool) throws -> [AXNode] {
         let data = Data(try spawnJSON(udid: udid, deep: deep).utf8)
         return try JSONDecoder().decode([AXNode].self, from: data)
+    }
+
+    /// A single hit-test run in a FRESH child process (`sipi describe-point`).
+    ///
+    /// Needed by `set-text`: after writing an accessibility value, the writing
+    /// process's translator can hand back its own cached element — i.e. echo the
+    /// write — so a same-process re-read cannot tell "the app applied it" from
+    /// "the proxy remembered it". A child process starts with an empty translator
+    /// cache, so what it reports is the guest's state.
+    static func spawnPointNodes(udid: String, x: Double, y: Double) throws -> [AXNode] {
+        let process = Process()
+        process.executableURL = executableURL()
+        process.arguments = ["describe-point", udid, "-x", String(x), "-y", String(y)]
+        let outPipe = Pipe()
+        process.standardOutput = outPipe
+        try process.run()
+        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return try JSONDecoder().decode([AXNode].self, from: outData)
     }
 
     /// The running `sipi` binary, resolved to an absolute path so the child can
@@ -335,4 +429,195 @@ extension Sipi {
             print("ok")
         }
     }
+}
+
+// MARK: - set-text
+
+extension Sipi {
+    /// Write text into a field by setting its accessibility value.
+    ///
+    /// This is a different mechanism from `type`, not a variant of it. `type`
+    /// drives the guest's keyboard (HID keystrokes, or Cmd+V after `simctl
+    /// pbcopy`), so it needs the field focused, it depends on the guest keyboard
+    /// layout / input language, it clobbers the pasteboard, and it silently does
+    /// nothing on a runtime that does not deliver keyboard HID (verified on the
+    /// iOS 27.0 simulator). `set-text` goes through the same accessibility bridge
+    /// `describe-ui` reads: it addresses the field directly, needs no focus and no
+    /// keyboard, and carries any text — Japanese, emoji, anything.
+    ///
+    /// The trade-off is fidelity: nothing is typed, so per-keystroke behaviour
+    /// (`onChange` per character, keyboard toolbars, autocomplete, IME
+    /// composition) is NOT exercised. Use `type` when the keystrokes themselves
+    /// are what the test is about, and `set-text` when the field's content is.
+    struct SetText: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-text",
+            abstract: "Write text into a field via its accessibility value (no keyboard, no pasteboard, no focus needed).",
+            discussion: """
+            Target the field the same way as `tap`: --id / --label / --value (with an
+            optional --element-type filter), or a direct -x/-y point (--norm default,
+            --pixel for logical pixels).
+
+            Unlike `type`, nothing is typed: the element's accessibility value is set
+            directly, so this is independent of the guest keyboard layout, input
+            language/IME, and pasteboard, and it works on runtimes that drop keyboard
+            HID entirely (iOS 27.0 simulators today). Because no keystrokes occur, it
+            does not exercise per-character behaviour — prefer `type` when the typing
+            itself is under test.
+
+            The write is verified by re-reading the element afterward, and the command
+            fails when the value did not take. Pass --no-verify for a field that
+            deliberately reports something else (a secure field showing bullets, or a
+            formatter that rewrites the value).
+            """
+        )
+
+        @OptionGroup var coordinate: CoordinateUnitOptions
+
+        @Argument(help: "Simulator UDID.")
+        var udid: String
+
+        @Argument(help: "The text to write into the field.")
+        var text: String
+
+        @Option(name: .long, help: "Resolve the element matching this AXUniqueId.")
+        var id: String?
+
+        @Option(name: .long, help: "Resolve the element matching this AXLabel.")
+        var label: String?
+
+        @Option(name: .long, help: "Resolve the element matching this AXValue.")
+        var value: String?
+
+        @Option(name: .customLong("element-type"), help: "Restrict --label/--id/--value matches to this accessibility type (e.g. TextField).")
+        var elementType: String?
+
+        @Option(name: .customShort("x"), help: "X (normalized 0...1, or pixels with --pixel). Use with -y to target a point.")
+        var x: Double?
+
+        @Option(name: .customShort("y"), help: "Y (normalized 0...1, or pixels with --pixel). Use with -x to target a point.")
+        var y: Double?
+
+        @Flag(name: .customLong("no-verify"), help: "Do not fail when the re-read value differs from the text written.")
+        var noVerify = false
+
+        func validate() throws {
+            try coordinate.validate()
+            let selectorCount = [id != nil, label != nil, value != nil].filter { $0 }.count
+            if x != nil || y != nil {
+                guard x != nil, y != nil else {
+                    throw ValidationError("Both -x and -y must be provided together.")
+                }
+                if selectorCount > 0 {
+                    throw ValidationError("Use either -x/-y or one of --id/--label/--value, not both.")
+                }
+            } else {
+                if selectorCount == 0 {
+                    throw ValidationError("Either provide both -x/-y, or use --id/--label/--value to target the field.")
+                }
+                if selectorCount > 1 {
+                    throw ValidationError("Use only one of --id, --label, or --value.")
+                }
+            }
+        }
+
+        func run() throws {
+            let driver = NativeDriver()
+            let target = try resolveLogicalPoint(driver: driver)
+
+            do {
+                try driver.setValue(text, at: target.point, udid: udid)
+            } catch {
+                throw ValidationError("Failed to write the accessibility value: \(error)")
+            }
+
+            // A setter that silently does nothing is the failure mode this command
+            // exists to avoid, so the guest's own read decides the exit code. That
+            // read runs in a child process on purpose — see guestValue().
+            if !noVerify {
+                let outcome = verifySetText(
+                    udid: udid, at: target.point, expected: text, screen: target.screen
+                )
+                if case .mismatch = outcome {
+                    emitError(
+                        "Warning: the value did not take. Wrote '\(text)', "
+                        + "the app reports \(outcome.observedDescription). Only editable text elements accept "
+                        + "a value write; if this field intentionally reports something else (secure field, "
+                        + "formatter), pass --no-verify."
+                    )
+                    throw ExitCode.failure
+                }
+            }
+            print("ok")
+        }
+
+        /// The element's logical activation point: resolved from the selector (fast
+        /// tree, then the deep grid pass, exactly like `tap`), or converted from an
+        /// explicit -x/-y point. Carries the screen frame it already fetched so the
+        /// verification read does not fetch another tree for it.
+        private func resolveLogicalPoint(driver: NativeDriver) throws -> ResolvedTarget {
+            if let x, let y {
+                let roots = try ChildTree.nodes(udid: udid, deep: false)
+                guard let frame = screenFrame(of: roots) else {
+                    throw ValidationError("Could not determine the screen frame to convert coordinates.")
+                }
+                let normalizedInput = try CoordinateConverter.normalize(
+                    x: x, y: y, unit: coordinate.unit,
+                    screen: ScreenSize(width: frame.width, height: frame.height)
+                )
+                return ResolvedTarget(
+                    point: Point(
+                        x: frame.x + normalizedInput.x * frame.width,
+                        y: frame.y + normalizedInput.y * frame.height
+                    ),
+                    screen: frame
+                )
+            }
+
+            let query: AccessibilityQuery
+            if let id {
+                query = .id(id)
+            } else if let label {
+                query = .label(label)
+            } else if let value {
+                query = .value(value)
+            } else {
+                throw ValidationError("Either provide both -x/-y, or use --id/--label/--value to target the field.")
+            }
+
+            let roots = try driver.describe(udid, deep: false)
+            do {
+                return ResolvedTarget(
+                    point: try AccessibilityTargetResolver.resolveTap(
+                        roots: roots, query: query, elementType: elementType
+                    ).point,
+                    screen: screenFrame(of: roots)
+                )
+            } catch let error as ElementResolutionError where error.isNotFound {
+                let deepRoots = try ChildTree.nodes(udid: udid, deep: true)
+                do {
+                    return ResolvedTarget(
+                        point: try AccessibilityTargetResolver.resolveTap(
+                            roots: deepRoots, query: query, elementType: elementType
+                        ).point,
+                        screen: screenFrame(of: deepRoots)
+                    )
+                } catch let retry as ElementResolutionError {
+                    emitError("Warning: \(retry.description) No text written.")
+                    throw ExitCode.failure
+                }
+            } catch let error as ElementResolutionError {
+                emitError("Warning: \(error.description) No text written.")
+                throw ExitCode.failure
+            }
+        }
+    }
+}
+
+/// A resolved `set-text` target: where to write, plus the screen frame the
+/// resolution already fetched (so verification reuses it instead of fetching a
+/// tree of its own).
+struct ResolvedTarget {
+    var point: Point
+    var screen: AXNode.Frame?
 }

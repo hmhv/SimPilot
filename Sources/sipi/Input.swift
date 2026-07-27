@@ -7,7 +7,7 @@
 //                  + Cmd+V by default (layout/IME independent; clobbers + restores
 //                  the simulator pasteboard — see §6.10). `--keyboard` injects
 //                  US-keyboard HID via SimCore TextToHIDEvents instead (US text
-//                  only). `--stdin` / `--file`.
+//                  only). `--clear` empties the field first. `--stdin` / `--file`.
 //   key            Press one HID keycode (optionally held for --duration).
 //   key-sequence   Press a comma-separated list of keycodes in order.
 //   key-combo      Hold modifiers, press the key, release modifiers in LIFO order.
@@ -88,6 +88,14 @@ extension Sipi {
             It pastes into the FIRST RESPONDER, so the target field must already be
             focused (tap it first), and it CLOBBERS the simulator pasteboard — sipi
             saves the prior contents and restores them afterward on a best-effort basis.
+            The simulator pasteboard is synced with the Mac pasteboard, so the host
+            clipboard is transiently replaced as well.
+
+            Both methods insert at the caret: a field that already holds text keeps it
+            and ends up with both strings. Pass --clear to select all (Cmd+A) and delete
+            first so the field ends up holding exactly the text passed in. --clear reaches
+            committed text only; text still being composed by an IME is not yet part of
+            the field value and survives a select-all.
 
             Pass --keyboard to inject US-keyboard HID key events instead, for the rare
             field that must receive real per-character keystrokes. Keyboard mode only
@@ -110,6 +118,9 @@ extension Sipi {
 
         @Flag(name: .customLong("keyboard"), help: "Inject US-keyboard HID keystrokes instead of pasting (US-representable text only).")
         var useKeyboard = false
+
+        @Flag(name: .customLong("clear"), help: "Select all (Cmd+A) and delete before inserting, so the field ends up holding only this text.")
+        var clearField = false
 
         func validate() throws {
             let sources = [text != nil, useStdin, inputFile != nil].filter { $0 }.count
@@ -140,7 +151,13 @@ extension Sipi {
             let driver = NativeDriver()
             let method: TextInputMethod = useKeyboard ? .keyboard : .paste
             do {
-                try TextInput.insert(inputText, method: method, driver: driver, udid: udid)
+                try TextInput.insert(
+                    inputText,
+                    method: method,
+                    clear: clearField,
+                    driver: driver,
+                    udid: udid
+                )
             } catch let error as TextInputError {
                 throw ValidationError(error.description)
             } catch let error as SimShellError {

@@ -59,6 +59,11 @@ private struct DoctorReport {
     var developerDir: String
     var checks: [Check]
     var bootedDevices: [String]
+    /// Informational lines that never affect the exit code: which binary is
+    /// running, whether it is stale relative to the surrounding checkout, and how
+    /// to look at a device. Kept out of `checks` on purpose — `checks` is the
+    /// exit-code contract, and none of this is a capability.
+    var notes: [String]
 
     /// Core capabilities that must all pass for exit 0: the three framework
     /// dlopens, the AX bridge, and the HID/transport classes.
@@ -79,6 +84,9 @@ private struct DoctorReport {
         } else {
             lines.append("  booted devices: \(bootedDevices.joined(separator: ", "))")
         }
+        for note in notes {
+            lines.append("  \(note)")
+        }
         lines.append("  result: \(allCorePresent ? "all core capabilities present" : "missing core capabilities")")
         return lines.joined(separator: "\n")
     }
@@ -92,6 +100,7 @@ private struct DoctorReport {
                 "detail": $0.detail
             ] },
             "bootedDevices": bootedDevices,
+            "notes": notes,
             "allCorePresent": allCorePresent
         ]
     }
@@ -193,7 +202,34 @@ private struct DoctorReport {
         return DoctorReport(
             developerDir: developerDir,
             checks: checks,
-            bootedDevices: bootedDevices
+            bootedDevices: bootedDevices,
+            notes: notes(developerDir: developerDir)
         )
+    }
+
+    /// Informational notes. Two things a caller cannot see from the capability
+    /// checks alone: WHICH sipi is answering (and whether the checkout has moved
+    /// past it), and that no simulator window is needed — plus how to open one on
+    /// this Xcode, since `open -a Simulator` no longer resolves on Xcode 27.
+    private static func notes(developerDir: String) -> [String] {
+        var notes: [String] = []
+
+        let build = BuildInfo.probe()
+        if let summary = build.summaryNote { notes.append(summary) }
+        if let warning = build.stalenessWarning { notes.append(warning) }
+
+        if let app = SimulatorUIApp.resolve(developerDir: developerDir) {
+            notes.append(
+                "sipi drives simulators headlessly (no window needed); "
+                + "open \(app.name) with `sipi open-ui` to look at a device."
+            )
+        } else {
+            notes.append(
+                "sipi drives simulators headlessly (no window needed); "
+                + "this Xcode ships no Device Hub / Simulator app to open."
+            )
+        }
+
+        return notes
     }
 }

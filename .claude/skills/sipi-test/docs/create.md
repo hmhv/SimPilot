@@ -44,7 +44,8 @@ Do not write natural-language actions such as `"Tap Settings"`. The harness does
 
 - `tap`: requires `selector` or `point`
 - `long-press`: `selector` or `point`; optional `duration` hold (default 0.5s) — context menus, reorder handles
-- `type`: requires `text`; the focused field must already be active. Enters text by pasting (pasteboard/Cmd+V) by default — layout/language independent; add `"input-method": "keyboard"` only when a field needs real keystrokes (US-representable text only)
+- `type`: requires `text`; the focused field must already be active. Enters text by pasting (pasteboard/Cmd+V) by default — layout/language independent; add `"input-method": "keyboard"` only when a field needs real keystrokes (US-representable text only). Text is inserted at the caret, so add `"clear": true` when the field may already hold something (leftovers from an earlier step or run) and the step's `verify` asserts exact contents
+- `set-text`: requires `text` and exactly one of `selector` / `point`; writes the field's accessibility value instead of typing. No focus, no keyboard, no pasteboard, any script — and it is the only text action that works where keyboard HID is not delivered (iOS 27.0 simulators). Prefer it when the field's CONTENT is what the test needs; keep `type` when the keystrokes are (per-character `onChange`, keyboard toolbars, IME composition). The target must be on screen (it is hit-tested like a tap), and a field that reports masked/reformatted text — a `SecureField` reads back as bullets — needs `"verify-value": false` (the saved-test counterpart of the CLI's `sipi set-text --no-verify`)
 - `key`: requires USB HID `usage`
 - `key-combo`: requires `modifiers` (keycodes) and `key` — e.g. Cmd+A is `{ "modifiers": [227], "key": 4 }`
 - `key-sequence`: requires `keycodes`; optional `delay` between presses

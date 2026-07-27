@@ -226,6 +226,31 @@ public enum SimShell {
         try runChecked(["push", udid, bundleID, "-"], stdin: payload)
     }
 
+    /// Path to an installed app's `.app` bundle on `udid` via
+    /// `simctl get_app_container <udid> <bundle-id> app`. Returns nil when the app
+    /// is not installed or simctl cannot resolve the container — callers use this
+    /// for advisory inspection, so absence must not be fatal.
+    public static func appBundlePath(udid: String, bundleID: String) -> String? {
+        guard let result = try? run(["get_app_container", udid, bundleID, "app"]),
+              result.succeeded else { return nil }
+        let path = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? nil : path
+    }
+
+    /// `UIBackgroundModes` declared by the installed app's `Info.plist`, or nil
+    /// when the plist cannot be read. An installed app with no declaration yields
+    /// an empty array, which is distinct from nil (unknown).
+    public static func appBackgroundModes(udid: String, bundleID: String) -> [String]? {
+        guard let bundlePath = appBundlePath(udid: udid, bundleID: bundleID) else { return nil }
+        let plistPath = (bundlePath as NSString).appendingPathComponent("Info.plist")
+        guard let data = FileManager.default.contents(atPath: plistPath),
+              let plist = try? PropertyListSerialization.propertyList(
+                  from: data, options: [], format: nil) as? [String: Any]
+        else { return nil }
+        guard let modes = plist["UIBackgroundModes"] else { return [] }
+        return (modes as? [String]) ?? []
+    }
+
     /// Set one simulated coordinate.
     public static func setLocation(udid: String, latitude: Double, longitude: Double) throws {
         try requireBooted(udid)
@@ -303,31 +328,77 @@ public enum SimShell {
 
     /// Read the simulator's pasteboard via `simctl pbpaste`. Returns the raw
     /// contents (may be empty). Throws on a non-zero exit so the caller can
-    /// decide whether a save/restore is feasible.
+    /// decide whether a save/restore is feasible. Retried on the same grounds as
+    /// `pbcopy` below: a transient read failure here silently costs the user their
+    /// clipboard, because the `type` paste path can only restore what it saved.
     public static func pbpaste(udid: String) throws -> String {
-        let result = try run(["pbpaste", udid])
-        guard result.succeeded else {
-            throw SimShellError.nonZeroExit(
-                command: "xcrun simctl pbpaste \(udid)",
-                code: result.exitCode,
-                stderr: result.stderr
-            )
+        try retrying(attempts: pasteboardAttempts, delay: pasteboardRetryDelay) {
+            let result = try run(["pbpaste", udid])
+            guard result.succeeded else {
+                throw SimShellError.nonZeroExit(
+                    command: "xcrun simctl pbpaste \(udid)",
+                    code: result.exitCode,
+                    stderr: result.stderr
+                )
+            }
+            return result.stdout
         }
-        return result.stdout
     }
 
     /// Write `text` onto the simulator's pasteboard via `simctl pbcopy`. This
-    /// CLOBBERS the simulator pasteboard; callers that care should save the prior
-    /// contents with `pbpaste` and restore them afterward.
+    /// CLOBBERS the simulator pasteboard (which is synced with the host
+    /// pasteboard); callers that care should save the prior contents with
+    /// `pbpaste` and restore them afterward.
+    ///
+    /// The pasteboard service is reached through the device's launchd, which
+    /// answers with a non-zero exit while it is still coming up (a freshly booted
+    /// device, a just-installed app, a device under load). Because the whole
+    /// default `type` path depends on this call, a lone transient failure would
+    /// fail an otherwise-good test step, so retry briefly before giving up. The
+    /// final failure still carries simctl's stderr.
     public static func pbcopy(_ text: String, udid: String) throws {
-        let result = try run(["pbcopy", udid], stdin: Data(text.utf8))
-        guard result.succeeded else {
-            throw SimShellError.nonZeroExit(
-                command: "xcrun simctl pbcopy \(udid)",
-                code: result.exitCode,
-                stderr: result.stderr
-            )
+        try retrying(attempts: pasteboardAttempts, delay: pasteboardRetryDelay) {
+            let result = try run(["pbcopy", udid], stdin: Data(text.utf8))
+            guard result.succeeded else {
+                throw SimShellError.nonZeroExit(
+                    command: "xcrun simctl pbcopy \(udid)",
+                    code: result.exitCode,
+                    stderr: result.stderr
+                )
+            }
         }
+    }
+
+    /// Total attempts (1 initial + retries) for the pasteboard calls.
+    static let pasteboardAttempts = 3
+    /// Gap between pasteboard attempts. Short enough to stay invisible in a step's
+    /// timing, long enough to outlast a service that is mid-launch.
+    static let pasteboardRetryDelay: TimeInterval = 0.15
+
+    /// Run `body`, retrying up to `attempts` times while it throws. Returns the
+    /// first success; rethrows the LAST error once the attempts are exhausted so
+    /// the caller still reports the real failure (with stderr) rather than a
+    /// synthesized one. Kept internal and closure-based so it is unit-testable
+    /// without a simulator.
+    static func retrying<T>(
+        attempts: Int,
+        delay: TimeInterval,
+        _ body: () throws -> T
+    ) throws -> T {
+        precondition(attempts >= 1, "retrying requires at least one attempt")
+        var lastError: Error?
+        for attempt in 1...attempts {
+            do {
+                return try body()
+            } catch {
+                lastError = error
+                if attempt < attempts, delay > 0 {
+                    Thread.sleep(forTimeInterval: delay)
+                }
+            }
+        }
+        // Unreachable with attempts >= 1: the loop either returned or set lastError.
+        throw lastError ?? SimShellError.launchFailed("retry loop produced no result")
     }
 
     /// One simulator device parsed from `simctl list devices`.

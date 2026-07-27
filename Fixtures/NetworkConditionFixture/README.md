@@ -4,6 +4,12 @@ This fixture verifies the simulator-control actions exposed by the `sipi-test`
 harness. It displays `NWPathMonitor`, request, deep-link, push-notification, and
 location results through stable accessibility identifiers.
 
+The Text Input section also carries a `SecureField` (`secure-input.field`) whose
+character count is echoed as `secure-input.echo`. It exists so the `set-text`
+behaviour on masked fields is measurable rather than assumed: the write reaches
+the app (the count updates) while the field's AXValue reads back as bullets, which
+is why a saved `set-text` step needs `"verify-value": false` there.
+
 Generate the Xcode project and install the app before running the saved test:
 
 ```bash

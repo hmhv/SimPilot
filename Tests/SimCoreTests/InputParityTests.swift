@@ -101,6 +101,29 @@ final class InputParityTests: XCTestCase {
         ])
     }
 
+    func testSelectAllComboIsCmdA() {
+        XCTAssertEqual(KeyInput.selectAllCombo(), [
+            HIDKeyEvent(usage: KeyInput.leftCommandUsage, down: true),
+            HIDKeyEvent(usage: KeyInput.aUsage, down: true),
+            HIDKeyEvent(usage: KeyInput.aUsage, down: false),
+            HIDKeyEvent(usage: KeyInput.leftCommandUsage, down: false)
+        ])
+    }
+
+    /// `type --clear` must select the field's text BEFORE deleting it: a delete
+    /// without a live selection only removes one character, which would leave the
+    /// rest of the old value in front of the newly inserted text.
+    func testClearFieldSelectsAllThenDeletes() {
+        XCTAssertEqual(KeyInput.clearFieldEvents(), [
+            HIDKeyEvent(usage: KeyInput.leftCommandUsage, down: true),
+            HIDKeyEvent(usage: KeyInput.aUsage, down: true),
+            HIDKeyEvent(usage: KeyInput.aUsage, down: false),
+            HIDKeyEvent(usage: KeyInput.leftCommandUsage, down: false),
+            HIDKeyEvent(usage: KeyInput.deleteUsage, down: true),
+            HIDKeyEvent(usage: KeyInput.deleteUsage, down: false)
+        ])
+    }
+
     // MARK: - Gesture presets
 
     func testScrollDownStartsAboveCenterEndsBelow() {

@@ -78,6 +78,19 @@ public final class NativeDriver: SimDriver {
         return Self.node(from: raw)
     }
 
+    public func setValue(_ value: String, at point: Point, udid: String) throws {
+        // Same coordinate contract as `element(at:)`: the caller passes a LOGICAL
+        // point in the current orientation and the bridge's hit-test consumes
+        // PHYSICAL portrait coordinates, so rotate first.
+        let physical = try physicalPoint(point, udid: udid)
+        try SPSimBridge.setAccessibilityValue(
+            value,
+            at: CGPoint(x: physical.x, y: physical.y),
+            forUDID: udid,
+            developerDir: developerDir
+        )
+    }
+
     public func tap(_ point: Point, udid: String) throws {
         // `point` is a LOGICAL normalized 0...1 point in the CURRENT orientation;
         // the Indigo mouse injector works in the PHYSICAL portrait framebuffer, so

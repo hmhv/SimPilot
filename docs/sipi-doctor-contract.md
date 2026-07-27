@@ -87,6 +87,11 @@ terminated by a newline:
   "bootedDevices" : [
     "iPhone 16 Pro (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)"
   ],
+  "notes" : [
+    "binary: /Users/you/.local/bin/sipi (modified 2026-07-18T14:38:00+09:00)",
+    "warning: this binary predates the SimPilot checkout at /Users/you/SimPilot (HEAD 3c32911, committed 2026-07-18T20:45:08+09:00). Rebuild and reinstall before trusting a source change: swift build -c release && cp .build/release/sipi \"$(command -v sipi)\"",
+    "sipi drives simulators headlessly (no window needed); open Device Hub with `sipi open-ui` to look at a device."
+  ],
   "allCorePresent" : true
 }
 ```
@@ -101,6 +106,7 @@ terminated by a newline:
 | `checks[].ok` | bool | Whether this capability fully resolved. |
 | `checks[].detail` | string | Human-readable detail (which class/symbol resolved or why it failed). Informational; do not parse for control flow — gate on `ok` / `allCorePresent`. |
 | `bootedDevices` | array of strings | Booted simulators as `"<name> (<udid>)"`. May be empty. Informational only. |
+| `notes` | array of strings | Free-form advisory lines. **Never affects the exit code** and is not a capability list: which binary answered and when it landed, a staleness warning when the surrounding SimPilot checkout's HEAD is newer than that binary, and how to open a device window on this Xcode. May be empty; wording is not stable — display it, do not parse it. |
 | `allCorePresent` | bool | `true` iff every `checks[].ok` is `true`. Mirrors the exit code: `true` ⇔ exit `0`. |
 
 Consumers should key on `name` + `ok` (and `allCorePresent`), not on array
@@ -119,12 +125,17 @@ sipi doctor
   [ok] SimulatorKit: loaded (SimDeviceLegacyHIDClient resolves)
   [ok] AccessibilityPlatformTranslation: AXPTranslator ready (sharedInstance ✓, tokenDelegate proto ✓, macElement ✓, SimDevice transport ✓)
   booted devices: iPhone 16 Pro (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
+  binary: /Users/you/.local/bin/sipi (modified 2026-07-18T14:38:00+09:00)
+  sipi drives simulators headlessly (no window needed); open Device Hub with `sipi open-ui` to look at a device.
   result: all core capabilities present
 ```
 
 - Each capability line is `  [ok] <name>: <detail>` when present and
   `  [--] <name>: <detail>` when missing.
 - `booted devices:` lists `<name> (<udid>)` entries, or `none`.
+- The `notes` lines follow the booted devices and precede `result:`. They are
+  advisory (binary provenance / staleness warning / how to open a device window)
+  and never change the exit code.
 - The final `result:` line is `all core capabilities present` (exit 0) or
   `missing core capabilities` (exit non-zero).
 

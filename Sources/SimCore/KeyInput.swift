@@ -24,6 +24,11 @@ public enum KeyInput {
     public static let leftCommandUsage = 227
     /// USB HID usage code for the V key (paste target with Cmd held).
     public static let vUsage = 25
+    /// USB HID usage code for the A key (select-all target with Cmd held).
+    public static let aUsage = 4
+    /// USB HID usage code for Delete/Backspace — deletes the selection left by
+    /// Cmd+A.
+    public static let deleteUsage = 42
 
     /// One key press: down then up.
     public static func keyPress(usage: Int) -> [HIDKeyEvent] {
@@ -57,5 +62,21 @@ public enum KeyInput {
     /// established and text is on the simulator pasteboard.
     public static func pasteCombo() -> [HIDKeyEvent] {
         keyCombo(modifiers: [leftCommandUsage], key: vUsage)
+    }
+
+    /// Cmd+A select-all combo — the first half of clearing a focused field.
+    public static func selectAllCombo() -> [HIDKeyEvent] {
+        keyCombo(modifiers: [leftCommandUsage], key: aUsage)
+    }
+
+    /// Clear the focused field: select all of its committed text (Cmd+A), then
+    /// delete the selection. Used by `type --clear` so an insert lands in a known
+    /// state instead of appending to whatever the field already held.
+    ///
+    /// Committed text only. Text still being composed by an IME (marked text) is
+    /// not part of the field's value yet, so a select-all cannot reach it —
+    /// commit or dismiss the composition first.
+    public static func clearFieldEvents() -> [HIDKeyEvent] {
+        selectAllCombo() + keyPress(usage: deleteUsage)
     }
 }

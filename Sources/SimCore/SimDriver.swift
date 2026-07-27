@@ -36,6 +36,17 @@ public protocol SimDriver {
     func describe(_ udid: String, deep: Bool) throws -> [AXNode]
     /// Single `objectAtPoint` lookup — cheap, no grid pass.
     func element(at point: Point, udid: String) throws -> AXNode?
+    /// Write text straight into the element at `point` (LOGICAL coordinates, the
+    /// `describe`/`element(at:)` space) through the accessibility bridge. Needs no
+    /// keyboard, no pasteboard, and no focus, so it is the text-entry path that
+    /// survives a guest keyboard layout / IME — and the only one that works at all
+    /// on runtimes where keyboard HID is not delivered.
+    ///
+    /// Returning without throwing means the setter RAN, not that the app took the
+    /// value: an element that ignores the write accepts the call all the same.
+    /// Callers that need certainty must re-read the value from a fresh process.
+    /// Throws when there is no element at the point or it takes no value write.
+    func setValue(_ value: String, at point: Point, udid: String) throws
     /// Tap at a normalized 0...1 point.
     func tap(_ point: Point, udid: String) throws
     /// Send one touch phase at a normalized 0...1 point.

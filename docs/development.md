@@ -102,7 +102,8 @@ sipi describe-point <udid> -x <x> -y <y>   # single objectAtPoint hit-test (chea
 
 ```sh
 sipi tap <udid> ...                  # tap by --label / --id / --value, or coordinates
-sipi type <udid> "text"              # paste via simctl pbcopy + Cmd+V (default); --keyboard = KeyCode → HID (US only)
+sipi type <udid> "text"              # paste via simctl pbcopy + Cmd+V (default); --keyboard = KeyCode → HID (US only); --clear = Cmd+A + delete first
+sipi set-text <udid> "text" --id <id> # write the field's AX value (no keyboard/pasteboard/focus; verified against the app)
 sipi key / key-sequence / key-combo  # HID keys, sequences, modifier combos
 sipi swipe / touch / drag / gesture  # HID touch phases + gesture presets
 sipi multitouch <udid> <phase> ...   # two-finger touch phase (e.g. pinch)
@@ -142,8 +143,8 @@ Execution and report generation live **inside** the binary (`run-test`,
 single-binary install stays self-contained.
 
 The v2 test `action.type` vocabulary spans the same input surface as the ad-hoc
-CLI: `tap`, `long-press`, `type`, `key`, `key-combo`, `key-sequence`, `button`,
-`swipe`, `drag`, `gesture`, `slider`, `orientation`, `crown`, and `wait`. So
+CLI: `tap`, `long-press`, `type`, `set-text`, `key`, `key-combo`, `key-sequence`,
+`button`, `swipe`, `drag`, `gesture`, `slider`, `orientation`, `crown`, `wait`. So
 toggles, sliders, gestures, modifier combos, and rotation are all expressible as
 deterministic saved steps — each case in `Harness.perform(action:)` reuses the
 same `NativeDriver` call as the matching CLI command. Two-finger `multitouch`
@@ -156,6 +157,7 @@ action). The full per-action JSON shapes are in
 ```sh
 sipi doctor [--json]                 # probe native capabilities; exit 0 only if all present
 sipi version [--json]                # print the sipi version
+sipi open-ui [--json|--print-only]   # open Device Hub (Xcode 27+) / Simulator.app (<=26)
 sipi setup                           # install the embedded skills into Claude Code + Codex
 sipi update                          # download the latest release binary + refresh skills
 sipi uninstall                       # remove skills, install metadata, and the sipi binary

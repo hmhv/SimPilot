@@ -104,6 +104,27 @@ NS_ASSUME_NONNULL_BEGIN
                                                     developerDir:(NSString *)developerDir
                                                            error:(NSError **)error;
 
+/// Set the accessibility value of the element at `point` — the text-entry path
+/// that needs no keyboard at all.
+///
+/// `point` is in the PHYSICAL portrait framebuffer space, like
+/// `elementAtPointForUDID:`, so a rotated caller converts first. The write goes
+/// through the same AXPTranslator bridge `describe-ui` reads, so it reaches the
+/// app's real text storage (a SwiftUI binding observes it) without HID keys, the
+/// pasteboard, or the guest keyboard layout / IME.
+///
+/// A YES return means the setter ran, NOT that the app took the value: an element
+/// that ignores the write still accepts the call, and this process's translator
+/// can echo its own write back, so there is deliberately no read-back here.
+/// Confirming the value is the CALLER's job and must read from a fresh process
+/// (`guestValue` in Perception.swift). Returns NO + error when nothing is at the
+/// point or no setter is available on the element.
++ (BOOL)setAccessibilityValue:(NSString *)value
+                      atPoint:(CGPoint)point
+                      forUDID:(NSString *)udid
+                 developerDir:(NSString *)developerDir
+                        error:(NSError **)error;
+
 // MARK: - In-process HID injection
 //
 // Inject touches and hardware buttons via SimulatorKit's Indigo HID functions

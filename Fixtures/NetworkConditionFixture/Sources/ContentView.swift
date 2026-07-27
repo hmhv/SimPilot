@@ -162,6 +162,7 @@ private extension NWInterface.InterfaceType {
 struct ContentView: View {
     @State private var model = NetworkProbeModel()
     @State private var typedText = ""
+    @State private var secretText = ""
 
     var body: some View {
         NavigationStack {
@@ -175,7 +176,7 @@ struct ContentView: View {
                     locationStatus: model.locationStatus
                 )
                 NetworkRequestSection(model: model)
-                TextEntrySection(text: $typedText)
+                TextEntrySection(text: $typedText, secret: $secretText)
             }
             .navigationTitle("Network Probe")
         }
@@ -234,6 +235,7 @@ private struct NetworkRequestSection: View {
 
 private struct TextEntrySection: View {
     @Binding var text: String
+    @Binding var secret: String
 
     var body: some View {
         Section("Text Input") {
@@ -245,6 +247,15 @@ private struct TextEntrySection: View {
             // exact entered text ("Typed, <value>") through describe-ui.
             LabeledContent("Typed", value: text)
                 .accessibilityIdentifier("text-input.echo")
+            // A secure field reports masked text as its AXValue, so `set-text`
+            // cannot confirm its own write here. Present so that behaviour is
+            // measurable instead of assumed.
+            SecureField("Enter secret", text: $secret)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("secure-input.field")
+            LabeledContent("Secret length", value: "\(secret.count)")
+                .accessibilityIdentifier("secure-input.echo")
         }
     }
 }

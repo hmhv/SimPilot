@@ -132,6 +132,11 @@ static id SPCopySimDeviceForUDID(NSString *udid, NSString *developerDir, NSError
                                                                y:(double)y
                                                     developerDir:(NSString *)developerDir
                                                            error:(NSError **)error;
+- (BOOL)setValue:(NSString *)value
+         atPoint:(CGPoint)point
+         forUDID:(NSString *)udid
+    developerDir:(NSString *)developerDir
+           error:(NSError **)error;
 @end
 
 @interface SPHIDInjector : NSObject
@@ -326,6 +331,18 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
         [hid sendKeyUsage:(uint32_t)usage down:down];
     }
     return YES;
+}
+
++ (BOOL)setAccessibilityValue:(NSString *)value
+                      atPoint:(CGPoint)point
+                      forUDID:(NSString *)udid
+                 developerDir:(NSString *)developerDir
+                        error:(NSError **)error {
+    return [[SPAccessibilityBridge shared] setValue:value
+                                            atPoint:point
+                                            forUDID:udid
+                                       developerDir:developerDir
+                                              error:error];
 }
 
 + (BOOL)sendDigitalCrownDelta:(double)delta udid:(NSString *)udid developerDir:(NSString *)developerDir error:(NSError **)error {
@@ -1121,6 +1138,88 @@ static BOOL SPIsCoverable(NSDictionary *node, CGFloat screenArea) {
         }
         return @[rootNode];
     }
+}
+
+#pragma mark - Accessibility text entry (set value)
+
+// Resolve the macPlatformElement at `point` for `token`, or nil.
+- (nullable id)elementAtPoint:(CGPoint)point token:(NSString *)token {
+    SEL atPoint = NSSelectorFromString(@"objectAtPoint:displayId:bridgeDelegateToken:");
+    if (![_translator respondsToSelector:atPoint]) return nil;
+    id translation = ((id (*)(id, SEL, CGPoint, NSUInteger, id))objc_msgSend)(
+        _translator, atPoint, point, (NSUInteger)0, token);
+    if (translation == nil) return nil;
+    SEL convert = NSSelectorFromString(@"macPlatformElementFromTranslation:");
+    if (![_translator respondsToSelector:convert]) return translation;
+    return ((id (*)(id, SEL, id))objc_msgSend)(_translator, convert, translation);
+}
+
+- (BOOL)setValue:(NSString *)value
+         atPoint:(CGPoint)point
+         forUDID:(NSString *)udid
+    developerDir:(NSString *)developerDir
+           error:(NSError **)error {
+    if (![self ensureLoaded:error]) return NO;
+
+    id device = SPCopySimDeviceForUDID(udid, developerDir, error);
+    if (device == nil) return NO;
+
+    SEL transport = NSSelectorFromString(@"sendAccessibilityRequestAsync:completionQueue:completionHandler:");
+    if (![device respondsToSelector:transport]) {
+        if (error) *error = [NSError errorWithDomain:kBridgeErrorDomain code:23 userInfo:@{
+            NSLocalizedDescriptionKey: @"SimDevice lacks sendAccessibilityRequestAsync"}];
+        return NO;
+    }
+
+    // Same stable token as the tree / hit-test paths (see -stableTokenForDevice:).
+    NSString *token = [self stableTokenForDevice:device udid:udid];
+    id element = [self elementAtPoint:point token:token];
+    if (element == nil) {
+        if (error) *error = [NSError errorWithDomain:kBridgeErrorDomain code:28 userInfo:@{
+            NSLocalizedDescriptionKey: [NSString stringWithFormat:
+                @"No accessibility element at (%.1f, %.1f). Hit-testing only sees what is "
+                @"rendered, so an element that is scrolled out of view (or under the keyboard) "
+                @"has a frame but cannot be hit — scroll it on screen first.",
+                point.x, point.y]}];
+        return NO;
+    }
+
+    // NSAccessibility setter first; KVC covers a build where the element exposes
+    // the property without the setter selector. Both can raise (the translated
+    // element forwards over XPC), so both are guarded.
+    BOOL attempted = NO;
+    NSString *raised = nil;
+    SEL setValueSel = NSSelectorFromString(@"setAccessibilityValue:");
+    if ([element respondsToSelector:setValueSel]) {
+        @try {
+            ((void (*)(id, SEL, id))objc_msgSend)(element, setValueSel, value);
+            attempted = YES;
+        } @catch (id exception) {
+            raised = [exception description];
+        }
+    }
+    if (!attempted) {
+        @try {
+            [element setValue:value forKey:@"accessibilityValue"];
+            attempted = YES;
+        } @catch (id exception) {
+            raised = raised ?: [exception description];
+        }
+    }
+    if (!attempted) {
+        if (error) *error = [NSError errorWithDomain:kBridgeErrorDomain code:29 userInfo:@{
+            NSLocalizedDescriptionKey: [NSString stringWithFormat:
+                @"Element at (%.1f, %.1f) (%@) rejected an accessibility value write%@",
+                point.x, point.y, NSStringFromClass([element class]),
+                raised ? [@": " stringByAppendingString:raised] : @""]}];
+        return NO;
+    }
+
+    // Deliberately NO read-back here: this process's translator can serve its own
+    // cached element, so a re-read would echo the write and report success for an
+    // element that never accepted it. Confirming the write is the caller's job,
+    // and it must read from a FRESH process (see `guestValue` in Perception.swift).
+    return YES;
 }
 
 // Single objectAtPoint hit-test — the cheap, grid-free path behind

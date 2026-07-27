@@ -28,12 +28,27 @@ enum TextInput {
     /// default) clobbers and restores the simulator pasteboard on a best-effort
     /// basis; `keyboard` requires US-keyboard-representable text and errors
     /// otherwise so a test never silently types the wrong characters.
+    ///
+    /// Both methods insert at the caret, so a field that already holds text ends
+    /// up with the two concatenated. Pass `clear: true` to select all (Cmd+A) and
+    /// delete first, which makes the resulting field value depend only on `text`
+    /// — the deterministic choice for a saved test step.
     static func insert(
         _ text: String,
         method: TextInputMethod,
+        clear: Bool = false,
         driver: SimDriver,
         udid: String
     ) throws {
+        if clear {
+            for event in KeyInput.clearFieldEvents() {
+                try driver.key(usage: event.usage, down: event.down, udid: udid)
+                // Same pacing as keyboard injection: Cmd+A and the delete that
+                // consumes the selection are dropped when sent back-to-back.
+                usleep(12 * 1000)
+            }
+        }
+
         switch method {
         case .keyboard:
             guard TextToHIDEvents.validateText(text) else {
@@ -50,6 +65,9 @@ enum TextInput {
         case .paste:
             // The paste target is the first responder, so the field must already
             // be focused. Save and restore the user's prior pasteboard best-effort.
+            // The simulator pasteboard is kept in sync with the HOST pasteboard in
+            // both directions, so this transiently replaces the Mac clipboard too
+            // — the restore below is what puts the user's clipboard back.
             let saved = try? SimShell.pbpaste(udid: udid)
             try SimShell.pbcopy(text, udid: udid)
             for event in KeyInput.pasteCombo() {

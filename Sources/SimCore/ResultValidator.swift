@@ -51,13 +51,14 @@ public enum ResultValidator {
         "type", "selector", "point", "text", "usage", "button", "start", "end", "duration",
         "value", "tolerance", "preset", "modifiers", "key", "keycodes", "delay", "steps", "orientation", "delta",
         "url", "operation", "service", "bundle-id", "latitude", "longitude", "appearance", "content-size",
-        "enabled", "payload", "profile", "arguments", "environment", "input-method"
+        "enabled", "payload", "profile", "arguments", "environment", "input-method", "clear",
+        "verify-value"
     ]
     private static let testSelectorOptional: Set<String> = ["id", "label", "value", "element-type"]
     private static let testPointOptional: Set<String> = ["x", "y", "unit"]
     private static let testVerifyOptional: Set<String> = ["contains", "absent"]
     private static let testActionTypes: Set<String> = [
-        "tap", "type", "key", "button", "swipe", "wait",
+        "tap", "type", "set-text", "key", "button", "swipe", "wait",
         "long-press", "slider", "gesture", "key-combo", "key-sequence", "drag", "orientation", "crown",
         "open-url", "privacy", "push", "location", "appearance", "content-size", "increase-contrast",
         "status-bar", "launch", "terminate", "network-condition"
@@ -327,6 +328,8 @@ public enum ResultValidator {
             checkNumber(path, a, numField, prefix: ordinal + ".", diag)
         }
         checkBool(path, a, "enabled", prefix: ordinal + ".", diag)
+        checkBool(path, a, "clear", prefix: ordinal + ".", diag)
+        checkBool(path, a, "verify-value", prefix: ordinal + ".", diag)
         checkStringArray(path, a, "arguments", prefix: ordinal + ".", diag)
         if let environment = a["environment"] {
             if let values = environment as? JSON,
@@ -377,6 +380,13 @@ public enum ResultValidator {
         case "tap", "long-press":
             if (a["selector"] != nil) == (a["point"] != nil) {
                 diag.errors.append("\(path): \(ordinal) (\(type)) requires exactly one of selector or point")
+            }
+        case "set-text":
+            // Same targeting contract as tap (exactly one of selector/point), plus
+            // the text to write. No input-method / clear: the value is set outright.
+            if !(a["text"] is String) { diag.errors.append("\(path): \(ordinal) (set-text) requires a text string") }
+            if (a["selector"] != nil) == (a["point"] != nil) {
+                diag.errors.append("\(path): \(ordinal) (set-text) requires exactly one of selector or point")
             }
         case "type":
             if !(a["text"] is String) { diag.errors.append("\(path): \(ordinal) (type) requires a text string") }

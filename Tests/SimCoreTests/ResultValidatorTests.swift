@@ -702,4 +702,71 @@ final class ResultValidatorTests: XCTestCase {
         XCTAssertFalse(outcome.isValid)
         XCTAssertTrue(outcome.errors.contains { $0.contains("keyboard") && $0.contains("non-US") }, "\(outcome.errors)")
     }
+
+    // MARK: - type clear
+
+    func testTypeClearFlagAccepted() throws {
+        let outcome = try validateSpec(id: "type-clear", steps: [
+            ["action": ["type": "type", "text": "hello", "clear": true]],
+            ["action": ["type": "type", "text": "hello", "clear": false, "input-method": "keyboard"]]
+        ])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    // MARK: - set-text
+
+    func testSetTextAcceptsSelectorOrPoint() throws {
+        let outcome = try validateSpec(id: "set-text-ok", steps: [
+            ["action": ["type": "set-text", "selector": ["id": "email"], "text": "a@b.c"]],
+            ["action": ["type": "set-text", "point": ["x": 0.5, "y": 0.4], "text": "日本語"]]
+        ])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    /// `verify-value: false` is the escape hatch for a field that reports masked or
+    /// reformatted text (a SecureField answers with bullets), so it must validate.
+    func testSetTextVerifyValueFlag() throws {
+        let ok = try validateSpec(id: "set-text-unverified", steps: [
+            ["action": ["type": "set-text", "selector": ["id": "password"], "text": "s3cret", "verify-value": false]]
+        ])
+        XCTAssertTrue(ok.isValid, "\(ok.errors)")
+
+        let bad = try validateSpec(id: "set-text-verify-value-bad", steps: [
+            ["action": ["type": "set-text", "selector": ["id": "password"], "text": "s3cret", "verify-value": "no"]]
+        ])
+        XCTAssertFalse(bad.isValid)
+        XCTAssertTrue(bad.errors.contains { $0.contains("verify-value") }, "\(bad.errors)")
+    }
+
+    func testSetTextRequiresText() throws {
+        let outcome = try validateSpec(id: "set-text-no-text", steps: [
+            ["action": ["type": "set-text", "selector": ["id": "email"]]]
+        ])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("(set-text) requires a text string") }, "\(outcome.errors)")
+    }
+
+    /// Both or neither target is ambiguous the same way `tap` is, so it is rejected
+    /// rather than silently preferring one.
+    func testSetTextRejectsBothOrNeitherTarget() throws {
+        let both = try validateSpec(id: "set-text-both", steps: [
+            ["action": ["type": "set-text", "selector": ["id": "a"], "point": ["x": 0.1, "y": 0.1], "text": "x"]]
+        ])
+        XCTAssertFalse(both.isValid)
+        XCTAssertTrue(both.errors.contains { $0.contains("(set-text) requires exactly one of selector or point") }, "\(both.errors)")
+
+        let neither = try validateSpec(id: "set-text-neither", steps: [
+            ["action": ["type": "set-text", "text": "x"]]
+        ])
+        XCTAssertFalse(neither.isValid)
+        XCTAssertTrue(neither.errors.contains { $0.contains("(set-text) requires exactly one of selector or point") }, "\(neither.errors)")
+    }
+
+    func testTypeClearMustBeBool() throws {
+        let outcome = try validateSpec(id: "type-clear-bad", steps: [
+            ["action": ["type": "type", "text": "hello", "clear": "yes"]]
+        ])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("clear") }, "\(outcome.errors)")
+    }
 }

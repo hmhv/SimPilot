@@ -132,11 +132,63 @@ By default `type` enters text by pasting it through the simulator pasteboard
 far more reliable than keystroke injection. Add `"input-method": "keyboard"` only
 for a field that must receive real per-character keystrokes; keyboard mode
 supports US-keyboard characters only and is rejected for accented/non-Latin/emoji
-text. Pasting clobbers and best-effort restores the simulator pasteboard.
+text. Pasting clobbers and best-effort restores the simulator pasteboard (which is
+synced with the Mac pasteboard, so the host clipboard is transiently replaced too).
 
 ```json
 { "type": "type", "text": "1234", "input-method": "keyboard" }
 ```
+
+Both methods insert at the caret, so a field that already holds text keeps it and
+ends up with both strings — including leftovers from an earlier step or a previous
+run. Add `"clear": true` to select all (Cmd+A) and delete before inserting, which
+makes the field's resulting value depend only on `text`. Prefer it for any step
+whose `verify` asserts the exact field contents. `clear` reaches committed text
+only: an IME's in-progress composition is not part of the field value yet and
+survives a select-all. `clear` rides on the same keyboard path as `type` itself,
+so it is equally ineffective where keyboard HID is not delivered (iOS 27.0) — use
+`set-text` there, which replaces the whole value and needs no clear.
+
+```json
+{ "type": "type", "text": "replaced", "clear": true }
+```
+
+`set-text` — write a field's content WITHOUT typing (targets the element like `tap`:
+exactly one of `selector` / `point`, plus `text`):
+
+```json
+{ "type": "set-text", "selector": { "id": "login.email" }, "text": "user@example.com" }
+```
+
+`set-text` sets the element's accessibility value directly, so it needs no keyboard,
+no pasteboard, and no focus, and it carries any text (Japanese, emoji) regardless of
+the guest keyboard layout or IME. It is the only text-entry action that works on a
+runtime that does not deliver keyboard HID (iOS 27.0 simulators today, where `type`
+silently enters nothing). The write is confirmed against a fresh read of the app, so
+the step FAILS when the value did not take — only editable text elements accept it.
+
+Because nothing is typed, per-keystroke behaviour is not exercised (`onChange` per
+character, keyboard toolbars, autocomplete, IME composition). Choose per intent: use
+`type` when the typing itself is under test, `set-text` when the field's content is
+what matters.
+
+Two constraints to plan around:
+
+- The target must be **on screen**. The write goes through a hit-test at the element's
+  activation point, so a field scrolled out of view (or hidden under the keyboard) has
+  a frame but cannot be hit — scroll it into view first, exactly as before a `tap`.
+- A field that deliberately reports something other than what was written fails the
+  built-in confirmation. `SecureField` is the common case: the write lands (measured —
+  an 11-character write reached the app) but its AXValue reads back as `•••••••••••`.
+  Use `"verify-value": false` there and assert on the app's own output instead:
+
+```json
+{ "type": "set-text", "selector": { "id": "login.password" }, "text": "s3cret", "verify-value": false }
+```
+
+`"verify-value": false` records the step's method as `set-text…+unverified` in
+`result.json`, so the artifact never implies a confirmation that did not happen. It
+is the saved-test counterpart of the CLI's `sipi set-text --no-verify`.
 
 `key`:
 

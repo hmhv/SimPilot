@@ -114,14 +114,17 @@ private struct HarnessAction: Decodable {
     var arguments: [String]?      // launch argv or status-bar override args
     var environment: [String: String]? // launch environment (without SIMCTL_CHILD_)
     var inputMethod: String?      // type: paste (default) or keyboard
+    var clear: Bool?              // type: empty the field before inserting
+    var verifyValue: Bool?        // set-text: confirm the written value (default true)
 
     enum CodingKeys: String, CodingKey {
         case type, selector, point, text, usage, button, start, end, duration
         case value, tolerance, preset, modifiers, key, keycodes, delay, steps, orientation, delta
-        case url, operation, service, latitude, longitude, appearance, enabled, payload, profile, arguments, environment
+        case url, operation, service, latitude, longitude, appearance, enabled, payload, profile, arguments, environment, clear
         case bundleID = "bundle-id"
         case contentSize = "content-size"
         case inputMethod = "input-method"
+        case verifyValue = "verify-value"
     }
 }
 
@@ -435,6 +438,16 @@ private final class HarnessRunner {
             }
             _ = try SimShell.launch(udid: udid, bundleID: test.app ?? bundleID)
             usleep(700 * 1000)
+            // The fixed sleep alone is not enough on every runtime (iOS 27.0 keeps
+            // answering with a degenerate tree well past it), so wait for the app
+            // to actually be reachable before the first step runs.
+            let launchWaitStarted = Date()
+            let roots = waitForUsableTree()
+            if ChildTree.isDegenerate(roots) {
+                testTrace.event("launch-tree-unavailable", fields: [
+                    "waited": Date().timeIntervalSince(launchWaitStarted)
+                ])
+            }
         }
 
         var stepResults: [[String: Any]] = []
@@ -590,8 +603,12 @@ private final class HarnessRunner {
         case "type":
             guard let text = action.text else { throw HarnessError("type action requires text.") }
             let method = try resolveInputMethod(action.inputMethod)
-            try TextInput.insert(text, method: method, driver: driver, udid: udid)
-            return ["method": "input", "value": method.rawValue]
+            let clear = action.clear ?? false
+            try TextInput.insert(text, method: method, clear: clear, driver: driver, udid: udid)
+            return ["method": "input", "value": clear ? "\(method.rawValue)+clear" : method.rawValue]
+
+        case "set-text":
+            return try performSetText(action)
 
         case "key":
             guard let usage = action.usage else { throw HarnessError("key action requires usage.") }
@@ -703,9 +720,11 @@ private final class HarnessRunner {
             guard payloadData.count <= 4096 else {
                 throw HarnessError("push payload must not exceed 4096 bytes.")
             }
+            let pushTarget = action.bundleID ?? bundleID
+            warnIfSilentPushCannotWake(payload: payloadData, udid: udid, bundleID: pushTarget)
             try SimShell.push(
                 udid: udid,
-                bundleID: action.bundleID ?? bundleID,
+                bundleID: pushTarget,
                 payload: payloadData
             )
             return ["method": "simctl", "value": "push"]
@@ -777,6 +796,9 @@ private final class HarnessRunner {
                 environment: action.environment ?? [:],
                 terminateRunning: true
             )
+            // Same reason as the pre-test launch: don't hand the next step a tree
+            // the app has not populated yet.
+            waitForUsableTree()
             return ["method": "simctl", "value": "launch:\(targetBundleID)"]
 
         case "terminate":
@@ -841,6 +863,84 @@ private final class HarnessRunner {
             throw HarnessError("Could not normalize the resolved point.")
         }
         return point
+    }
+
+    /// The resolved element's activation point in LOGICAL coordinates (the
+    /// describe-ui / accessibility space), with the screen frame that resolution
+    /// already fetched. `set-text` writes through the accessibility bridge, which
+    /// addresses elements in that space, so it must not go through the normalized
+    /// HID conversion `resolveSelectorPoint` does.
+    private func resolveSelectorLogicalPoint(_ selector: HarnessSelector) throws -> ResolvedTarget {
+        let query = try accessibilityQuery(selector)
+        let roots = try resolvingRoots(query: query, elementType: selector.elementType)
+        return ResolvedTarget(
+            point: try AccessibilityTargetResolver.resolveTap(
+                roots: roots, query: query, elementType: selector.elementType
+            ).point,
+            screen: screenFrame(of: roots)
+        )
+    }
+
+    /// Convert an action's normalized/pixel point spec into a LOGICAL point.
+    private func logicalPoint(_ spec: HarnessPoint) throws -> ResolvedTarget {
+        let normalizedSpec = try normalizedPoint(spec)
+        let roots = try driver.describe(udid, deep: false)
+        guard let frame = screenFrame(of: roots) else {
+            throw HarnessError("Could not determine the screen frame to convert the point.")
+        }
+        return ResolvedTarget(
+            point: Point(
+                x: frame.x + normalizedSpec.x * frame.width,
+                y: frame.y + normalizedSpec.y * frame.height
+            ),
+            screen: frame
+        )
+    }
+
+    /// Write text straight into a field's accessibility value — no keyboard, no
+    /// pasteboard, no focus. The write is confirmed by re-reading the element in a
+    /// FRESH process (see `guestValue`): the writing process's translator can echo
+    /// its own write back, so an in-process read would let a step "pass" against an
+    /// element that never accepted the text.
+    private func performSetText(_ action: HarnessAction) throws -> [String: Any] {
+        guard let text = action.text else { throw HarnessError("set-text action requires text.") }
+        let target: ResolvedTarget
+        var method = "set-text"
+        if let selector = action.selector {
+            target = try resolveSelectorLogicalPoint(selector)
+            if let id = selector.id { method = "set-text:id:\(id)" }
+        } else if let pointSpec = action.point {
+            target = try logicalPoint(pointSpec)
+            method = "set-text:point"
+        } else {
+            throw HarnessError("set-text action requires selector or point.")
+        }
+
+        try driver.setValue(text, at: target.point, udid: udid)
+
+        // Confirming the write is the default, because an element that ignores it
+        // still accepts the setter. `"verify-value": false` is the escape hatch for
+        // a field that deliberately reports something else — a SecureField answers
+        // with bullets (measured: an 11-character write reads back as
+        // "•••••••••••"), and a formatter can rewrite what it was given. The
+        // recorded method says which of the two ran, so the artifact never implies
+        // a confirmation that did not happen.
+        guard action.verifyValue ?? true else {
+            return ["method": "input", "value": method + "+unverified"]
+        }
+
+        let outcome = verifySetText(
+            udid: udid, at: target.point, expected: text, screen: target.screen
+        )
+        if case .mismatch = outcome {
+            throw HarnessError(
+                "set-text did not take: wrote '\(text)', the app reports "
+                + "\(outcome.observedDescription). Only editable text elements accept a value write; "
+                + "for a field that intentionally reports something else (secure field, formatter) "
+                + "set \"verify-value\": false and assert on the app's own output instead."
+            )
+        }
+        return ["method": "input", "value": method]
     }
 
     private func validateKeycodes(_ codes: [Int]) throws {
@@ -985,6 +1085,32 @@ private final class HarnessRunner {
         usleep(UInt32(min(max(micros, 0), Double(UInt32.max))))
     }
 
+    /// A silent push (`aps.content-available: 1` with no `alert`) only reaches an
+    /// app that declares the `remote-notification` background mode: without it iOS
+    /// drops the wake, the app never runs, and the step reads as an unexplained
+    /// no-op even though `simctl push` succeeded. Warn — never fail — when the
+    /// INSTALLED app's Info.plist lacks the mode, and name the two ways out.
+    /// Stays silent when the plist cannot be read (app not installed yet, or the
+    /// container is unreadable): an advisory check must not invent findings.
+    private func warnIfSilentPushCannotWake(payload: Data, udid: String, bundleID: String) {
+        guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+              let aps = object["aps"] as? [String: Any] else { return }
+        let contentAvailable = (aps["content-available"] as? NSNumber)?.intValue ?? 0
+        guard contentAvailable == 1, aps["alert"] == nil else { return }
+        guard let modes = SimShell.appBackgroundModes(udid: udid, bundleID: bundleID),
+              !modes.contains("remote-notification") else { return }
+        let declared: String = modes.isEmpty
+            ? " (no background modes at all)"
+            : " (has: \(modes.joined(separator: ", ")))"
+        var message = "[sipi] warning: silent push (content-available, no alert) to \(bundleID), "
+        message += "but its Info.plist declares no 'remote-notification' UIBackgroundModes"
+        message += declared
+        message += ". iOS will not wake the app, so this step cannot observe a reaction. "
+        message += "Add the background mode to the app, or send an alert payload (aps.alert) "
+        message += "if the test only needs a visible notification."
+        emitError(message)
+    }
+
     /// Resolve the `type` action's text-entry method, defaulting to paste so
     /// input is independent of the guest keyboard layout and input language.
     private func resolveInputMethod(_ raw: String?) throws -> TextInputMethod {
@@ -995,8 +1121,35 @@ private final class HarnessRunner {
         return method
     }
 
+    /// Wait (bounded) for the accessibility tree to become usable, and return the
+    /// last tree fetched.
+    ///
+    /// Right after `simctl launch` the bridge answers with a degenerate tree — a
+    /// single 0x0 `Application` root, no children — until the app is actually
+    /// reachable. On iOS 26 the fixed post-launch sleep covered it; on iOS 27.0 it
+    /// does not, and the first step of every test failed as "element not found"
+    /// against an empty tree. Polling here turns that into a short wait instead of
+    /// a false failure. Returning the last tree (even if still degenerate) keeps
+    /// the caller's own error path in charge of reporting.
+    @discardableResult
+    private func waitForUsableTree(timeout: TimeInterval = 5.0) -> [AXNode] {
+        let deadline = Date().addingTimeInterval(timeout)
+        var roots = (try? driver.describe(udid, deep: false)) ?? []
+        while ChildTree.isDegenerate(roots), Date() < deadline {
+            usleep(250 * 1000)
+            roots = (try? driver.describe(udid, deep: false)) ?? []
+        }
+        return roots
+    }
+
     private func resolvingRoots(query: AccessibilityQuery, elementType: String?) throws -> [AXNode] {
-        let fast = try driver.describe(udid, deep: false)
+        var fast = try driver.describe(udid, deep: false)
+        // An app that is still coming up yields a degenerate tree; resolving
+        // against it would report the selector as missing. Wait for a real tree
+        // first, then let resolution decide.
+        if ChildTree.isDegenerate(fast) {
+            fast = waitForUsableTree()
+        }
         do {
             _ = try AccessibilityTargetResolver.resolveTap(roots: fast, query: query, elementType: elementType)
             return fast
@@ -1061,7 +1214,15 @@ private final class HarnessRunner {
             if let point = action.point { return "long-press \(point.x),\(point.y)" }
             return "long-press"
         case "type":
-            return "type text"
+            return (action.clear ?? false) ? "type text (clear)" : "type text"
+        case "set-text":
+            if let selector = action.selector {
+                if let id = selector.id { return "set-text id \(id)" }
+                if let label = selector.label { return "set-text label \(label)" }
+                if let value = selector.value { return "set-text value \(value)" }
+            }
+            if let point = action.point { return "set-text \(point.x),\(point.y)" }
+            return "set-text"
         case "key":
             return "key \(action.usage ?? 0)"
         case "key-combo":
