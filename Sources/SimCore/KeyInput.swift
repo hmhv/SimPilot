@@ -73,9 +73,13 @@ public enum KeyInput {
     /// delete the selection. Used by `type --clear` so an insert lands in a known
     /// state instead of appending to whatever the field already held.
     ///
-    /// Committed text only. Text still being composed by an IME (marked text) is
-    /// not part of the field's value yet, so a select-all cannot reach it —
-    /// commit or dismiss the composition first.
+    /// Only reliable when NO IME composition is pending. Measured with a Japanese
+    /// keyboard: while text is still being composed the guest gives Cmd+A to the
+    /// IME instead of the field, so the delete removes a single character and the
+    /// previously committed text survives (`あbc` + clear + paste `world` came out
+    /// as `あb world`). Discard the composition first (HID Escape, usage 41) — or
+    /// use the accessibility write behind `sipi set-text`, which replaces the whole
+    /// value without keystrokes.
     public static func clearFieldEvents() -> [HIDKeyEvent] {
         selectAllCombo() + keyPress(usage: deleteUsage)
     }

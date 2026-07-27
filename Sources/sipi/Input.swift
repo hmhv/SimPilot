@@ -93,9 +93,15 @@ extension Sipi {
 
             Both methods insert at the caret: a field that already holds text keeps it
             and ends up with both strings. Pass --clear to select all (Cmd+A) and delete
-            first so the field ends up holding exactly the text passed in. --clear reaches
-            committed text only; text still being composed by an IME is not yet part of
-            the field value and survives a select-all.
+            first. --clear only clears reliably when no IME composition is pending: with
+            one, the guest gives Cmd+A to the IME and the delete removes a single
+            character, leaving the old text (measured under a Japanese keyboard). Send
+            `sipi key 41` (Escape) first to discard a composition, or use `sipi set-text`,
+            which replaces the whole value without touching the keyboard.
+
+            On an iOS 27.0 simulator NOTHING here is delivered — paste, --keyboard and
+            --clear all leave the field untouched while this command still prints ok.
+            Use `sipi set-text` on that runtime.
 
             Pass --keyboard to inject US-keyboard HID key events instead, for the rare
             field that must receive real per-character keystrokes. Keyboard mode only

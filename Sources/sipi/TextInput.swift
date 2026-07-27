@@ -31,8 +31,10 @@ enum TextInput {
     ///
     /// Both methods insert at the caret, so a field that already holds text ends
     /// up with the two concatenated. Pass `clear: true` to select all (Cmd+A) and
-    /// delete first, which makes the resulting field value depend only on `text`
-    /// — the deterministic choice for a saved test step.
+    /// delete first. `clear` only clears reliably when no IME composition is
+    /// pending (see `KeyInput.clearFieldEvents`); for a field that must simply end
+    /// up holding a given value, the accessibility write behind `sipi set-text` is
+    /// the deterministic path — it needs no keyboard at all.
     static func insert(
         _ text: String,
         method: TextInputMethod,

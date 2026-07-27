@@ -467,8 +467,13 @@ extension Sipi {
 
             The write is verified by re-reading the element afterward, and the command
             fails when the value did not take. Pass --no-verify for a field that
-            deliberately reports something else (a secure field showing bullets, or a
-            formatter that rewrites the value).
+            deliberately reports something else: a secure field shows bullets, a
+            formatter rewrites the value, and an EMPTY write reads back as the field's
+            placeholder (so clearing a field always needs --no-verify).
+
+            Because nothing is typed, a field that filters input as it is typed (a
+            length cap, a character whitelist) can end up holding a value a user could
+            not have entered.
             """
         )
 

@@ -121,37 +121,52 @@ Step fields:
 { "type": "tap", "point": { "x": 0.5, "y": 0.8, "unit": "norm" } }
 ```
 
-`type` (the field must already be focused — tap it first):
+`type` — keystroke-level entry, for steps where the TYPING is the subject
+(per-character `onChange`, keyboard toolbar, candidate bar, Return/submit). For
+simply putting content in a field, use `set-text` below instead. The field must
+already be focused (tap it first):
 
 ```json
 { "type": "type", "text": "hello@example.com" }
 ```
 
-By default `type` enters text by pasting it through the simulator pasteboard
-(Cmd+V), which is independent of the guest keyboard layout and input language —
-far more reliable than keystroke injection. Add `"input-method": "keyboard"` only
-for a field that must receive real per-character keystrokes; keyboard mode
-supports US-keyboard characters only and is rejected for accented/non-Latin/emoji
-text. Pasting clobbers and best-effort restores the simulator pasteboard (which is
-synced with the Mac pasteboard, so the host clipboard is transiently replaced too).
+By default `type` pastes through the simulator pasteboard (Cmd+V), which is
+independent of the guest keyboard layout and input language. Add
+`"input-method": "keyboard"` only for a field that must receive real per-character
+keystrokes; keyboard mode supports US-keyboard characters only and is rejected for
+accented/non-Latin/emoji text. Pasting clobbers and best-effort restores the
+simulator pasteboard (which is synced with the Mac pasteboard, so the host
+clipboard is transiently replaced too).
 
 ```json
 { "type": "type", "text": "1234", "input-method": "keyboard" }
 ```
 
-Both methods insert at the caret, so a field that already holds text keeps it and
-ends up with both strings — including leftovers from an earlier step or a previous
-run. Add `"clear": true` to select all (Cmd+A) and delete before inserting, which
-makes the field's resulting value depend only on `text`. Prefer it for any step
-whose `verify` asserts the exact field contents. `clear` reaches committed text
-only: an IME's in-progress composition is not part of the field value yet and
-survives a select-all. `clear` rides on the same keyboard path as `type` itself,
-so it is equally ineffective where keyboard HID is not delivered (iOS 27.0) — use
-`set-text` there, which replaces the whole value and needs no clear.
+Both methods insert at the caret, so a field that already holds text ends up with
+both strings — including leftovers from an earlier step or a previous run. Add
+`"clear": true` to select all (Cmd+A) and delete before inserting.
 
 ```json
 { "type": "type", "text": "replaced", "clear": true }
 ```
+
+Measured limits of the keyboard paths, all on Xcode 27.0 beta 4:
+
+- On an **iOS 27.0** runtime NONE of it is delivered: paste, `keyboard`, and
+  `clear` all leave the field untouched while the step still reports the action as
+  performed. Use `set-text` there.
+- Under a **non-Latin IME** (a Japanese keyboard, for example) `"input-method":
+  "keyboard"` text arrives as an in-progress COMPOSITION, not committed text:
+  `abc` shows up as `あbc`, and dismissing the composition discards all of it.
+  `describe-ui` reports composing text in AXValue, so a `verify` can pass on text
+  the field never committed.
+- `"clear": true` is unreliable while a composition is pending: the select-all is
+  swallowed by the IME and only one character is deleted, so old text survives
+  (`あbc` + clear + `world` measured as `あb world`). With no composition pending
+  it clears exactly.
+
+`set-text` has none of these failure modes — prefer it whenever the step only
+needs the field to hold a given value.
 
 `set-text` — write a field's content WITHOUT typing (targets the element like `tap`:
 exactly one of `selector` / `point`, plus `text`):
@@ -168,11 +183,13 @@ silently enters nothing). The write is confirmed against a fresh read of the app
 the step FAILS when the value did not take — only editable text elements accept it.
 
 Because nothing is typed, per-keystroke behaviour is not exercised (`onChange` per
-character, keyboard toolbars, autocomplete, IME composition). Choose per intent: use
-`type` when the typing itself is under test, `set-text` when the field's content is
-what matters.
+character, keyboard toolbars, autocomplete, IME composition) — and a field that
+filters input as it is typed (a length cap, a character whitelist) may accept a
+value through this path that a user could not have typed (not measured; assume it
+can happen). Choose per intent: `set-text` when the field's content is what
+matters, `type` when the typing itself is under test.
 
-Two constraints to plan around:
+Three constraints to plan around:
 
 - The target must be **on screen**. The write goes through a hit-test at the element's
   activation point, so a field scrolled out of view (or hidden under the keyboard) has
@@ -185,6 +202,10 @@ Two constraints to plan around:
 ```json
 { "type": "set-text", "selector": { "id": "login.password" }, "text": "s3cret", "verify-value": false }
 ```
+
+- Clearing a field with `"text": ""` cannot be confirmed: an empty field reports its
+  PLACEHOLDER as AXValue, which never equals `""`. Pair an empty write with
+  `"verify-value": false` and assert on the app's own output.
 
 `"verify-value": false` records the step's method as `set-text…+unverified` in
 `result.json`, so the artifact never implies a confirmation that did not happen. It
