@@ -52,16 +52,41 @@ public enum ResultValidator {
         "value", "tolerance", "preset", "modifiers", "key", "keycodes", "delay", "steps", "orientation", "delta",
         "url", "operation", "service", "bundle-id", "latitude", "longitude", "appearance", "content-size",
         "enabled", "payload", "profile", "arguments", "environment", "input-method", "clear",
-        "verify-value"
+        "verify-value", "verify-effect", "direction", "separation", "points", "phase", "settings"
     ]
     private static let testSelectorOptional: Set<String> = ["id", "label", "value", "element-type"]
     private static let testPointOptional: Set<String> = ["x", "y", "unit"]
-    private static let testVerifyOptional: Set<String> = ["contains", "absent"]
+    private static let testVerifyOptional: Set<String> = ["contains", "absent", "matches", "not-matches", "elements"]
+    private static let testElementConditionOptional: Set<String> = [
+        "id", "label", "value", "element-type",
+        "exists", "enabled", "value-equals", "value-matches",
+        "count", "min-count", "max-count", "min-width", "min-height"
+    ]
+    private static let testElementSelectorKeys: Set<String> = ["id", "label", "value", "element-type"]
+    /// The facets a `display-state` action may set. Anything else is a typo, not
+    /// an extension point: devicectl would silently ignore it.
+    private static let testDisplaySettingKeys: Set<String> = [
+        "look-and-feel", "reduce-motion", "reduce-transparency", "show-borders",
+        "liquid-glass-opacity", "color-filter", "color-filter-type",
+        "color-filter-intensity", "larger-accessibility-sizes"
+    ]
+    /// Facets devicectl can write but `display-state` deliberately does not own,
+    /// because a dedicated action already owns them and captures its own restore
+    /// baseline. Two mechanisms moving one facet means two baselines and a restore
+    /// that lands on whichever ran last, so these are rejected with a pointer to
+    /// the right action rather than silently accepted.
+    private static let testDisplaySettingKeysOwnedElsewhere: [String: String] = [
+        "mode": "appearance",
+        "text-size": "content-size",
+        "increase-contrast": "increase-contrast"
+    ]
     private static let testActionTypes: Set<String> = [
-        "tap", "type", "set-text", "key", "button", "swipe", "wait",
+        "tap", "double-tap", "type", "set-text", "key", "button", "swipe", "wait",
         "long-press", "slider", "gesture", "key-combo", "key-sequence", "drag", "orientation", "crown",
+        "pinch", "multitouch",
         "open-url", "privacy", "push", "location", "appearance", "content-size", "increase-contrast",
-        "status-bar", "launch", "terminate", "network-condition"
+        "status-bar", "launch", "terminate", "network-condition",
+        "display-state", "voiceover", "biometrics"
     ]
 
     private static let suiteRequired: Set<String> = ["name", "tests"]
@@ -89,8 +114,13 @@ public enum ResultValidator {
     private static let resultFailureTypes: Set<String> = ["action", "verify", "timeout"]
     private static let attemptedMethodRequired: Set<String> = ["method"]
     private static let attemptedMethodOptional: Set<String> = ["value"]
+    /// The `method` values the harness writes into `result.json`. Every string
+    /// `perform(action:)` can return must appear here, or `sipi validate` rejects
+    /// the harness's own output. `multitouch` covers pinch/multitouch steps;
+    /// `devicectl` covers the device-state actions.
     private static let attemptedMethodTypes: Set<String> = [
-        "tap-label", "tap-id", "tap-value", "touch-coordinate", "input", "simctl", "network-condition"
+        "tap-label", "tap-id", "tap-value", "touch-coordinate", "input", "simctl",
+        "network-condition", "multitouch", "devicectl"
     ]
     private static let screenshotsOptional: Set<String> = ["before", "after"]
     private static let verifyRequired: Set<String> = ["check", "found"]
@@ -294,15 +324,149 @@ public enum ResultValidator {
                             diag.errors.append("\(path): steps[\(i)].verify.\(key) conditions must not be empty or whitespace")
                         }
                     }
+                    // Regex conditions: string arrays, non-empty, and compilable.
+                    // An uncompilable pattern would evaluate to a permanent failure
+                    // at run time, which is a spec bug worth catching here.
+                    for key in ["matches", "not-matches"] where v[key] != nil {
+                        guard let arr = v[key] as? [Any], arr.allSatisfy({ $0 is String }) else {
+                            diag.errors.append("\(path): steps[\(i)].verify.\(key) must be a string array")
+                            continue
+                        }
+                        for pattern in arr.compactMap({ $0 as? String }) {
+                            if pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                diag.errors.append("\(path): steps[\(i)].verify.\(key) patterns must not be empty or whitespace")
+                            } else if (try? NSRegularExpression(pattern: pattern)) == nil {
+                                diag.errors.append("\(path): steps[\(i)].verify.\(key) pattern '\(pattern)' is not a valid regular expression")
+                            }
+                        }
+                    }
+                    var elementsArr: [Any] = []
+                    if let elements = v["elements"] {
+                        guard let arr = elements as? [Any] else {
+                            diag.errors.append("\(path): steps[\(i)].verify.elements must be an array of objects")
+                            continue
+                        }
+                        elementsArr = arr
+                        for (e, element) in arr.enumerated() {
+                            guard let condition = element as? JSON else {
+                                diag.errors.append("\(path): steps[\(i)].verify.elements[\(e)] must be an object")
+                                continue
+                            }
+                            validateElementCondition(
+                                path, condition, ordinal: "steps[\(i)].verify.elements[\(e)]", diag)
+                        }
+                    }
                     // A verify with no conditions would pass vacuously in the harness
                     // (empty allSatisfy is true), so a verify-only step would PASS
                     // without checking anything. Require at least one condition.
                     let containsArr = (v["contains"] as? [Any]) ?? []
                     let absentArr = (v["absent"] as? [Any]) ?? []
-                    if containsArr.isEmpty && absentArr.isEmpty {
-                        diag.errors.append("\(path): steps[\(i)].verify must have at least one contains or absent condition")
+                    let matchesArr = (v["matches"] as? [Any]) ?? []
+                    let notMatchesArr = (v["not-matches"] as? [Any]) ?? []
+                    if containsArr.isEmpty && absentArr.isEmpty && matchesArr.isEmpty
+                        && notMatchesArr.isEmpty && elementsArr.isEmpty {
+                        diag.errors.append(
+                            "\(path): steps[\(i)].verify must have at least one contains, absent, matches, not-matches, or elements condition")
                     }
                 }
+            }
+        }
+    }
+
+    /// Type-check the `settings` facets against what `HarnessDisplaySettings`
+    /// decodes them as.
+    ///
+    /// Runs for every action, not just `display-state`: `settings` is a shared
+    /// optional key, and the decoder is type-strict wherever it appears. Only the
+    /// types are checked here — which facets are permitted, their allowed values,
+    /// and their interdependencies are `display-state` semantics and live with
+    /// that case.
+    private static func validateDisplaySettingTypes(
+        _ path: String, _ settings: JSON, ordinal: String, _ diag: Diagnostics
+    ) {
+        for boolFacet in [
+            "increase-contrast", "reduce-motion", "reduce-transparency",
+            "show-borders", "color-filter", "larger-accessibility-sizes"
+        ] {
+            checkBool(path, settings, boolFacet, prefix: ordinal + ".", diag)
+        }
+        for stringFacet in ["mode", "look-and-feel", "text-size", "color-filter-type"] {
+            checkString(path, settings, stringFacet, prefix: ordinal + ".", diag)
+        }
+        for numberFacet in ["liquid-glass-opacity", "color-filter-intensity"] {
+            checkNumber(path, settings, numberFacet, prefix: ordinal + ".", diag)
+        }
+    }
+
+    /// Validate one structured element assertion. The rules that matter:
+    /// a selector is mandatory (an assertion with none would silently apply to the
+    /// whole screen), at least one assertion must be present beyond the selector
+    /// OR the bare selector means "exists", counts must be non-negative, and
+    /// `value-matches` must compile.
+    private static func validateElementCondition(_ path: String, _ c: JSON, ordinal: String, _ diag: Diagnostics) {
+        checkKeys(path, c, required: [], optional: testElementConditionOptional, prefix: ordinal + " ", diag)
+
+        for stringField in ["id", "label", "value", "element-type", "value-equals", "value-matches"] {
+            checkString(path, c, stringField, prefix: ordinal + ".", diag)
+        }
+        for boolField in ["exists", "enabled"] {
+            checkBool(path, c, boolField, prefix: ordinal + ".", diag)
+        }
+        for intField in ["count", "min-count", "max-count"] {
+            checkInteger(path, c, intField, prefix: ordinal + ".", diag)
+            if let value = c[intField] as? Int, value < 0 {
+                diag.errors.append("\(path): \(ordinal).\(intField) must be zero or greater")
+            }
+        }
+        for numField in ["min-width", "min-height"] {
+            checkNumber(path, c, numField, prefix: ordinal + ".", diag)
+            if let value = (c[numField] as? NSNumber)?.doubleValue, value < 0 {
+                diag.errors.append("\(path): \(ordinal).\(numField) must be zero or greater")
+            }
+        }
+
+        if Set(c.keys).isDisjoint(with: testElementSelectorKeys) {
+            diag.errors.append(
+                "\(path): \(ordinal) requires at least one selector (id, label, value, or element-type)")
+        }
+        if let pattern = c["value-matches"] as? String, (try? NSRegularExpression(pattern: pattern)) == nil {
+            diag.errors.append("\(path): \(ordinal).value-matches '\(pattern)' is not a valid regular expression")
+        }
+        // Contradictory bounds would be unsatisfiable, which reads at run time as a
+        // mysterious permanent failure.
+        if let min = c["min-count"] as? Int, let max = c["max-count"] as? Int, min > max {
+            diag.errors.append("\(path): \(ordinal).min-count (\(min)) is greater than max-count (\(max))")
+        }
+        if let count = c["count"] as? Int, c["min-count"] != nil || c["max-count"] != nil {
+            diag.errors.append(
+                "\(path): \(ordinal) sets count (\(count)) together with min-count/max-count; use one form or the other")
+        }
+        // Asserting absence and a property of the absent element at the same time
+        // can never hold. `count`/`max-count` are included: `exists: false` short-
+        // circuits evaluation, so a count beside it would be silently ignored
+        // rather than checked — except for the zero forms, which say the same
+        // thing and are harmless.
+        if c["exists"] as? Bool == false {
+            var propertyKeys = Set(c.keys).intersection([
+                "enabled", "value-equals", "value-matches", "min-width", "min-height", "min-count"
+            ])
+            if let count = c["count"] as? Int, count != 0 { propertyKeys.insert("count") }
+            if let maxCount = c["max-count"] as? Int, maxCount != 0 { propertyKeys.insert("max-count") }
+            if !propertyKeys.isEmpty {
+                diag.errors.append(
+                    "\(path): \(ordinal) asserts exists=false together with \(propertyKeys.sorted()); "
+                    + "an absent element has no properties to check")
+            }
+        }
+        // The mirror case: exists=true with a zero count asserts presence and
+        // absence at once. `ElementCondition.assertsAbsence` resolves it as
+        // absence, so the `exists: true` would be quietly discarded.
+        if c["exists"] as? Bool == true {
+            let zeroCounts = ["count", "max-count"].filter { (c[$0] as? Int) == 0 }
+            if !zeroCounts.isEmpty {
+                diag.errors.append(
+                    "\(path): \(ordinal) asserts exists=true together with \(zeroCounts.sorted()) of 0; "
+                    + "these contradict each other")
             }
         }
     }
@@ -330,6 +494,35 @@ public enum ResultValidator {
         checkBool(path, a, "enabled", prefix: ordinal + ".", diag)
         checkBool(path, a, "clear", prefix: ordinal + ".", diag)
         checkBool(path, a, "verify-value", prefix: ordinal + ".", diag)
+        checkBool(path, a, "verify-effect", prefix: ordinal + ".", diag)
+        checkString(path, a, "direction", prefix: ordinal + ".", diag)
+        checkNumber(path, a, "separation", prefix: ordinal + ".", diag)
+        checkInteger(path, a, "phase", prefix: ordinal + ".", diag)
+        // Structural keys are checked for EVERY action, not only the ones that use
+        // them: the optional-key set is shared across action types, so `"points":
+        // "typo"` on a tap would otherwise validate and then fail to decode at run
+        // time — the exact gap `sipi validate` exists to close.
+        //
+        // The check reaches INSIDE them for the same reason. `HarnessAction`
+        // decodes `points` as `[HarnessPoint]` and `settings` as a typed object
+        // whatever the action type is, so a well-shaped outer container full of
+        // ill-typed members fails to decode just as surely.
+        if let points = a["points"] {
+            if let array = points as? [Any] {
+                for (p, point) in array.enumerated() {
+                    validatePoint(path, point, ordinal: "\(ordinal).points[\(p)]", diag)
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal).points must be an array of points")
+            }
+        }
+        if let settings = a["settings"] {
+            if let object = settings as? JSON {
+                validateDisplaySettingTypes(path, object, ordinal: "\(ordinal).settings", diag)
+            } else {
+                diag.errors.append("\(path): \(ordinal).settings must be an object")
+            }
+        }
         checkStringArray(path, a, "arguments", prefix: ordinal + ".", diag)
         if let environment = a["environment"] {
             if let values = environment as? JSON,
@@ -377,9 +570,128 @@ public enum ResultValidator {
         }
 
         switch type {
-        case "tap", "long-press":
+        case "tap", "long-press", "double-tap":
             if (a["selector"] != nil) == (a["point"] != nil) {
                 diag.errors.append("\(path): \(ordinal) (\(type)) requires exactly one of selector or point")
+            }
+        case "pinch":
+            if let direction = a["direction"] as? String {
+                if PinchDirection(rawValue: direction) == nil {
+                    diag.errors.append(
+                        "\(path): \(ordinal).direction must be one of \(PinchDirection.allCases.map(\.rawValue).sorted())")
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (pinch) requires a direction (in or out)")
+            }
+            // `point` is the optional gesture center; the harness defaults it to the
+            // middle of the screen. `separation` bounds mirror PinchPlan's.
+            if let separation = numberValue(a["separation"]),
+               !(separation > PinchPlan.minimumSeparation && separation <= 1.0) {
+                diag.errors.append(
+                    "\(path): \(ordinal).separation must be greater than \(PinchPlan.minimumSeparation) and at most 1.0")
+            }
+            if let steps = a["steps"] as? Int, !(1...200).contains(steps) {
+                diag.errors.append("\(path): \(ordinal).steps must be between 1 and 200")
+            }
+            // Tighter than the shared 0...600 seconds bound, and matching
+            // `sipi pinch`: 0 collapses the gesture into one instant frame, which
+            // no recognizer reads as a pinch, and anything long enough to matter is
+            // capped by the driver's frame count anyway.
+            if let duration = numberValue(a["duration"]), !(duration > 0 && duration <= 30) {
+                diag.errors.append(
+                    "\(path): \(ordinal).duration must be greater than 0 and at most 30 seconds for a pinch")
+            }
+        case "multitouch":
+            if let points = a["points"] as? [Any] {
+                if points.count != 2 {
+                    diag.errors.append("\(path): \(ordinal).points must contain exactly two points")
+                }
+                for (p, point) in points.enumerated() {
+                    validatePoint(path, point, ordinal: "\(ordinal).points[\(p)]", diag)
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (multitouch) requires a points array of exactly two points")
+            }
+            if let phase = a["phase"] as? Int {
+                if TouchPhase(rawValue: phase) == nil {
+                    diag.errors.append("\(path): \(ordinal).phase must be 1 (begin/move) or 2 (end)")
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (multitouch) requires a phase of 1 or 2")
+            }
+        case "display-state":
+            guard let settings = a["settings"] as? JSON else {
+                diag.errors.append("\(path): \(ordinal) (display-state) requires a settings object")
+                break
+            }
+            for (facet, owner) in testDisplaySettingKeysOwnedElsewhere.sorted(by: { $0.key < $1.key })
+            where settings[facet] != nil {
+                diag.errors.append(
+                    "\(path): \(ordinal).settings.\(facet) is set by the '\(owner)' action, not display-state; "
+                    + "using both would leave the facet restored from the wrong baseline")
+            }
+            let unknown = Set(settings.keys)
+                .subtracting(testDisplaySettingKeys)
+                .subtracting(testDisplaySettingKeysOwnedElsewhere.keys)
+                .sorted()
+            if !unknown.isEmpty {
+                diag.errors.append("\(path): \(ordinal).settings unknown facets \(unknown)")
+            }
+            if settings.isEmpty {
+                diag.errors.append("\(path): \(ordinal).settings must set at least one facet")
+            }
+            // Facet TYPES are checked for every action in `validateAction` (the
+            // decoder is type-strict regardless of action type), so only the
+            // display-state-specific VALUE rules live here. The range guards below
+            // read through `numberValue`, which yields nil for a mistyped value —
+            // they rely on that shared type check having already run.
+            if let look = settings["look-and-feel"] as? String, !["clear", "tinted"].contains(look) {
+                diag.errors.append("\(path): \(ordinal).settings.look-and-feel must be clear or tinted")
+            }
+            if let filter = settings["color-filter-type"] as? String,
+               !["grayscale", "protanopia", "deuteranopia", "tritanopia"].contains(filter) {
+                diag.errors.append(
+                    "\(path): \(ordinal).settings.color-filter-type must be grayscale, protanopia, deuteranopia, or tritanopia")
+            }
+            if let opacity = numberValue(settings["liquid-glass-opacity"]), !(0.0...1.0).contains(opacity) {
+                diag.errors.append("\(path): \(ordinal).settings.liquid-glass-opacity must be between 0.0 and 1.0")
+            }
+            if let intensity = numberValue(settings["color-filter-intensity"]), !(0.25...1.0).contains(intensity) {
+                diag.errors.append("\(path): \(ordinal).settings.color-filter-intensity must be between 0.25 and 1.0")
+            }
+            // devicectl rejects the pair outright ("--color-filter-intensity is not
+            // supported for the grayscale filter type"), and a rejected write
+            // leaves the whole batch unapplied — so this must fail validation, not
+            // the run.
+            if settings["color-filter-type"] as? String == "grayscale", settings["color-filter-intensity"] != nil {
+                diag.errors.append(
+                    "\(path): \(ordinal).settings sets color-filter-intensity together with the grayscale "
+                    + "filter, which does not take one; drop one of them")
+            }
+            // The filter's kind and intensity are only reported by devicectl while
+            // the filter is ON, so a run that starts with it off has no baseline
+            // for them and cannot put them back. Requiring `color-filter` alongside
+            // keeps the restore honest: switching the filter off returns the screen
+            // to its original appearance regardless of the kind left behind, and
+            // any later test that switches it on must state its own kind.
+            let filterDetailKeys = ["color-filter-type", "color-filter-intensity"].filter { settings[$0] != nil }
+            if !filterDetailKeys.isEmpty, settings["color-filter"] == nil {
+                diag.errors.append(
+                    "\(path): \(ordinal).settings sets \(filterDetailKeys.sorted()) without color-filter; "
+                    + "set color-filter too, or the original filter state cannot be restored")
+            }
+        case "voiceover":
+            if !(a["enabled"] is Bool) {
+                diag.errors.append("\(path): \(ordinal) (voiceover) requires an enabled boolean")
+            }
+        case "biometrics":
+            if let operation = a["operation"] as? String {
+                if !["enroll", "unenroll", "match", "no-match"].contains(operation) {
+                    diag.errors.append(
+                        "\(path): \(ordinal).operation must be enroll, unenroll, match, or no-match")
+                }
+            } else {
+                diag.errors.append("\(path): \(ordinal) (biometrics) requires an operation")
             }
         case "set-text":
             // Same targeting contract as tap (exactly one of selector/point), plus

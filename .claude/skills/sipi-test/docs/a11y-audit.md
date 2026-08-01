@@ -19,12 +19,39 @@ Judge whether each screen is semantically correct for assistive technology users
 1. Confirm preflight is complete.
 2. Ask the app to navigate screen by screen or run the user-provided flow.
 3. For each screen:
+   - run `ui_a11y_audit --fail-on none --json` first — it decides the mechanical rules for you (undersized touch targets, unlabeled controls, ambiguous duplicate labels, meaningless labels, truncated text) so the judgment below can focus on what a machine cannot decide
    - run `ui_describe --expect "<text you expect on this screen>"` so the fast tree auto-escalates to the deep grid pass (surfacing System UI) only when the expected text is missing
    - capture `ui_screenshot`
    - inspect element roles, labels, identifiers, and ordering
 4. When the issue is unclear from simulator output alone, inspect the relevant source code.
 5. Record issues by screen in a report.
 6. For each issue, suggest the smallest practical fix. Apply it directly when it meets the Fix Priority criteria below.
+
+### Mechanical rules vs. judgment
+
+`sipi a11y-audit` reports what is decidable from the tree, with a frame and a
+label on every finding. Take those verbatim — do not re-derive or soften them.
+Reserve your own analysis for what it deliberately does not decide:
+
+- reading and focus order
+- whether a present label is CORRECT for what the control does (the audit only
+  catches labels that are meaningless on their face)
+- grouping, custom rotors, and custom actions
+- contrast and clipped text, which need pixel analysis — the audit's
+  `truncated-text` rule only catches clipping the guest itself reports with an
+  ellipsis, and it exempts an actionable element's LABEL because Apple's own
+  convention puts a trailing ellipsis on any control that opens a further prompt
+  ("Save As…"). A clipped BUTTON label is therefore yours to spot
+- whether an undersized `hit-region` finding is real: the accessibility frame is
+  a lower bound on the tappable area, so a 20pt glyph inside a 44pt control
+  reports as undersized. That rule warns rather than errors for this reason
+
+Run the pass under real accessibility settings rather than only the defaults.
+`ui_appearance --reduce-motion on --reduce-transparency on --show-borders on`,
+`ui_appearance --larger-accessibility-sizes on --text-size accessibility-extra-large`,
+and `ui_voiceover --enable` each change what the app renders and announces;
+several defects only appear in those states. Restore what you changed afterward
+(read the state with a bare `ui_appearance` first).
 
 ## Fix Priority
 
@@ -53,10 +80,22 @@ Screen: settings
 
 ## Difference From Xcode Accessibility Audit
 
+Xcode's `XCUIApplication.performAccessibilityAudit` only runs from inside a UI
+test target — there is no simctl or devicectl subcommand that audits a running
+app, and Accessibility Inspector is GUI-only. This pass:
+
+- Runs from the command line against any booted simulator, with no test target
+  and no changes to the app under test
 - Works on arbitrary simulator flows, not only test code that already exists
 - Produces AI-written remediation suggestions
 - Can inspect multiple screens in one pass
 - Can pair UI tree inspection with screenshots and source review
+- Can drive the accessibility settings the audit should run under
+  (`ui_appearance`, `ui_voiceover`) in the same pass
+
+What Xcode's audit still does that this does not: contrast ratio and clipped-text
+detection, both of which need pixel analysis of the rendered frame. When those
+matter, run Xcode's audit from a UI test in addition to this pass.
 
 ## Guardrails
 

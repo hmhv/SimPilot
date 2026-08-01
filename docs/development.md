@@ -21,10 +21,15 @@ headless: no GUI, no Node runtime, and no spawned helper process.
   from the user's own Xcode. The full inventory of undocumented symbols, magic
   constants, and their runtime guards is in
   [`private-symbols.md`](private-symbols.md).
-- **simctl shell-out for the rest.** App install/launch/terminate/uninstall,
+- **Public-tooling shell-out for the rest.** App install/launch/terminate/uninstall,
   boot/shutdown/erase, addmedia, privacy, openurl, `ui appearance`, status bar,
   pasteboard, `record-video`, and `log stream` all go through typed `Process()`
-  wrappers over `xcrun simctl` — no private APIs (see `SimShell`).
+  wrappers over `xcrun simctl` — no private APIs (see `SimShell`). `DeviceCtl`
+  wraps `xcrun devicectl` the same way for the facets simctl never exposed:
+  face-up / face-down orientation, biometric enrollment and match events,
+  VoiceOver, and the full accessibility appearance surface. devicectl only
+  targets simulators from Xcode 27 on, so every call site checks
+  `DeviceCtl.isSimulatorCapable()` and degrades with an explicit message.
 
 ## Package layout
 
@@ -46,7 +51,8 @@ SimPilot
 │                 install flow.
 ├── SimNative     The SimDriver implementation. Wires SimCore value types to
 │                 SimBridge's Objective-C APIs.
-├── SimShell      Typed Process() wrappers over public `xcrun simctl`.
+├── SimShell      Typed Process() wrappers over public `xcrun simctl` and
+│                 `xcrun devicectl`.
 ├── SimSkills     The three skill trees, embedded into the binary at build time.
 └── sipi          The swift-argument-parser CLI for the `sipi-*` skills.
 ```
@@ -96,21 +102,33 @@ never go stale relative to the source tree. `SimCore` depends on `SimSkills`, so
 ```sh
 sipi describe-ui <udid> [--deep] [--expect "Text"]   # AX tree (default fast; grid on --deep/auto)
 sipi describe-point <udid> -x <x> -y <y>   # single objectAtPoint hit-test (cheap, no grid)
+sipi a11y-audit <udid>                     # mechanical accessibility rules over the same tree
 ```
 
 ### Input
 
 ```sh
 sipi tap <udid> ...                  # tap by --label / --id / --value, or coordinates
-sipi type <udid> "text"              # paste via simctl pbcopy + Cmd+V (default); --keyboard = KeyCode → HID (US only); --clear = Cmd+A + delete first
+sipi double-tap <udid> ...           # same targeting; two taps inside the system double-tap window
+sipi type <udid> "text"              # paste via simctl pbcopy + Cmd+V (default); --keyboard = KeyCode → HID (US only); --clear = Cmd+A + delete first; fails when the field's content did not change (--no-verify opts out)
 sipi set-text <udid> "text" --id <id> # write the field's AX value (no keyboard/pasteboard/focus; verified against the app)
 sipi key / key-sequence / key-combo  # HID keys, sequences, modifier combos
 sipi swipe / touch / drag / gesture  # HID touch phases + gesture presets
-sipi multitouch <udid> <phase> ...   # two-finger touch phase (e.g. pinch)
+sipi multitouch <udid> <phase> ...   # raw two-finger touch phase
+sipi pinch <udid> <in|out>           # interpolated two-finger pinch over multitouch
 sipi slider <udid> ...               # resolve + drag + AXValue verify
 sipi button <udid> <name>            # hardware button (home/lock/side_button/...)
 sipi crown <udid> <delta>            # Digital Crown rotation (Apple Watch only)
-sipi orientation <udid> [--set name] # native READ; SET (PurpleEvent, osascript fallback)
+sipi orientation <udid> [--set name] # native READ; SET (PurpleEvent → devicectl → osascript); --json --physical adds the flat states
+```
+
+### Accessibility and device state
+
+```sh
+sipi a11y-audit <udid>               # mechanical audit: touch targets, labels, truncation (--fast, --rules, --min-touch-target, --fail-on)
+sipi biometrics <udid> <op>          # status | enroll | unenroll | match | no-match      (devicectl, Xcode 27+)
+sipi appearance <udid> [facets]      # read/write reduce-motion, color filters, Liquid Glass, … (devicectl, Xcode 27+)
+sipi voiceover <udid> [--enable|--disable]  # read/write VoiceOver                        (devicectl, Xcode 27+)
 ```
 
 ### Capture
@@ -143,13 +161,23 @@ Execution and report generation live **inside** the binary (`run-test`,
 single-binary install stays self-contained.
 
 The v2 test `action.type` vocabulary spans the same input surface as the ad-hoc
-CLI: `tap`, `long-press`, `type`, `set-text`, `key`, `key-combo`, `key-sequence`,
-`button`, `swipe`, `drag`, `gesture`, `slider`, `orientation`, `crown`, `wait`. So
-toggles, sliders, gestures, modifier combos, and rotation are all expressible as
-deterministic saved steps — each case in `Harness.perform(action:)` reuses the
-same `NativeDriver` call as the matching CLI command. Two-finger `multitouch`
-stays ad-hoc-only (its stateful begin/end phases are not modeled as a single
-action). The full per-action JSON shapes are in
+CLI: `tap`, `double-tap`, `long-press`, `type`, `set-text`, `key`, `key-combo`,
+`key-sequence`, `button`, `swipe`, `drag`, `gesture`, `pinch`, `multitouch`,
+`slider`, `orientation`, `crown`, `wait`. So toggles, sliders, gestures, pinches,
+modifier combos, and rotation are all expressible as deterministic saved steps —
+each case in `Harness.perform(action:)` reuses the same `NativeDriver` call as
+the matching CLI command.
+
+Beyond input, the harness owns simulator state: `open-url`, `privacy`, `push`,
+`location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`,
+`launch`, `terminate`, `network-condition` (simctl / provider), plus
+`display-state`, `voiceover`, and `biometrics` (devicectl, Xcode 27+). Each
+captures a baseline the first time it runs and is restored between tests and at
+end of run. A facet has exactly one owning action: `display-state` deliberately
+cannot set light/dark, text size, or Increase Contrast, because two mechanisms
+capturing two baselines for one facet would restore whichever ran last.
+
+The full per-action JSON shapes are in
 [json-reference.md](../.claude/skills/sipi-test/references/json-reference.md).
 
 ### Diagnostics and lifecycle

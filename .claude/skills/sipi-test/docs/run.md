@@ -36,7 +36,7 @@ For each step, the harness:
 
 1. Writes `step-NNN.describe-before.json`.
 2. Executes the explicit `action`, if any.
-3. Polls `describe-ui` until `verify.contains` are present and `verify.absent` are absent, or the step `wait` timeout expires.
+3. Polls `describe-ui` until every verify condition holds — `contains` present, `absent` gone, `matches` matching, `not-matches` not matching, and every `elements` assertion satisfied — or the step `wait` timeout expires. Any absence-shaped condition forces the deep tree; presence-shaped ones escalate to it only when the fast tree does not already satisfy them.
 4. Retries the same action and same verify object up to `--retries` times (extra attempts beyond the first). The count resolves as `--retries`, else `config.json` `max-retries`, else `1`; total attempts = retries + 1, so with the default of `1` a failing step is attempted twice.
 5. Writes `step-NNN.describe-after.json`.
 6. Captures `step-NNN.png`.
@@ -45,7 +45,7 @@ For each step, the harness:
 
 `trace.jsonl` is appended live throughout the run (run-start, per-step events, run-finish). After the run completes, the harness writes the final `run.json`, then generates `summary.json` and `report.html`.
 
-The harness also restores temporary simulator state it owns: appearance, content size, Increase Contrast, simulated location, status-bar overrides, and active provider-backed network conditions. In a suite with `reset-between-tests` enabled (the default), this state is restored between tests as well, so one test does not leak appearance/Dynamic Type/location/network state into the next; a between-test restore failure is traced and the run continues, then retried by the strict end-of-run cleanup. Privacy authorization is not automatically restored because simctl cannot safely read the previous state.
+The harness also restores temporary simulator state it owns: appearance, content size, Increase Contrast, simulated location, status-bar overrides, active provider-backed network conditions, the `display-state` accessibility facets, VoiceOver, and biometric enrollment. In a suite with `reset-between-tests` enabled (the default), this state is restored between tests as well, so one test does not leak appearance/Dynamic Type/location/network state into the next; a between-test restore failure is traced and the run continues, then retried by the strict end-of-run cleanup. Privacy authorization is not automatically restored because simctl cannot safely read the previous state.
 
 ## Failure Rules
 

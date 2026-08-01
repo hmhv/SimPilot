@@ -19,9 +19,13 @@ frameworks on **this** machine / Xcode:
 - dlopen status of the three private frameworks (CoreSimulator, SimulatorKit,
   AccessibilityPlatformTranslation),
 - presence of the key classes / selectors / symbols each one needs
-  (`NSClassFromString`, `respondsToSelector`, `dlsym` results),
+  (`NSClassFromString`, `respondsToSelector`, `dlsym` results), including the
+  Indigo HID event builders,
 - the active Xcode developer dir,
-- which simulators (if any) are currently booted.
+- which simulators (if any) are currently booted,
+- whether `xcrun devicectl` can target simulators here (a note, not a core
+  check — it gates the Xcode 27+ device-state surface but is not needed to drive
+  a simulator).
 
 It performs read-only probing only. It boots nothing, taps nothing, and mutates
 no device state.
@@ -43,8 +47,8 @@ selects the JSON shape below; otherwise a plain-text report is emitted.
 | `0` | **All core capabilities present.** Every core check passed (`allCorePresent == true`). The workflow may proceed. |
 | non-zero | **At least one core capability is missing.** `preflight` must stop and surface the failing check(s). |
 
-"Core capabilities" are the three framework checks: `CoreSimulator`,
-`SimulatorKit`, and `AccessibilityPlatformTranslation`. The exit code is derived
+"Core capabilities" are the four framework checks: `CoreSimulator`,
+`SimulatorKit`, `IndigoHID`, and `AccessibilityPlatformTranslation`. The exit code is derived
 **only** from these checks (`allCorePresent = checks.allSatisfy { $0.ok }`).
 Booted-device discovery is informational and never affects the exit code: a
 machine with all frameworks healthy but no booted device still exits `0` (the
@@ -79,6 +83,11 @@ terminated by a newline:
       "detail" : "loaded (SimDeviceLegacyHIDClient resolves)"
     },
     {
+      "name" : "IndigoHID",
+      "ok" : true,
+      "detail" : "all builders resolve (mouse ✓, button ✓, keyboard ✓, crown ✓)"
+    },
+    {
       "name" : "AccessibilityPlatformTranslation",
       "ok" : true,
       "detail" : "AXPTranslator ready (sharedInstance ✓, tokenDelegate proto ✓, macElement ✓, SimDevice transport ✓)"
@@ -90,6 +99,7 @@ terminated by a newline:
   "notes" : [
     "binary: /Users/you/.local/bin/sipi (modified 2026-07-18T14:38:00+09:00)",
     "warning: this binary predates the SimPilot checkout at /Users/you/SimPilot (HEAD 3c32911, committed 2026-07-18T20:45:08+09:00). Rebuild and reinstall before trusting a source change: swift build -c release && cp .build/release/sipi \"$(command -v sipi)\"",
+    "devicectl can target simulators: `sipi biometrics`, `sipi appearance`, `sipi voiceover`, face-up/face-down orientation, and the biometrics / display-state / voiceover test actions are available.",
     "sipi drives simulators headlessly (no window needed); open Device Hub with `sipi open-ui` to look at a device."
   ],
   "allCorePresent" : true
@@ -101,12 +111,12 @@ terminated by a newline:
 | Field | Type | Meaning |
 |---|---|---|
 | `developerDir` | string | The active Xcode developer dir the probe used (`DEVELOPER_DIR` env override, else the well-known Xcode path). |
-| `checks` | array of objects | One entry per core capability, in a stable order: `CoreSimulator`, `SimulatorKit`, `AccessibilityPlatformTranslation`. |
-| `checks[].name` | string | Stable capability name (one of the three above). |
+| `checks` | array of objects | One entry per core capability, in a stable order: `CoreSimulator`, `SimulatorKit`, `IndigoHID`, `AccessibilityPlatformTranslation`. |
+| `checks[].name` | string | Stable capability name (one of the four above). |
 | `checks[].ok` | bool | Whether this capability fully resolved. |
 | `checks[].detail` | string | Human-readable detail (which class/symbol resolved or why it failed). Informational; do not parse for control flow — gate on `ok` / `allCorePresent`. |
 | `bootedDevices` | array of strings | Booted simulators as `"<name> (<udid>)"`. May be empty. Informational only. |
-| `notes` | array of strings | Free-form advisory lines. **Never affects the exit code** and is not a capability list: which binary answered and when it landed, a staleness warning when the surrounding SimPilot checkout's HEAD is newer than that binary, and how to open a device window on this Xcode. May be empty; wording is not stable — display it, do not parse it. |
+| `notes` | array of strings | Free-form advisory lines. **Never affects the exit code** and is not a capability list: which binary answered and when it landed, a staleness warning when the surrounding SimPilot checkout's HEAD is newer than that binary, whether devicectl can target simulators on this toolchain (which gates the biometrics / appearance / VoiceOver surface, Xcode 27+), and how to open a device window on this Xcode. May be empty; wording is not stable — display it, do not parse it. |
 | `allCorePresent` | bool | `true` iff every `checks[].ok` is `true`. Mirrors the exit code: `true` ⇔ exit `0`. |
 
 Consumers should key on `name` + `ok` (and `allCorePresent`), not on array
@@ -123,9 +133,11 @@ sipi doctor
   developer dir: /Applications/Xcode.app/Contents/Developer
   [ok] CoreSimulator: loaded (SimServiceContext, SimDevice resolve)
   [ok] SimulatorKit: loaded (SimDeviceLegacyHIDClient resolves)
+  [ok] IndigoHID: all builders resolve (mouse ✓, button ✓, keyboard ✓, crown ✓)
   [ok] AccessibilityPlatformTranslation: AXPTranslator ready (sharedInstance ✓, tokenDelegate proto ✓, macElement ✓, SimDevice transport ✓)
   booted devices: iPhone 16 Pro (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
   binary: /Users/you/.local/bin/sipi (modified 2026-07-18T14:38:00+09:00)
+  devicectl can target simulators: `sipi biometrics`, `sipi appearance`, `sipi voiceover`, face-up/face-down orientation, and the biometrics / display-state / voiceover test actions are available.
   sipi drives simulators headlessly (no window needed); open Device Hub with `sipi open-ui` to look at a device.
   result: all core capabilities present
 ```
@@ -134,8 +146,8 @@ sipi doctor
   `  [--] <name>: <detail>` when missing.
 - `booted devices:` lists `<name> (<udid>)` entries, or `none`.
 - The `notes` lines follow the booted devices and precede `result:`. They are
-  advisory (binary provenance / staleness warning / how to open a device window)
-  and never change the exit code.
+  advisory (binary provenance / staleness warning / devicectl simulator support /
+  how to open a device window) and never change the exit code.
 - The final `result:` line is `all core capabilities present` (exit 0) or
   `missing core capabilities` (exit non-zero).
 
@@ -144,7 +156,7 @@ exit code.
 
 ## Stability rules
 
-1. The three core check `name`s are stable identifiers; do not rename them.
+1. The four core check `name`s are stable identifiers; do not rename them.
 2. The exit code reflects `allCorePresent` and **only** the core checks.
 3. `bootedDevices` and `detail` are informational; their wording may change.
 4. Additions are backward-compatible (new `checks` entries, new top-level

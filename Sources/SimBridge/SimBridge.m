@@ -1672,19 +1672,115 @@ static id SPPerformNoArg(id target, NSString *selectorName) {
     return YES;
 }
 
-// Among the framebuffer descriptors, the live IOSurface with the largest area.
+/// Whether a framebuffer descriptor describes the built-in device screen.
+///
+/// CoreSimulator tags each display with a class: 0 is the device's own LCD, 1 is
+/// a secondary display (external, CarPlay, the Xcode 27 "Resizable" surface).
+/// `simctl io <udid> enumerate` prints the same value as "Display class".
+///
+/// The descriptor is a remote proxy that answers neither the property nor KVC,
+/// so the class is read off its `state` snapshot — an immutable proxy that does
+/// respond to KVC. Both hops are guarded; an unreadable class yields NO, which
+/// falls back to the previous largest-area behavior rather than failing the
+/// capture.
+/// The built-in screen's pixel size for `udid`, or CGSizeZero when it cannot be
+/// determined.
+///
+/// Read from `simctl io <udid> enumerate`, which prints each display's class
+/// alongside its default size. The obvious in-process route — the descriptor's
+/// `state` snapshot — is not usable: it is a `ROCKImmutableProxy` that answers
+/// neither the property nor KVC, and its backing `properties` map crashes the
+/// process on `objectForKey:` (SIGTRAP) and on `dictionaryRepresentation`
+/// (SIGSEGV), both measured on Xcode 27. A short-lived subprocess is the only
+/// safe way to read it, so the result is cached per UDID for the life of the
+/// process — the harness screenshots every step from one process, so the cost is
+/// paid once per run, not once per capture.
+static CGSize SPBuiltInDisplaySizeForUDID(NSString *udid) {
+    static NSMutableDictionary<NSString *, NSValue *> *cache;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+
+    // Only a successful probe is cached. Caching a failure would pin the process
+    // to the largest-area fallback — i.e. black captures on Xcode 27 — for its
+    // whole life over one transient simctl hiccup (a device still coming up, a
+    // busy machine). A retry costs one subprocess; a stuck fallback costs the run.
+    @synchronized (cache) {
+        NSValue *cached = cache[udid];
+        if (cached != nil) return cached.sizeValue;
+    }
+
+    CGSize size = CGSizeZero;
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/xcrun"];
+    task.arguments = @[@"simctl", @"io", udid, @"enumerate"];
+    NSPipe *outPipe = [NSPipe pipe];
+    task.standardOutput = outPipe;
+    task.standardError = [NSPipe pipe];
+    @try {
+        if ([task launchAndReturnError:NULL]) {
+            NSData *data = [outPipe.fileHandleForReading readDataToEndOfFile];
+            [task waitUntilExit];
+            NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            // Walk the block that follows "Display class: 0" and take the first
+            // default width/height pair under it.
+            BOOL inBuiltIn = NO;
+            CGFloat width = 0, height = 0;
+            for (NSString *raw in [text componentsSeparatedByString:@"\n"]) {
+                NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+                if ([line hasPrefix:@"Display class:"]) {
+                    inBuiltIn = [line hasSuffix:@" 0"];
+                    width = height = 0;
+                    continue;
+                }
+                if (!inBuiltIn) continue;
+                if ([line hasPrefix:@"Default width:"]) {
+                    width = [[line substringFromIndex:@"Default width:".length] doubleValue];
+                } else if ([line hasPrefix:@"Default height:"]) {
+                    height = [[line substringFromIndex:@"Default height:".length] doubleValue];
+                }
+                if (width > 0 && height > 0) { size = CGSizeMake(width, height); break; }
+            }
+        }
+    } @catch (__unused NSException *ex) {}
+
+    if (size.width > 0 && size.height > 0) {
+        @synchronized (cache) { cache[udid] = [NSValue valueWithSize:NSSizeFromCGSize(size)]; }
+    }
+    return size;
+}
+
+/// The live IOSurface for the device's own screen.
+///
+/// Selects the surface whose dimensions match the built-in display reported by
+/// `SPBuiltInDisplaySizeForUDID`, and falls back to "largest live surface" only
+/// when that size cannot be determined.
+///
+/// The fallback used to be the whole rule, which was correct while a simulator
+/// vended exactly one live framebuffer. Xcode 27 vends several: alongside the
+/// device LCD (e.g. 1206x2622) there is a 7680x4320 "Resizable" display whose
+/// surface is live and permanently black. Largest-area therefore captured that
+/// blank display instead of the screen — and because `screenshot`, the harness's
+/// per-step images, `verify-session` captures, and the mirror view all share
+/// this one selector, every visual artifact on an iOS 27 run came back black.
 - (IOSurfaceRef)currentSurface {
     SEL sel = NSSelectorFromString(@"framebufferSurface");
-    IOSurfaceRef best = NULL;
-    size_t bestArea = 0;
+    CGSize builtInSize = _udid != nil ? SPBuiltInDisplaySizeForUDID(_udid) : CGSizeZero;
+    IOSurfaceRef builtIn = NULL;
+    IOSurfaceRef largest = NULL;
+    size_t largestArea = 0;
     for (id descriptor in _descriptors) {
         if (![descriptor respondsToSelector:sel]) continue;
         IOSurfaceRef surface = ((IOSurfaceRef (*)(id, SEL))objc_msgSend)(descriptor, sel);
         if (surface == NULL) continue;
-        size_t area = IOSurfaceGetWidth(surface) * IOSurfaceGetHeight(surface);
-        if (area > bestArea) { bestArea = area; best = surface; }
+        size_t width = IOSurfaceGetWidth(surface), height = IOSurfaceGetHeight(surface);
+        size_t area = width * height;
+        if (area > largestArea) { largestArea = area; largest = surface; }
+        if (builtIn == NULL && builtInSize.width > 0
+            && (size_t)builtInSize.width == width && (size_t)builtInSize.height == height) {
+            builtIn = surface;
+        }
     }
-    return best;
+    return builtIn ?: largest;
 }
 
 - (nullable NSView *)startMirrorForUDID:(NSString *)udid developerDir:(NSString *)developerDir error:(NSError **)error {

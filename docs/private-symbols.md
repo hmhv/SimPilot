@@ -114,25 +114,62 @@ binary) is documented inline at `SimBridge.m:470-482`.
 | `AXPTranslationTokenDelegateHelper` (protocol) | protocol | The delegate protocol whose callbacks (`accessibilityTranslationDelegateBridgeCallbackWithToken:` etc.) forward each translator request to the device transport. | conformance implemented `SimBridge.m:607-630`; protocol existence probed at `SimBridge.m:448` | `objc_getProtocol(...) != NULL` reported as `tokenDelegate proto ✓/✗` in `sipi doctor` (`SimBridge.m:448`, `461-465`). |
 | `AXPMacPlatformElement` | class | The NSAccessibility element type the tree walk serializes. | presence probed at `SimBridge.m:449` | `NSClassFromString(...) != nil` reported as `macElement ✓/✗` in `sipi doctor` (`SimBridge.m:449`, `461-465`). |
 | NSAccessibility KVC keys (`accessibilityLabel`, `accessibilityValue`, `accessibilityRoleDescription`, `accessibilityRole`, `accessibilitySubrole`, `accessibilityIdentifier`, `accessibilityEnabled`, `accessibilityChildren`, `accessibilityFrame`) | KVC / selectors | Per-node serialization into the describe-ui shape. `accessibilityRole` is captured raw into `role`, then `AX`-stripped into `type`; `accessibilitySubrole` is emitted only when non-empty. | `SimBridge.m:674-697` (serialize), `656-658` (`accessibilityFrame`) | each read goes through `SPAXString`/`SPAXBool`, which `@try/@catch` around `valueForKey:` and return a default on failure (`SimBridge.m:484-497`); `accessibilityFrame` is `respondsToSelector`-guarded (`SimBridge.m:656-657`). |
-| `setAccessibilityValue:` (and the `accessibilityValue` KVC key as a WRITE) | selector / KVC | Text entry with no keyboard: `sipi set-text` / the `set-text` action hit-test the target, then write the element's value straight through the translated element. This is the only text path that works on a runtime that does not deliver keyboard HID (iOS 27.0 simulators). | `SimBridge.m:1160-1214` (`-setValue:atPoint:...`), wrapper at `SimBridge.m:337` | `respondsToSelector` for the setter, KVC as the fallback, both inside `@try/@catch`; nothing at the point → `NSError` code 28, neither write path usable → code 29. A write that the app ignores is caught one layer up: the caller re-reads the value in a FRESH process (an in-process read can echo the write back) and fails the command/step. |
+| `setAccessibilityValue:` (and the `accessibilityValue` KVC key as a WRITE) | selector / KVC | Text entry with no keyboard: `sipi set-text` / the `set-text` action hit-test the target, then write the element's value straight through the translated element. This is the only text path that works on a simulator that has stopped delivering keyboard HID (a device-age condition, not a runtime one). | `SimBridge.m:1160-1214` (`-setValue:atPoint:...`), wrapper at `SimBridge.m:337` | `respondsToSelector` for the setter, KVC as the fallback, both inside `@try/@catch`; nothing at the point → `NSError` code 28, neither write path usable → code 29. A write that the app ignores is caught one layer up: the caller re-reads the value in a FRESH process (an in-process read can echo the write back) and fails the command/step. |
 | `registerScreenCallbacksWithUUID:callbackQueue:frameCallback:surfacesChangedCallback:propertiesChangedCallback:` / `unregisterScreenCallbacksWithUUID:` | selectors | Framebuffer mirror: register/unregister screen ping callbacks on a display descriptor. | `SimBridge.m:1269-1271` (register), `1290` (unregister) | `respondsToSelector` guards both (`SimBridge.m:1279`, `1294`). |
 | `updateIOPorts`, `deviceIOPorts` (KVC), `portIdentifier`, `descriptor`, `framebufferSurface` + magic `"com.apple.framebuffer.display"` | selectors / KVC / constant | Resolve the framebuffer IOSurface: refresh IO ports, find the port whose `portIdentifier == "com.apple.framebuffer.display"`, take its `descriptor`, read `framebufferSurface`. | `SimBridge.m:1196-1217` (resolve), `1227-1238` (`currentSurface`) | `updateIOPorts`/`portIdentifier`/`framebufferSurface` are `respondsToSelector`/`SPPerformNoArg`-guarded; `deviceIOPorts` is `@try/@catch` + class check → `NSError` code 41 (`SimBridge.m:1199-1205`); no descriptor → code 42 (`SimBridge.m:1218-1222`). |
+
+### Which display the framebuffer capture picks
+
+A simulator vends more than one live framebuffer. Xcode 27 adds a 7680x4320
+"Resizable" display (display class 1) alongside the device screen (class 0), and
+its surface is live and permanently black — so the previous rule, "the live
+IOSurface with the largest area", captured the blank display. Every visual
+artifact on an iOS 27 run (screenshots, per-step harness images, verify
+captures, the mirror view, `record-video`) came back black.
+
+The display class is NOT readable in-process. The descriptor is a
+`ROCKRemoteProxy` that answers neither `displayClass` nor KVC for it; its `state`
+snapshot is a `ROCKImmutableProxy` whose values live in a `properties`
+`NSMapTable` that **crashes the process** when read — `objectForKey:` traps
+(SIGTRAP) and `dictionaryRepresentation` segfaults (SIGSEGV), both measured on
+Xcode 27.0 beta 4. Do not reach into that map.
+
+`SPBuiltInDisplaySizeForUDID` (`SimBridge.m`) therefore reads the built-in
+display's size from `xcrun simctl io <udid> enumerate`, which prints each
+display's class and default size, and `currentSurface` selects the surface
+matching that size. The subprocess result is cached per UDID for the life of the
+process, so a harness run pays for it once rather than once per capture, and an
+unreadable enumerate falls back to the old largest-area behavior rather than
+failing the capture.
 
 ---
 
 ## 5. How the guards roll up into `sipi doctor`
 
 `sipi doctor` (`Sources/sipi/Doctor.swift`) is the per-Xcode early-warning
-system for this whole surface. Its three core checks map directly onto the
+system for this whole surface. Its four core checks map directly onto the
 sections above:
 
 - **CoreSimulator** — `+loadCoreSimulator:` dlopen + `SimServiceContext` /
   `SimDevice` class resolution (§1, §2).
 - **SimulatorKit** — binary existence + `dlopen` + the mangled
   `_TtC12SimulatorKit24SimDeviceLegacyHIDClient` class (§1, §3.1).
+- **IndigoHID** — `dlsym` of the four Indigo event builders; only the mouse
+  builder is required, the others are reported as warnings (§3).
 - **AccessibilityPlatformTranslation** — `+accessibilityBridgeStatus` probes
   APT dlopen, `AXPTranslator`/`sharedInstance`, the token-delegate protocol, the
   Mac platform-element class, and the `SimDevice` transport selector (§1, §4).
+
+A note (never the exit code) reports whether `xcrun devicectl` can target
+simulators here, which gates the Xcode 27+ device-state surface. That surface is
+public tooling, not a private symbol, so its absence is not a driver failure.
+
+**What these checks do NOT cover:** they prove the symbols RESOLVE, not that the
+events they build are DELIVERED. A runtime can accept every HID message and act
+on none of it — measured on iOS 27.0, where the keyboard path is dead (and, in
+one session, touch as well) while `doctor` reports every builder present. Symbol
+resolution is a necessary, not sufficient, condition; the per-action effect
+checks (`type`'s text-field comparison) are what catch the delivery failures.
 
 If any core check fails, `sipi doctor` exits non-zero and `preflight` stops the
 workflow (see `docs/sipi-doctor-contract.md`). The workflow in

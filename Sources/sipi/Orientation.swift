@@ -10,20 +10,22 @@
 //
 // SET (`sipi orientation <udid> --set <name>`): rotates the device. The native
 // PurpleEvent SET is tried first (headless, locale-independent, covers
-// UIDeviceOrientation 1...4); it falls back to the osascript "Device >
-// Orientation" menu path, which is also the only way to express face-up /
-// face-down.
+// UIDeviceOrientation 1...4), then `devicectl device orientation set`, which is
+// headless too and is the only supported way to express face-up / face-down now
+// that Xcode 27 removed Simulator.app. The osascript menu path remains as a
+// last resort for Xcode 26 and earlier.
 
 import ArgumentParser
 import Foundation
 import SimCore
 import SimNative
+import SimShell
 
 extension Sipi {
     struct Orientation: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "orientation",
-            abstract: "Read or set the simulator's physical UI orientation (native SET, osascript fallback)."
+            abstract: "Read or set the simulator's physical UI orientation (native SET, devicectl fallback)."
         )
 
         @Argument(help: "Simulator UDID.")
@@ -34,6 +36,16 @@ extension Sipi {
 
         @Option(name: .long, help: "Set the orientation instead of reading it: \(OrientationSetName.acceptedNames).")
         var set: String?
+
+        @Flag(
+            name: .long,
+            help: """
+            Also report the physical orientation via devicectl, which detects the \
+            face-up / face-down states SimulatorKit cannot express. Costs one \
+            process spawn.
+            """
+        )
+        var physical = false
 
         func run() throws {
             let driver = NativeDriver()
@@ -50,11 +62,26 @@ extension Sipi {
             let orientation = try driver.uiOrientation(udid)
             let name = orientationName(orientation)
 
+            // The plain (non-JSON) READ contract stays exactly the four upright
+            // names — NativeDriver's coordinate math and the skills both parse it.
+            // `--physical` only ever adds keys to the JSON form.
+            if physical && !json {
+                throw ValidationError("--physical requires --json.")
+            }
+
             if json {
-                let object: [String: Any] = [
+                var object: [String: Any] = [
                     "orientation": name,
                     "raw": orientation.rawValue
                 ]
+                if physical {
+                    let reading = DeviceCtl.isSimulatorCapable() ? try? DeviceCtl.orientation(udid: udid) : nil
+                    // NSNull, not an omitted key: "devicectl says upright" and
+                    // "devicectl could not be asked" must not look identical.
+                    object["flat"] = reading?.flat ?? NSNull()
+                    object["physical"] = reading?.deviceOrientation ?? NSNull()
+                    object["locked"] = reading?.isLocked ?? NSNull()
+                }
                 let data = try JSONSerialization.data(
                     withJSONObject: object,
                     options: [.prettyPrinted]

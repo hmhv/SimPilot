@@ -99,9 +99,26 @@ extension Sipi {
             `sipi key 41` (Escape) first to discard a composition, or use `sipi set-text`,
             which replaces the whole value without touching the keyboard.
 
-            On an iOS 27.0 simulator NOTHING here is delivered — paste, --keyboard and
-            --clear all leave the field untouched while this command still prints ok.
-            Use `sipi set-text` on that runtime.
+            A simulator can stop delivering keyboard HID entirely — paste, --keyboard
+            and --clear then all leave the field untouched. This command DETECTS that:
+            it compares the text fields' contents before and after and fails when
+            nothing changed, instead of printing ok over a no-op. Measured: this
+            follows DEVICE age, not the iOS version, and neither `simctl erase` nor a
+            reboot revives it — `simctl create` a replacement device. `sipi set-text`
+            works regardless; pass --no-verify to opt out of the check.
+
+            The comparison brackets the INSERTION, so --clear followed by the text the
+            field already held still passes. Emptying a field (--clear with "") is the
+            exception: there the clear is the effect, so the comparison brackets the
+            clear instead.
+
+            Three distinct failures, and the message says which:
+              not attempted     no field on screen, or the tree could not be read.
+                                Nothing was typed — safe to retry.
+              had no effect     the field's content did not change. The keystrokes
+                                were sent and did not land.
+              could not verify  the tree could not be read back afterward. The text
+                                WAS sent, so check the field before retrying.
 
             Pass --keyboard to inject US-keyboard HID key events instead, for the rare
             field that must receive real per-character keystrokes. Keyboard mode only
@@ -127,6 +144,12 @@ extension Sipi {
 
         @Flag(name: .customLong("clear"), help: "Select all (Cmd+A) and delete before inserting, so the field ends up holding only this text.")
         var clearField = false
+
+        @Flag(
+            name: .customLong("no-verify"),
+            help: "Skip the post-entry check that the accessibility tree changed. Use for a field whose insertion is genuinely invisible."
+        )
+        var noVerify = false
 
         func validate() throws {
             let sources = [text != nil, useStdin, inputFile != nil].filter { $0 }.count
@@ -162,7 +185,8 @@ extension Sipi {
                     method: method,
                     clear: clearField,
                     driver: driver,
-                    udid: udid
+                    udid: udid,
+                    verifyEffect: !noVerify
                 )
             } catch let error as TextInputError {
                 throw ValidationError(error.description)

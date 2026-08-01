@@ -11,6 +11,7 @@
 import Foundation
 import SimCore
 import SimBridge
+import SimShell
 
 public final class NativeDriver: SimDriver {
     private let developerDir: String
@@ -347,11 +348,14 @@ public final class NativeDriver: SimDriver {
     }
 
     public func setOrientation(_ name: OrientationSetName, udid: String) throws {
-        // Try the native PurpleEvent SET first for the orientations it can express
-        // (UIDeviceOrientation 1...4); only fall back to the osascript menu hack
-        // when native is unavailable (port not vended yet / reverse-engineered wire
-        // format mismatch) or the orientation is face-up/face-down. The native path
-        // is headless and locale-independent, so it is strictly preferred.
+        // Three tiers, strongest first:
+        //   1. native PurpleEvent SET — headless, locale-independent, in-process,
+        //      but only expresses UIDeviceOrientation 1...4.
+        //   2. devicectl — headless and locale-independent too, and the only
+        //      supported way to reach face-up / face-down now that Xcode 27
+        //      removed Simulator.app. Costs a process spawn, hence tier 2.
+        //   3. osascript menu click — needs a visible Simulator.app and is
+        //      locale-sensitive. Xcode 26 and earlier only.
         if name.isNativeExpressible {
             do {
                 try SPSimBridge.setOrientationNative(
@@ -361,18 +365,55 @@ public final class NativeDriver: SimDriver {
                 )
                 return
             } catch {
-                // Fall through to osascript; the native attempt's error is non-fatal.
-                FileHandle.standardError.write(
-                    Data("orientation: native SET unavailable (\(error.localizedDescription)); falling back to osascript\n".utf8))
+                // Non-fatal: fall through to the next tier.
+                warn("orientation: native SET unavailable (\(error.localizedDescription)); trying devicectl")
             }
+        }
+
+        if DeviceCtl.isSimulatorCapable() {
+            do {
+                try DeviceCtl.setOrientation(udid: udid, name: name.deviceCtlName)
+                return
+            } catch {
+                warn("orientation: devicectl SET failed (\(error)); trying the Simulator.app menu")
+            }
+        }
+
+        guard simulatorAppPath() != nil else {
+            // Xcode 27+ with devicectl unavailable or failing: there is no menu to
+            // click. Say so instead of emitting an opaque AppleScript error.
+            throw SimDriverError.bridge(
+                """
+                orientation: cannot set \(name.canonicalName). The native SET \
+                \(name.isNativeExpressible ? "failed" : "cannot express this orientation") \
+                and devicectl could not set it. This Xcode ships no Simulator.app to fall back on \
+                (Xcode 27 replaced it with Device Hub) — check `xcrun devicectl list plugins` for \
+                SimulatorCoreDevicePlugin.
+                """
+            )
         }
         try setOrientationViaOSAScript(name, udid: udid)
     }
 
-    /// AppleScript fallback for the orientation SET. Uses Process()/osascript to
-    /// click the Simulator "Device > Orientation" menu item;
-    /// this is the only path that can express face-up / face-down (PurpleEvent
-    /// covers only 1...4). Lives here (not in SimCore) because SimCore is pure
+    /// Path to the legacy Simulator.app for this toolchain, or nil on Xcode 27+
+    /// where it was removed in favor of Device Hub.
+    private func simulatorAppPath() -> String? {
+        let path = URL(fileURLWithPath: developerDir)
+            .appendingPathComponent("Applications/Simulator.app").path
+        return FileManager.default.fileExists(atPath: path) ? path : nil
+    }
+
+    private func warn(_ message: String) {
+        FileHandle.standardError.write(Data((message + "\n").utf8))
+    }
+
+    /// Last-resort AppleScript fallback for the orientation SET: clicks the
+    /// Simulator "Device > Orientation" menu item.
+    ///
+    /// Only reachable on Xcode 26 and earlier. Xcode 27 removed Simulator.app, so
+    /// `setOrientation` checks for the app before coming here and face-up /
+    /// face-down go through devicectl instead — this path is no longer the only
+    /// way to express them. Lives here (not in SimCore) because SimCore is pure
     /// Foundation with no Process().
     private func setOrientationViaOSAScript(_ name: OrientationSetName, udid: String) throws {
         let device = (try? deviceName(for: udid)) ?? ""
@@ -430,13 +471,42 @@ public final class NativeDriver: SimDriver {
         // a pass-through). Without this, a rotated pinch lands at the wrong points.
         let physicalA = try physicalNormalized(a, udid: udid)
         let physicalB = try physicalNormalized(b, udid: udid)
+        try sendMultiTouch(physicalA, physicalB, phase: phase, udid: udid)
+    }
+
+    public func multiTouchSequence(_ frames: [MultiTouchFrame], frameDelay: TimeInterval, udid: String) throws {
+        guard !frames.isEmpty else { return }
+        // Resolve orientation + logical extent ONCE, exactly as the interpolated
+        // single-finger gestures do. Doing it per frame would cost two
+        // CoreSimulator round trips and two AX fetches per frame on a rotated
+        // device — enough delay between moves that the guest no longer reads the
+        // sequence as one continuous gesture.
+        let context = try resolvePhysicalContext(udid: udid)
+        let lastIndex = frames.count - 1
+        for (index, frame) in frames.enumerated() {
+            try sendMultiTouch(
+                physicalNormalized(frame.a, context: context),
+                physicalNormalized(frame.b, context: context),
+                phase: frame.phase,
+                udid: udid
+            )
+            // Pace the interpolated moves only. The opening touch-down and the
+            // closing lift follow immediately, so the recognizer never sees a
+            // stalled hold at either end.
+            if index > 0, index < lastIndex, frameDelay > 0 {
+                usleep(useconds_t(min(max(frameDelay, 0), 5) * 1_000_000))
+            }
+        }
+    }
+
+    private func sendMultiTouch(_ a: Point, _ b: Point, phase: TouchPhase, udid: String) throws {
         try SPSimBridge.multiTouchUDID(
             udid,
             phase: phase.rawValue,
-            x1: physicalA.x,
-            y1: physicalA.y,
-            x2: physicalB.x,
-            y2: physicalB.y,
+            x1: a.x,
+            y1: a.y,
+            x2: b.x,
+            y2: b.y,
             developerDir: developerDir
         )
     }

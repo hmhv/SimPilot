@@ -8,7 +8,7 @@ SimPilot は、Claude Code や Codex から自然言語で使える、iOS Simula
 
 ## できること
 
-- **`/sipi-test`**: iOS Simulator 上での UI テスト自動化。自然言語からテストを定義し、操作と検証を自動化します。回帰テスト、複数デバイス実行、品質監査（アクセシビリティ、ローカライズ、表示確認）に対応します。
+- **`/sipi-test`**: iOS Simulator 上での UI テストと異常系テストの自動化。skill が自然言語の意図を明示的な v2 JSON 仕様に変換し、`sipi run-test` / `sipi run-suite` が決定論的な harness で実行します。保存したテストでは、権限、deep link、push 通知、位置情報、外観、Dynamic Type、Increase Contrast、Face ID / Touch ID、VoiceOver、より広いアクセシビリティ表示設定、起動環境、明示的に設定した network-condition provider を制御できます。
 - **`/sipi-verify`**: 実装後の検証。機能追加や修正後に、その変更が正しく動作し見た目も問題ないかを確認します。
 
 結果は `.simpilot/` に保存され、HTML レポートをブラウザで確認できます。
@@ -16,7 +16,7 @@ SimPilot は、Claude Code や Codex から自然言語で使える、iOS Simula
 ## 前提条件
 
 - macOS 15 以降
-- Xcode 26 以降: Simulator を操作するために**実行時**に必要です（SimPilot は Xcode の private Simulator frameworks を読み込みます）。インストール時には不要です。
+- Xcode 26 以降: Simulator を操作するために**実行時**に必要です（SimPilot は Xcode の private Simulator frameworks を読み込みます）。インストール時には不要です。Xcode 27 以降ではさらに Face ID / Touch ID、VoiceOver、アクセシビリティ表示設定が使えます。これらは `xcrun devicectl` を経由します。
 - [Claude Code](https://claude.com/claude-code) または Codex
 
 ## インストール
@@ -72,7 +72,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test 今の画面からテストを作成して
 ```
 
-保存したテストは、タップやスワイプだけでなく、タップ・トグル・スライダー・ジェスチャー・ドラッグ・長押し・キー操作・回転まで決定論的なステップとして実行します。
+保存したテストは、タップやスワイプだけでなく、タップ・ダブルタップ・トグル・スライダー・ジェスチャー・ドラッグ・長押し・ピンチや生のマルチタッチ・キー操作・回転まで決定論的なステップとして実行します。
+
+さらに、権限の拒否、deep link、push 配信、座標のシミュレート、Face ID / Touch ID の一致と不一致、VoiceOver、アクセシビリティ表示設定の全体（視差効果を減らす、透明度を下げる、カラーフィルタ、Liquid Glass の不透明度）、provider を使ったオフライン／遅延プロファイルなど、Simulator が制御する実際のエラー前提条件も作成できます。SimPilot は独自のネットワークコンディショナーを同梱も模倣もしていません。network profile を使う前に `sipi network-condition status` を確認してください。
+
+検証はテキストの一致にとどまりません。`contains` / `absent` や正規表現に加えて、ステップは要素そのものについてもアサートできます。コントロールが無効になっていること、リストがちょうど 5 行であること、値がパターンに一致すること、タップ領域が 44pt を満たしていることなどです。
 
 **テスト実行:**
 ```text
@@ -111,7 +115,10 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test 未翻訳テキストや文字切れを確認して
 /sipi-test profile 画面を Light と Dark で比較して
 /sipi-test 大きな Dynamic Type サイズで settings フローを確認して
+/sipi-test 視差効果を減らすとカラーフィルタを有効にしてこの画面を監査して
 ```
+
+`sipi a11y-audit` は、その機械的にチェックできる部分を、起動済みの任意の simulator に対してコマンドラインから実行します。小さすぎるタップ領域、ラベルのないコントロール、紛らわしい重複ラベル、意味のないラベル、切り詰められたテキストを検出し、error 深刻度の指摘があれば非ゼロで終了するため、CI のゲートに使えます。Xcode 自身のアクセシビリティ監査は UI テストターゲットの中からしか実行できません。
 
 ## ワークスペース構成
 
@@ -153,8 +160,10 @@ SimPilot は `.simpilot/` 配下に次の構成を使います。
 
 ## 既知の制限
 
-- US 配列以外のテキスト入力は直接のキー入力ではなく clipboard（paste）で行います
-- 直接の HID キー入力は US キーボード配列に対応しています
+- テキスト入力は既定でフィールドのアクセシビリティ値を書き込む方式（`set-text`）を使います。キーボードが不要で、どの文字体系でも入力できます。キー入力レベルの入力（`type`）は既定で clipboard（paste）を経由し、直接の HID キー入力は US キーボード配列のみ対応です
+- **長く使った simulator はキーボード HID を配送しなくなることがあります**（Xcode 27.0 beta 4 で計測）。paste、キー単位の入力、select-all+delete はいずれも無視され、タッチ入力は動作します。これは iOS のバージョンではなくデバイスの使用期間に依存し、`simctl erase` でも再起動でも回復しません。デバイスを作り直してください。`type` はこの状態を検出し、成功と報告せずに失敗します。`set-text` は影響を受けません
+- Face ID / Touch ID、VoiceOver、light/dark を超えるアクセシビリティ表示設定には Xcode 27 が必要です。これらは `xcrun devicectl` を経由し、devicectl はそのリリース以降の simulator しか対象にできません
+- コントラスト比と文字切れは `sipi a11y-audit` の対象外です。どちらも描画されたフレームのピクセル解析が必要です
 - simulator のみ対応で、実機はサポートしていません
 
 ## Note

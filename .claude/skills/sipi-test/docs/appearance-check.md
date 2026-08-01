@@ -51,6 +51,24 @@ If appearance does not switch, reboot the simulator:
 xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>
 ```
 
+The remaining accessibility-appearance facets have no simctl equivalent; they go
+through `sipi appearance` (Xcode 27+, which the command checks for and reports on
+explicitly):
+
+```bash
+sipi appearance <UDID> --json                      # read every facet — capture this before changing anything
+sipi appearance <UDID> --reduce-motion on
+sipi appearance <UDID> --reduce-transparency on
+sipi appearance <UDID> --larger-accessibility-sizes on --text-size accessibility-extra-large
+sipi appearance <UDID> --color-filter on --color-filter-type deuteranopia --color-filter-intensity 0.8
+sipi appearance <UDID> --liquid-glass-opacity 1.0  # opaque; 0.0 is fully translucent
+sipi voiceover <UDID> --enable
+```
+
+These are ad-hoc commands with no automatic restore, unlike the saved-test
+`display-state` action — read the baseline with `sipi appearance <UDID> --json`
+first and write it back when the pass is done.
+
 For the **light/dark** portion specifically, you can let `verify-session` own the aligned capture and report: `sipi verify-session capture <verify-dir> <variant> "<check>" --index N --appearance light|dark` forces the appearance with a built-in settle, and `sipi verify-session finalize` renders the iPhone/iPad × light/dark grid (the same engine as `/sipi-verify`). Keep the `xcrun simctl ui ... content_size ...` commands above for Dynamic Type — `--appearance` cannot set content-size variants.
 
 ## Checks

@@ -324,7 +324,12 @@ extension Sipi {
     struct Tap: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "tap",
-            abstract: "Tap a point (--norm default or --pixel), or resolve --label/--id/--value to an activation point and tap it."
+            abstract: "Tap a point (--norm default or --pixel), or resolve --label/--id/--value to an activation point and tap it.",
+            discussion: """
+            Coordinates and a selector are mutually exclusive: passing both is an
+            error rather than a silent preference for the coordinates, so a typo'd
+            selector cannot look like it resolved.
+            """
         )
 
         @OptionGroup var coordinate: CoordinateUnitOptions
@@ -352,21 +357,11 @@ extension Sipi {
 
         func validate() throws {
             try coordinate.validate()
-            if x != nil || y != nil {
-                guard x != nil, y != nil else {
-                    throw ValidationError("Both -x and -y must be provided together.")
-                }
-                // Range is validated during conversion (Gate 4), which depends on
-                // the unit and (for --pixel) the screen size resolved at run time.
-            } else {
-                let selectorCount = [label != nil, id != nil, value != nil].filter { $0 }.count
-                if selectorCount == 0 {
-                    throw ValidationError("Either provide both -x/-y, or use --label/--id/--value to tap an element.")
-                }
-                if selectorCount > 1 {
-                    throw ValidationError("Use only one of --label, --id, or --value.")
-                }
-            }
+            // Range is validated during conversion (Gate 4), which depends on the
+            // unit and (for --pixel) the screen size resolved at run time.
+            try validateTargeting(
+                x: x, y: y, label: label, id: id, value: value,
+                elementType: elementType, verb: "tap")
         }
 
         func run() throws {
@@ -383,51 +378,202 @@ extension Sipi {
                 return
             }
 
-            let query: AccessibilityQuery
-            if let id {
-                query = .id(id)
-            } else if let label {
-                query = .label(label)
-            } else if let value {
-                query = .value(value)
-            } else {
-                throw ValidationError("Either provide both -x/-y, or use --label/--id/--value to tap an element.")
-            }
-
-            // Resolve against the fast tree first; on a not-found, fall back to
-            // the grid (deep) pass — the ui-driver.md keystone where a selector
-            // that misses the frontmost tree is retried against System UI. The
-            // deep pass goes through ChildTree (in-process, with a child-process
-            // fallback); repeated in-process fetches now both return the full tree.
-            var roots = try driver.describe(udid, deep: false)
-            var resolution: TapResolution
-            do {
-                resolution = try AccessibilityTargetResolver.resolveTap(roots: roots, query: query, elementType: elementType)
-            } catch let error as ElementResolutionError where error.isNotFound {
-                roots = try ChildTree.nodes(udid: udid, deep: true)
-                do {
-                    resolution = try AccessibilityTargetResolver.resolveTap(roots: roots, query: query, elementType: elementType)
-                } catch let retry as ElementResolutionError {
-                    emitError("Warning: \(retry.description) No tap performed.")
-                    throw ExitCode.failure
-                }
-            } catch let error as ElementResolutionError {
-                emitError("Warning: \(error.description) No tap performed.")
-                throw ExitCode.failure
-            }
-
-            guard let frame = screenFrame(of: roots) else {
-                emitError("Warning: could not determine the screen frame to normalize the tap point. No tap performed.")
-                throw ExitCode.failure
-            }
-            guard let normalizedPoint = normalized(resolution.point, in: frame) else {
-                emitError("Warning: screen frame has no positive extent; cannot normalize the tap point. No tap performed.")
-                throw ExitCode.failure
-            }
-
-            try driver.tap(normalizedPoint, udid: udid)
+            let query = try selectorQuery(id: id, label: label, value: value)
+            let point = try resolveActivationPoint(
+                driver: driver, udid: udid, query: query, elementType: elementType, verb: "tap"
+            )
+            try driver.tap(point, udid: udid)
             print("ok")
         }
+    }
+}
+
+// MARK: - selector resolution shared by the point-targeting commands
+
+/// Enforce the targeting contract: exactly one way to say where.
+///
+/// Coordinates and a selector are mutually exclusive, not a preference order.
+/// Accepting both and silently taking the coordinates makes a typo'd selector
+/// look like it resolved — the command reports `ok` having acted somewhere the
+/// caller did not ask for. The saved-test harness has always required exactly
+/// one (`(selector != nil) == (point != nil)` is a validation error); this is
+/// the same rule for the CLI.
+///
+/// `--element-type` is part of the selector, not an independent filter: it only
+/// narrows which element a label/id/value resolves to. Alongside coordinates it
+/// constrains nothing, so it is rejected for the same reason — a caller who
+/// passes it is expecting a type check that will not happen.
+func validateTargeting(
+    x: Double?,
+    y: Double?,
+    label: String?,
+    id: String?,
+    value: String?,
+    elementType: String? = nil,
+    verb: String
+) throws {
+    let hasCoordinate = x != nil || y != nil
+    let selectorCount = [label != nil, id != nil, value != nil].filter { $0 }.count
+
+    if hasCoordinate {
+        guard x != nil, y != nil else {
+            throw ValidationError("Both -x and -y must be provided together.")
+        }
+        guard selectorCount == 0 else {
+            throw ValidationError(
+                "Use either -x/-y or --label/--id/--value to \(verb), not both — "
+                + "passing both would silently ignore the selector.")
+        }
+        guard elementType == nil else {
+            throw ValidationError(
+                "--element-type only narrows a --label/--id/--value match; it does nothing "
+                + "alongside -x/-y. Drop it, or target the element by selector instead.")
+        }
+        return
+    }
+    if selectorCount == 0 {
+        throw ValidationError("Either provide both -x/-y, or use --label/--id/--value to \(verb) an element.")
+    }
+    if selectorCount > 1 {
+        throw ValidationError("Use only one of --label, --id, or --value.")
+    }
+}
+
+/// Build an `AccessibilityQuery` from the mutually exclusive selector options.
+/// Callers validate the "exactly one" rule up front; this throws only to keep the
+/// optional unwrapping total.
+func selectorQuery(id: String?, label: String?, value: String?) throws -> AccessibilityQuery {
+    if let id { return .id(id) }
+    if let label { return .label(label) }
+    if let value { return .value(value) }
+    throw ValidationError("Either provide both -x/-y, or use --label/--id/--value to target an element.")
+}
+
+/// Resolve a selector to a normalized activation point.
+///
+/// Resolves against the fast tree first; on a not-found, falls back to the grid
+/// (deep) pass — the ui-driver.md keystone where a selector that misses the
+/// frontmost tree is retried against System UI. The deep pass goes through
+/// ChildTree (in-process, with a child-process fallback); repeated in-process
+/// fetches now both return the full tree.
+///
+/// `verb` names the action in the failure message ("tap", "double-tap") so the
+/// warning still reads naturally for each caller.
+func resolveActivationPoint(
+    driver: SimDriver,
+    udid: String,
+    query: AccessibilityQuery,
+    elementType: String?,
+    verb: String
+) throws -> Point {
+    var roots = try driver.describe(udid, deep: false)
+    var resolution: TapResolution
+    do {
+        resolution = try AccessibilityTargetResolver.resolveTap(roots: roots, query: query, elementType: elementType)
+    } catch let error as ElementResolutionError where error.isNotFound {
+        roots = try ChildTree.nodes(udid: udid, deep: true)
+        do {
+            resolution = try AccessibilityTargetResolver.resolveTap(roots: roots, query: query, elementType: elementType)
+        } catch let retry as ElementResolutionError {
+            emitError("Warning: \(retry.description) No \(verb) performed.")
+            throw ExitCode.failure
+        }
+    } catch let error as ElementResolutionError {
+        emitError("Warning: \(error.description) No \(verb) performed.")
+        throw ExitCode.failure
+    }
+
+    guard let frame = screenFrame(of: roots) else {
+        emitError("Warning: could not determine the screen frame to normalize the \(verb) point. No \(verb) performed.")
+        throw ExitCode.failure
+    }
+    guard let normalizedPoint = normalized(resolution.point, in: frame) else {
+        emitError("Warning: screen frame has no positive extent; cannot normalize the \(verb) point. No \(verb) performed.")
+        throw ExitCode.failure
+    }
+    return normalizedPoint
+}
+
+// MARK: - double-tap
+
+extension Sipi {
+    struct DoubleTap: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "double-tap",
+            abstract: "Double-tap a point (--norm default or --pixel), or resolve --label/--id/--value and double-tap it.",
+            discussion: """
+            Two full down/up taps at the same point, separated by less than the system
+            double-tap threshold so the guest coalesces them into one double-tap rather
+            than two single taps. Use it for zoom-to-fit in map/photo views and for the
+            double-tap-to-select text idiom.
+
+            Coordinates and a selector are mutually exclusive: passing both is an error
+            rather than a silent preference for the coordinates, so a typo'd selector
+            cannot look like it resolved.
+            """
+        )
+
+        @OptionGroup var coordinate: CoordinateUnitOptions
+
+        @Argument(help: "Simulator UDID.")
+        var udid: String
+
+        @Option(name: .customShort("x"), help: "X (normalized 0...1, or pixels with --pixel). Use with -y for a direct double-tap.")
+        var x: Double?
+
+        @Option(name: .customShort("y"), help: "Y (normalized 0...1, or pixels with --pixel). Use with -x for a direct double-tap.")
+        var y: Double?
+
+        @Option(name: .long, help: "Resolve and double-tap the element matching this AXLabel.")
+        var label: String?
+
+        @Option(name: .long, help: "Resolve and double-tap the element matching this AXUniqueId.")
+        var id: String?
+
+        @Option(name: .long, help: "Resolve and double-tap the element matching this AXValue.")
+        var value: String?
+
+        @Option(name: .customLong("element-type"), help: "Restrict --label/--id/--value matches to this accessibility type (e.g. Button, Image).")
+        var elementType: String?
+
+        func validate() throws {
+            try coordinate.validate()
+            try validateTargeting(
+                x: x, y: y, label: label, id: id, value: value,
+                elementType: elementType, verb: "double-tap")
+        }
+
+        func run() throws {
+            let driver = NativeDriver()
+            let point: Point
+            if let x, let y {
+                let screen = coordinate.unit == .pixel ? tapScreenSize(udid: udid) : nil
+                point = try CoordinateConverter.normalize(x: x, y: y, unit: coordinate.unit, screen: screen)
+            } else {
+                let query = try selectorQuery(id: id, label: label, value: value)
+                point = try resolveActivationPoint(
+                    driver: driver, udid: udid, query: query, elementType: elementType, verb: "double-tap"
+                )
+            }
+            try DoubleTapInput.perform(point, driver: driver, udid: udid)
+            print("ok")
+        }
+    }
+}
+
+/// The double-tap timing policy, shared by the CLI and the saved-test harness so
+/// both produce the same gesture.
+enum DoubleTapInput {
+    /// Gap between the two taps. iOS treats successive taps as a double-tap when
+    /// they land within ~0.3s of each other; 80 ms is comfortably inside that
+    /// window while still leaving the two taps distinguishable to the guest's
+    /// event pipeline (sent truly back-to-back they can coalesce into one).
+    static let interTapDelay: TimeInterval = 0.08
+
+    static func perform(_ point: Point, driver: SimDriver, udid: String) throws {
+        try driver.tap(point, udid: udid)
+        usleep(useconds_t(interTapDelay * 1_000_000))
+        try driver.tap(point, udid: udid)
     }
 }
 
@@ -441,7 +587,7 @@ extension Sipi {
     /// pbcopy`), so it needs the field focused, it depends on the guest keyboard
     /// layout / input language, it clobbers the pasteboard, and it silently does
     /// nothing on a runtime that does not deliver keyboard HID (verified on the
-    /// iOS 27.0 simulator). `set-text` goes through the same accessibility bridge
+    /// simulator whose keyboard HID has decayed). `set-text` goes through the same accessibility bridge
     /// `describe-ui` reads: it addresses the field directly, needs no focus and no
     /// keyboard, and carries any text — Japanese, emoji, anything.
     ///
@@ -461,7 +607,7 @@ extension Sipi {
             Unlike `type`, nothing is typed: the element's accessibility value is set
             directly, so this is independent of the guest keyboard layout, input
             language/IME, and pasteboard, and it works on runtimes that drop keyboard
-            HID entirely (iOS 27.0 simulators today). Because no keystrokes occur, it
+            HID entirely. Because no keystrokes occur, it
             does not exercise per-character behaviour — prefer `type` when the typing
             itself is under test.
 
@@ -508,22 +654,9 @@ extension Sipi {
 
         func validate() throws {
             try coordinate.validate()
-            let selectorCount = [id != nil, label != nil, value != nil].filter { $0 }.count
-            if x != nil || y != nil {
-                guard x != nil, y != nil else {
-                    throw ValidationError("Both -x and -y must be provided together.")
-                }
-                if selectorCount > 0 {
-                    throw ValidationError("Use either -x/-y or one of --id/--label/--value, not both.")
-                }
-            } else {
-                if selectorCount == 0 {
-                    throw ValidationError("Either provide both -x/-y, or use --id/--label/--value to target the field.")
-                }
-                if selectorCount > 1 {
-                    throw ValidationError("Use only one of --id, --label, or --value.")
-                }
-            }
+            try validateTargeting(
+                x: x, y: y, label: label, id: id, value: value,
+                elementType: elementType, verb: "set text on")
         }
 
         func run() throws {

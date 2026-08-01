@@ -8,7 +8,7 @@ SimPilot 是一组面向 iOS Simulator 测试与验证的 agent skills，可在 
 
 ## 功能
 
-- **`/sipi-test`**: 在 iOS Simulator 上自动化 UI 测试。可以用自然语言定义测试，并自动执行交互和验证。支持回归测试、多设备运行，以及质量审查（无障碍、本地化、外观检查）。
+- **`/sipi-test`**: 在 iOS Simulator 上自动化 UI 测试与异常状态测试。skill 会把自然语言意图转换成明确的 v2 JSON 规范，再由 `sipi run-test` / `sipi run-suite` 通过确定性 harness 执行。保存的测试可以控制权限、deep links、推送通知、定位、外观、Dynamic Type、Increase Contrast、Face ID / Touch ID、VoiceOver、更广泛的无障碍外观设置、启动环境，以及显式配置的 network-condition provider。
 - **`/sipi-verify`**: 实现后的验证。用于在功能开发或缺陷修复后，确认行为和界面都符合预期。
 
 结果会保存在 `.simpilot/` 中，并生成可在浏览器查看的 HTML 报告。
@@ -16,7 +16,7 @@ SimPilot 是一组面向 iOS Simulator 测试与验证的 agent skills，可在 
 ## 前置条件
 
 - macOS 15 或更高版本
-- Xcode 26 或更高版本：在**运行时**需要，用于驱动 Simulator（SimPilot 会加载 Xcode 的 private Simulator frameworks）。安装时不需要。
+- Xcode 26 或更高版本：在**运行时**需要，用于驱动 Simulator（SimPilot 会加载 Xcode 的 private Simulator frameworks）。安装时不需要。Xcode 27 或更高版本还会额外启用 Face ID / Touch ID、VoiceOver 和无障碍外观设置，它们通过 `xcrun devicectl` 实现。
 - [Claude Code](https://claude.com/claude-code) 或 Codex
 
 ## 安装
@@ -72,7 +72,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test 从当前界面创建测试
 ```
 
-保存的测试以确定性步骤驱动完整的交互面——点按、开关切换、滑块、手势、拖拽、长按、组合键和旋转——而不仅是点按和滑动。
+保存的测试以确定性步骤驱动完整的交互面——点按、双击、开关切换、滑块、手势、拖拽、长按、捏合与原始多点触控、组合键和旋转——而不仅是点按和滑动。
+
+它们还能创建由 Simulator 真实控制的错误前置条件，比如拒绝权限、deep links、推送投递、模拟坐标、Face ID / Touch ID 的匹配与不匹配、VoiceOver、完整的无障碍外观设置（减弱动态效果、降低透明度、颜色滤镜、Liquid Glass 不透明度），以及由 provider 支撑的离线/延迟配置。SimPilot 不捆绑也不模仿任何专有的网络条件模拟工具：使用网络配置前请先检查 `sipi network-condition status`。
+
+验证不止于文本匹配：除了 `contains` / `absent` 和正则表达式，单个步骤还可以对元素本身做断言——某个控件处于禁用状态、某个列表恰好有五行、某个值匹配指定模式，或者某个点按目标达到 44pt。
 
 **运行测试:**
 ```text
@@ -111,7 +115,10 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test 检查未翻译文本和文字截断
 /sipi-test 比较 profile 页面在 Light 和 Dark 模式下的表现
 /sipi-test 检查 settings 流程在大号 Dynamic Type 下的显示
+/sipi-test 在开启减弱动态效果和颜色滤镜的情况下审查这个界面
 ```
+
+`sipi a11y-audit` 可以在命令行中针对任意已启动的 simulator 运行其中机械可查的部分——过小的点按目标、缺少标签的控件、有歧义的重复标签、无意义的标签、被截断的文本——并在出现 error 级别的问题时以非零码退出，因此可以用来把关 CI。Xcode 自带的无障碍审查只能在 UI 测试 target 内部运行。
 
 ## 工作区结构
 
@@ -153,8 +160,10 @@ SimPilot 在 `.simpilot/` 下使用如下目录结构:
 
 ## 已知限制
 
-- 非美式文本输入通过剪贴板（粘贴）完成，而非逐键直接输入
-- 逐键直接 HID 输入支持美式键盘布局
+- 文本输入默认写入字段的无障碍值（`set-text`），无需键盘，任何文字系统都适用。按键级别的输入（`type`）默认通过剪贴板粘贴；逐键直接 HID 输入仅支持美式键盘布局
+- **长期使用的 simulator 可能不再投递键盘 HID**（在 Xcode 27.0 beta 4 上实测）：粘贴、逐键输入和全选+删除都会被忽略，而触摸输入正常。这取决于设备的使用时长而非 iOS 版本，`simctl erase` 和重启都无法恢复，需要重新创建设备。`type` 会检测到这一点并直接失败，而不是报告成功；`set-text` 不受影响
+- Face ID / Touch ID、VoiceOver，以及 light/dark 之外的无障碍外观项需要 Xcode 27——它们通过 `xcrun devicectl` 实现，而 devicectl 只能作用于该版本及之后的 simulator
+- 对比度和文字截断不在 `sipi a11y-audit` 的范围内；两者都需要对渲染帧做像素分析
 - 仅支持 simulator，不支持真机
 
 ## Note

@@ -207,16 +207,36 @@ private struct DoctorReport {
         )
     }
 
-    /// Informational notes. Two things a caller cannot see from the capability
-    /// checks alone: WHICH sipi is answering (and whether the checkout has moved
-    /// past it), and that no simulator window is needed — plus how to open one on
-    /// this Xcode, since `open -a Simulator` no longer resolves on Xcode 27.
+    /// Informational notes. Things a caller cannot see from the capability checks
+    /// alone: WHICH sipi is answering (and whether the checkout has moved past
+    /// it), that no simulator window is needed — plus how to open one on this
+    /// Xcode, since `open -a Simulator` no longer resolves on Xcode 27 — and
+    /// whether the devicectl-backed device-state commands are available here.
+    ///
+    /// devicectl is deliberately a NOTE, not a core check: it is not required to
+    /// drive a simulator, and gating the exit code on it would make `sipi doctor`
+    /// fail on a perfectly working Xcode 26 setup.
     private static func notes(developerDir: String) -> [String] {
         var notes: [String] = []
 
         let build = BuildInfo.probe()
         if let summary = build.summaryNote { notes.append(summary) }
         if let warning = build.stalenessWarning { notes.append(warning) }
+
+        if DeviceCtl.isSimulatorCapable() {
+            notes.append(
+                "devicectl can target simulators: `sipi biometrics`, `sipi appearance`, "
+                + "`sipi voiceover`, face-up/face-down orientation, and the biometrics / "
+                + "display-state / voiceover test actions are available."
+            )
+        } else {
+            notes.append(
+                "devicectl cannot target simulators on this toolchain (no SimulatorCoreDevicePlugin): "
+                + "`sipi biometrics`, `sipi appearance`, `sipi voiceover`, face-up/face-down orientation, "
+                + "and the biometrics / display-state / voiceover test actions are unavailable. "
+                + "Everything else works; select Xcode 27 or later to enable them."
+            )
+        }
 
         if let app = SimulatorUIApp.resolve(developerDir: developerDir) {
             notes.append(

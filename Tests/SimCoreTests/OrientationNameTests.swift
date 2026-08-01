@@ -58,6 +58,19 @@ final class OrientationNameTests: XCTestCase {
         XCTAssertEqual(OrientationSetName.landscapeRight.canonicalName, "landscape-right")
     }
 
+    /// devicectl is the headless path that reaches all six orientations, so its
+    /// names must match `devicectl device orientation set`'s accepted values
+    /// exactly — a mismatch fails at run time with an argument error, and
+    /// face-up / face-down have no other headless route on Xcode 27.
+    func testDeviceCtlNamesMatchDeviceCtlVocabulary() {
+        XCTAssertEqual(OrientationSetName.portrait.deviceCtlName, "portrait")
+        XCTAssertEqual(OrientationSetName.portraitUpsideDown.deviceCtlName, "portraitUpsideDown")
+        XCTAssertEqual(OrientationSetName.landscapeLeft.deviceCtlName, "landscapeLeft")
+        XCTAssertEqual(OrientationSetName.landscapeRight.deviceCtlName, "landscapeRight")
+        XCTAssertEqual(OrientationSetName.faceUp.deviceCtlName, "faceUp")
+        XCTAssertEqual(OrientationSetName.faceDown.deviceCtlName, "faceDown")
+    }
+
     func testMenuItemNamesMatchSimulatorMenu() {
         // These must match the Simulator "Device > Orientation" submenu labels the
         // osascript fallback clicks.

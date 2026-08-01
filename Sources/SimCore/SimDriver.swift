@@ -61,12 +61,55 @@ public protocol SimDriver {
     func screenshot(to url: URL, udid: String) throws
     /// Native READ of the current physical UI orientation.
     func uiOrientation(_ udid: String) throws -> UIOrientation
-    /// SET the device orientation: native PurpleEvent SET first, osascript menu
-    /// fallback (which also covers face-up / face-down).
+    /// SET the device orientation: native PurpleEvent SET first, then devicectl
+    /// (the only headless path to face-up / face-down), then the osascript menu
+    /// on toolchains that still ship Simulator.app.
     func setOrientation(_ name: OrientationSetName, udid: String) throws
     /// Two-finger touch phase at two normalized 0...1 points (pinch / multitouch).
     /// `phase` 1 = begin/move, 2 = end.
     func multiTouch(_ a: Point, _ b: Point, phase: TouchPhase, udid: String) throws
+    /// Send a whole interpolated two-finger gesture.
+    ///
+    /// Worth implementing rather than leaving to the default below: an
+    /// implementation that knows the device can resolve the orientation and
+    /// logical extent ONCE for the gesture, the way `swipe` and the composite
+    /// drag do. Going through `multiTouch` per frame re-resolves both per
+    /// endpoint, which on a rotated device means two CoreSimulator round trips
+    /// plus two accessibility-tree fetches per frame — for a default 22-frame
+    /// pinch that is 44 of each, mid-gesture, and the guest stops recognizing it
+    /// as a pinch.
+    ///
+    /// `frameDelay` paces the interpolated moves; the opening and closing frames
+    /// are sent without an added gap.
+    ///
+    /// Has a default implementation, so conforming types written before it
+    /// existed keep compiling.
+    func multiTouchSequence(_ frames: [MultiTouchFrame], frameDelay: TimeInterval, udid: String) throws
     /// Send a Digital Crown rotation delta (Apple Watch simulators only).
     func crown(delta: Double, udid: String) throws
+}
+
+extension SimDriver {
+    /// Frame-by-frame fallback over `multiTouch`.
+    ///
+    /// Correct but slower than a native implementation: each frame re-resolves
+    /// whatever per-call state `multiTouch` needs. Adopters that can hoist that
+    /// work out of the loop should override this — see the protocol requirement.
+    public func multiTouchSequence(
+        _ frames: [MultiTouchFrame],
+        frameDelay: TimeInterval,
+        udid: String
+    ) throws {
+        guard !frames.isEmpty else { return }
+        let lastIndex = frames.count - 1
+        for (index, frame) in frames.enumerated() {
+            try multiTouch(frame.a, frame.b, phase: frame.phase, udid: udid)
+            // Pace the interpolated moves only; the opening touch-down and the
+            // closing lift follow immediately so the recognizer never sees a
+            // stalled hold at either end.
+            if index > 0, index < lastIndex, frameDelay > 0 {
+                usleep(useconds_t(min(max(frameDelay, 0), 5) * 1_000_000))
+            }
+        }
+    }
 }

@@ -86,6 +86,21 @@ extension AXNode {
         return false
     }
 
+    /// Accessibility types that accept typed text. Used to decide where text
+    /// entry could have landed.
+    static let textEntryTypes: Set<String> = [
+        "TextField",
+        "SecureTextField",
+        "TextView",
+        "TextArea",
+        "SearchField",
+        "ComboBox"
+    ]
+
+    var isTextEntry: Bool {
+        type.map(Self.textEntryTypes.contains) == true
+    }
+
     /// Depth-first flatten of self + all descendants.
     func flattened() -> [AXNode] {
         var result: [AXNode] = [self]

@@ -56,7 +56,7 @@ Fields:
 | `network-condition-provider` | absolute path string | No |
 | `build` | object (`project` / `scheme` / `configuration`) | No |
 
-The harness (`run-test` / `run-suite`) consumes only `app`, `step-delay`, and `max-retries`. `build` is load-bearing for the build step (see `../../sipi-common/docs/build.md`; all sub-keys are optional, and an empty `"build": {}` enables auto-detection). `keep-runs` and `record-video` are accepted by `sipi validate` but are not acted on by the deterministic runner.
+The harness (`run-test` / `run-suite`) consumes `app`, `step-delay`, `max-retries`, and `network-condition-provider`. `build` is load-bearing for the build step (see `../../sipi-common/docs/build.md`; all sub-keys are optional, and an empty `"build": {}` enables auto-detection). `keep-runs` and `record-video` are accepted by `sipi validate` but are not acted on by the deterministic runner.
 
 ## tests/<id>.json
 
@@ -150,11 +150,40 @@ both strings — including leftovers from an earlier step or a previous run. Add
 { "type": "type", "text": "replaced", "clear": true }
 ```
 
+`type` confirms it did something: it compares the text fields' contents before and
+after the insertion and FAILS the step when nothing changed, so a simulator that
+has stopped delivering keyboard events can no longer produce a green step over an
+empty field. Set
+`"verify-effect": false` for the rare field whose insertion is genuinely
+invisible.
+
+The comparison is against the field as it stands AFTER any `clear`, so the two
+idioms that end where they started still pass: `"clear": true` with the same
+string, and clearing a `SecureField` to retype a password of the same length
+(bullets either way). Only the text-entry elements are compared — not the whole
+tree, which the status-bar clock changes every second.
+
+Emptying a field (`"clear": true` with `"text": ""`) is the exception: there the
+clear IS the effect, so the comparison brackets the clear instead and the step
+fails only when the field kept its value.
+
+The step distinguishes three failures, because the right response differs:
+
+| Message | Meaning | Safe to retry? |
+|---|---|---|
+| `text entry not attempted` | No field on screen, or the tree could not be read at all — checked BEFORE anything is typed | Yes, nothing was sent |
+| `text entry had no effect` | The field's content did not change; the keystrokes did not land | Yes, but expect the same result until the cause is fixed |
+| `could not verify text entry` | The tree could not be read back afterward | **No** — the text WAS sent, so a blind retry can enter it twice |
+
 Measured limits of the keyboard paths, all on Xcode 27.0 beta 4:
 
-- On an **iOS 27.0** runtime NONE of it is delivered: paste, `keyboard`, and
-  `clear` all leave the field untouched while the step still reports the action as
-  performed. Use `set-text` there.
+- **A worn-out simulator delivers NONE of it**: paste, `keyboard`, and `clear`
+  all leave the field untouched. Measured 2026-08-01: this follows DEVICE age,
+  not the iOS version — a freshly created device types fine on iOS 27.0, while
+  long-lived devices fail on both iOS 27.0 and 26.4, and neither `simctl erase`
+  nor a reboot revives them. `simctl create` a replacement to confirm. The
+  `verify-effect` check turns the silent no-op into an explicit step failure that
+  names `set-text` as the fix.
 - Under a **non-Latin IME** (a Japanese keyboard, for example) `"input-method":
   "keyboard"` text arrives as an in-progress COMPOSITION, not committed text:
   `abc` shows up as `あbc`, and dismissing the composition discards all of it.
@@ -178,8 +207,8 @@ exactly one of `selector` / `point`, plus `text`):
 `set-text` sets the element's accessibility value directly, so it needs no keyboard,
 no pasteboard, and no focus, and it carries any text (Japanese, emoji) regardless of
 the guest keyboard layout or IME. It is the only text-entry action that works on a
-runtime that does not deliver keyboard HID (iOS 27.0 simulators today, where `type`
-silently enters nothing). The write is confirmed against a fresh read of the app, so
+device that has stopped delivering keyboard HID, where `type`
+silently enters nothing. The write is confirmed against a fresh read of the app, so
 the step FAILS when the value did not take — only editable text elements accept it.
 
 Because nothing is typed, per-keystroke behaviour is not exercised (`onChange` per
@@ -292,7 +321,40 @@ These drive the richer `sipi` primitives as deterministic, saved test steps.
 { "type": "crown", "delta": 40 }
 ```
 
-All keycodes are USB HID usage codes 0…255. `long-press`/`slider` selectors honor the same fast→deep resolution and `optional` skip as `tap`.
+`double-tap` (selector or `point`, same targeting as `tap`) — zoom-to-fit in map
+and photo views, double-tap-to-select text. Two full taps inside the system
+double-tap window, which two separate `tap` steps cannot guarantee:
+
+```json
+{ "type": "double-tap", "selector": { "label": "Map" } }
+```
+
+`pinch` (`direction` is `in` (zoom out) or `out` (zoom in)). Optional `point` is
+the gesture center (default: screen center), `separation` is the widest
+normalized finger gap (default 0.4, must be above 0.05 and at most 1.0), `steps`
+is the interpolated move count (default 20, max 200), `duration` is the total
+seconds (default 0.5, must be above 0 and at most 30 — the same bound as
+`sipi pinch`, because 0 collapses the gesture into a single instant frame that no
+recognizer reads as a pinch). The two contacts travel along the vertical axis through
+the center, and a center near an edge shortens the travel rather than moving a
+contact off screen — a center so close to an edge that no travel is left is a
+step failure, not a silent no-op:
+
+```json
+{ "type": "pinch", "direction": "out", "point": { "x": 0.5, "y": 0.4 }, "separation": 0.6 }
+```
+
+`multitouch` (raw two-finger phase — `points` is exactly two points, `phase` is 1
+(begin/move) or 2 (end)). Use `pinch` unless the gesture is not a pinch;
+this is the escape hatch for hand-assembled two-finger sequences such as a
+rotate:
+
+```json
+{ "type": "multitouch", "phase": 1, "points": [{ "x": 0.4, "y": 0.4 }, { "x": 0.6, "y": 0.6 }] }
+{ "type": "multitouch", "phase": 2, "points": [{ "x": 0.3, "y": 0.3 }, { "x": 0.7, "y": 0.7 }] }
+```
+
+All keycodes are USB HID usage codes 0…255. `long-press`/`double-tap`/`slider` selectors honor the same fast→deep resolution and `optional` skip as `tap`.
 
 ### Simulator-control actions
 
@@ -352,6 +414,80 @@ Apply or clear a profile through the configured external provider:
 
 `bundle-id` optionally overrides the configured app for `privacy`, `push`, `launch`, `terminate`, and `network-condition`. See `adverse-state-testing.md` for provider capability checks, cleanup, and the difference between request failure and `NWPathMonitor` path loss.
 
+### Device-state actions (Xcode 27+)
+
+These reach facets simctl never exposed. They go through `xcrun devicectl`, which
+only speaks to simulators from Xcode 27 on; on an older toolchain the step fails
+with an explicit message rather than a device-not-found error. Every facet these
+touch is captured once per run and restored afterward, like `appearance` and
+Dynamic Type. The capture happens before the first write and a step FAILS when it
+cannot be read — changing the device with no way to change it back is worse than
+not running the step. The same applies per facet: if the runtime does not report
+one the action wants to change, the step fails rather than leaving it applied for
+the rest of the run.
+
+One facet cannot be restored and so is refused outright rather than silently
+left behind: `look-and-feel` on a runtime that offers a single look (iOS 27 has
+only "Liquid Glass"), where devicectl accepts the write and ignores it.
+
+Drive a Face ID / Touch ID flow end to end. Enrollment must be on before a match
+event has a prompt to answer, so the order is enroll → present the prompt →
+match:
+
+```json
+{ "type": "biometrics", "operation": "enroll" }
+{ "type": "biometrics", "operation": "match" }
+{ "type": "biometrics", "operation": "no-match" }
+{ "type": "biometrics", "operation": "unenroll" }
+```
+
+Set the accessibility appearance facets simctl cannot reach. Every key is
+optional; at least one is required, and an unknown key is a validation error
+rather than a silently ignored setting:
+
+```json
+{
+  "type": "display-state",
+  "settings": {
+    "reduce-motion": true,
+    "reduce-transparency": true,
+    "show-borders": true,
+    "color-filter": true,
+    "color-filter-type": "deuteranopia",
+    "color-filter-intensity": 0.8,
+    "liquid-glass-opacity": 1.0,
+    "larger-accessibility-sizes": true,
+    "look-and-feel": "tinted"
+  }
+}
+```
+
+| Facet | Values |
+|---|---|
+| `look-and-feel` | `clear`, `tinted` |
+| `reduce-motion`, `reduce-transparency`, `show-borders`, `color-filter`, `larger-accessibility-sizes` | boolean |
+| `color-filter-type` | `grayscale`, `protanopia`, `deuteranopia`, `tritanopia` |
+| `color-filter-intensity` | 0.25…1.0. Cannot be combined with `grayscale`, which takes no intensity — `sipi validate` rejects the pair, because devicectl refuses the write and leaves the whole batch unapplied |
+
+`color-filter-type` and `color-filter-intensity` require `color-filter` in the
+same settings object. devicectl only reports those two while the filter is ON, so
+a run that starts with it off has no baseline to restore them from; switching the
+filter back off is what returns the screen to its original appearance.
+| `liquid-glass-opacity` | 0.0 (translucent) … 1.0 (opaque) |
+
+Light/dark, text size, and Increase Contrast are NOT settable here even though
+devicectl can write them: the `appearance`, `content-size`, and
+`increase-contrast` actions already own those facets and capture their own
+restore baselines. Two mechanisms moving one facet would mean two baselines and a
+restore that lands on whichever ran last, so `sipi validate` rejects them here
+and names the action to use instead.
+
+Turn VoiceOver on for an accessibility pass and off afterward:
+
+```json
+{ "type": "voiceover", "enabled": true }
+```
+
 ## Selector
 
 Exactly one of:
@@ -379,16 +515,77 @@ Optional selector field:
 
 ## Verify
 
+A step passes when EVERY condition across every form holds. At least one
+condition is required — an empty verify would pass without checking anything and
+is rejected by `sipi validate`.
+
+### Text forms
+
 ```json
 {
   "contains": ["Settings"],
-  "absent": ["Home only text"]
+  "absent": ["Home only text"],
+  "matches": ["Total: \\d+ items"],
+  "not-matches": ["Error \\d+"]
 }
 ```
 
 - `contains`: every string must appear in `describe-ui`.
 - `absent`: every string must be absent from `describe-ui`.
+- `matches`: every regular expression must match somewhere in `describe-ui`.
+- `not-matches`: no regular expression may match.
+- Patterns are search semantics, like grep; anchor with `^` / `$` when you mean
+  the whole string. An uncompilable pattern is a validation error, not a run-time
+  surprise.
 - Use strings that prove the new state, not static chrome.
+
+### Element form
+
+`elements` asserts about ELEMENTS rather than about the serialized text, which is
+what makes a check like "the button is disabled" or "there are exactly five rows"
+expressible at all:
+
+```json
+{
+  "elements": [
+    { "label": "Sign In", "enabled": false },
+    { "element-type": "Cell", "count": 5 },
+    { "id": "login.email", "value-matches": "@example\\.com$" },
+    { "label": "Close", "min-width": 44, "min-height": 44 },
+    { "label": "Error banner", "exists": false }
+  ]
+}
+```
+
+Selector fields (at least one required; they are ANDed):
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Exact `AXUniqueId` |
+| `label` | string | Exact `AXLabel` |
+| `value` | string | Exact `AXValue` |
+| `element-type` | string | Accessibility type such as `Button` or `Cell` |
+
+Assertion fields (all optional; a bare selector means "must exist"):
+
+| Field | Type | Description |
+|---|---|---|
+| `exists` | bool | Whether any element must match (default true) |
+| `enabled` | bool | Required enabled state for every match |
+| `value-equals` | string | Required exact `AXValue` for every match |
+| `value-matches` | string | Regular expression that must match somewhere in every match's `AXValue` (search semantics, like `matches`; anchor with `^` / `$` for a whole-value match) |
+| `count` | int | Exact number of matches |
+| `min-count` / `max-count` | int | Bounds on the number of matches |
+| `min-width` / `min-height` | number | Minimum frame extent in points for every match — the assertion form of the 44pt touch-target rule |
+
+String comparisons are exact after trimming; use `contains` for substring
+matching. Asserting a property of an element that does not exist FAILS ("no
+element matched") rather than passing over an empty set, so an element condition
+can never green a step vacuously.
+
+`sipi validate` rejects a condition with no selector, contradictory counts
+(`min-count` above `max-count`, `count` alongside `min-count`/`max-count`), and
+`exists: false` paired with a property assertion.
 
 ## suites/<name>.json
 

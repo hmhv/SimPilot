@@ -19,8 +19,36 @@ Use saved simulator-control actions when a UI state depends on something outside
 - `status-bar`: create deterministic screenshot chrome only. It does not change connectivity, battery state, or radio behavior.
 - `launch` and `terminate`: restart with explicit arguments/environment or stop the app.
 - `network-condition`: use an explicitly installed provider to apply an app-scoped profile.
+- `biometrics`: enroll/unenroll Face ID / Touch ID and deliver a match or no-match to a live prompt (Xcode 27+).
+- `display-state`: set the accessibility appearance facets simctl cannot reach — reduce motion, reduce transparency, show borders, color filter and its type/intensity, Liquid Glass opacity, Larger Accessibility Sizes (Xcode 27+).
+- `voiceover`: turn VoiceOver on or off for an accessibility pass (Xcode 27+).
 
-The harness restores appearance, content size, Increase Contrast, location, status-bar overrides, and active network conditions after the run, and — in a suite with `reset-between-tests` enabled (the default) — between tests as well, so this state does not leak from one test into the next. Privacy changes cannot be safely read back and are not automatically restored; add an explicit reset step when the next test needs a prompt.
+The harness restores appearance, content size, Increase Contrast, location, status-bar overrides, active network conditions, the `display-state` facets, VoiceOver, and biometric enrollment after the run, and — in a suite with `reset-between-tests` enabled (the default) — between tests as well, so this state does not leak from one test into the next. Privacy changes cannot be safely read back and are not automatically restored; add an explicit reset step when the next test needs a prompt.
+
+## Biometric Authentication
+
+A biometric prompt can only be answered while enrollment is on: an unenrolled
+device shows the passcode fallback instead, so a `match` has nothing to answer.
+Order the steps enroll → reach the prompt → match:
+
+```json
+{ "action": { "type": "biometrics", "operation": "enroll" } },
+{ "action": { "type": "tap", "selector": { "label": "Sign in with Face ID" } } },
+{ "action": { "type": "biometrics", "operation": "match" },
+  "verify": { "contains": ["Dashboard"] } }
+```
+
+Test the failure path with the same shape and `no-match`, and assert on the app's
+own recovery UI (a retry prompt, a passcode fallback), not merely on the absence
+of the success screen:
+
+```json
+{ "action": { "type": "biometrics", "operation": "no-match" },
+  "verify": { "elements": [{ "label": "Try Again" }, { "label": "Dashboard", "exists": false }] } }
+```
+
+These need Xcode 27's simulator-capable devicectl; on an older toolchain the step
+fails with an explicit message naming the requirement.
 
 ## Network Conditions
 

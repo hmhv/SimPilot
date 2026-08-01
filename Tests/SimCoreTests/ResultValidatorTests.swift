@@ -434,13 +434,13 @@ final class ResultValidatorTests: XCTestCase {
     func testEmptyVerifyObjectIsRejected() throws {
         let outcome = try validateSpec(id: "verify-empty", steps: [["verify": [String: Any]()]])
         XCTAssertFalse(outcome.isValid)
-        XCTAssertTrue(outcome.errors.contains { $0.contains("at least one contains or absent") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("must have at least one contains") }, "\(outcome.errors)")
     }
 
     func testEmptyVerifyArraysAreRejected() throws {
         let outcome = try validateSpec(id: "verify-empties", steps: [["verify": ["contains": [String]()]]])
         XCTAssertFalse(outcome.isValid)
-        XCTAssertTrue(outcome.errors.contains { $0.contains("at least one contains or absent") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("must have at least one contains") }, "\(outcome.errors)")
     }
 
     func testVerifyOnlyStepWithConditionValidates() throws {

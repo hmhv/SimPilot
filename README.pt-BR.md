@@ -8,7 +8,7 @@ Somente o README de nível superior é traduzido. Os skill docs e o código perm
 
 ## O que faz
 
-- **`/sipi-test`**: automação de testes de UI no iOS Simulator. Defina testes em linguagem natural; o skill automatiza a interação e a verificação. Suporta suítes de regressão, execução em múltiplos dispositivos e auditorias de qualidade (acessibilidade, localização e aparência).
+- **`/sipi-test`**: automação de testes de UI e de estados adversos no iOS Simulator. O skill converte a intenção em linguagem natural em especificações JSON v2 explícitas e, em seguida, `sipi run-test` / `sipi run-suite` as executa com um harness determinístico. Os testes salvos podem controlar permissões, deep links, notificações push, localização, aparência, Dynamic Type, Increase Contrast, Face ID / Touch ID, VoiceOver, o restante das configurações de aparência de acessibilidade, o ambiente de lançamento e um provedor de condição de rede configurado explicitamente.
 - **`/sipi-verify`**: verificação pós-implementação. Confirma que um recurso ou correção funciona corretamente após mudanças no código.
 
 Os resultados são salvos em `.simpilot/` com relatórios HTML que podem ser abertos no navegador.
@@ -16,7 +16,7 @@ Os resultados são salvos em `.simpilot/` com relatórios HTML que podem ser abe
 ## Pré-requisitos
 
 - macOS 15 ou superior
-- Xcode 26 ou superior: necessário em **tempo de execução** para controlar o Simulator (o SimPilot carrega os private Simulator frameworks do Xcode). Não é necessário para instalar.
+- Xcode 26 ou superior: necessário em **tempo de execução** para controlar o Simulator (o SimPilot carrega os private Simulator frameworks do Xcode). Não é necessário para instalar. O Xcode 27 ou superior habilita ainda Face ID / Touch ID, VoiceOver e as configurações de aparência de acessibilidade, que passam pelo `xcrun devicectl`.
 - [Claude Code](https://claude.com/claude-code) ou Codex
 
 ## Instalação
@@ -72,7 +72,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test Crie um teste a partir da tela atual
 ```
 
-Os testes salvos acionam toda a superfície de interação — toques, interruptores, controles deslizantes, gestos, arrastos, toque longo, combinações de teclas e rotação — como passos determinísticos, não apenas toques e deslizes.
+Os testes salvos acionam toda a superfície de interação — toques, toques duplos, interruptores, controles deslizantes, gestos, arrastos, toque longo, pinça e multitoque bruto, combinações de teclas e rotação — como passos determinísticos, não apenas toques e deslizes.
+
+Eles também podem criar pré-condições de erro reais controladas pelo Simulator, como permissões negadas, deep links, entrega de push, coordenadas simuladas, correspondência e não correspondência de Face ID / Touch ID, VoiceOver, toda a superfície de aparência de acessibilidade (reduzir movimento, reduzir transparência, filtros de cor, opacidade do Liquid Glass) e perfis de offline/latência apoiados por um provedor. O SimPilot não embute nem imita nenhum condicionador de rede proprietário: verifique `sipi network-condition status` antes de usar um perfil de rede.
+
+A verificação vai além da correspondência de texto: além de `contains` / `absent` e expressões regulares, um passo pode afirmar coisas sobre os próprios elementos — que um controle está desabilitado, que uma lista tem exatamente cinco linhas, que um valor corresponde a um padrão ou que uma área de toque atende aos 44pt.
 
 **Executar testes:**
 ```text
@@ -111,7 +115,10 @@ Cada execução gera `report.html` dentro do diretório do run. Os resultados s�
 /sipi-test Verifique texto não traduzido e texto cortado
 /sipi-test Compare a tela profile nos modos Light e Dark
 /sipi-test Verifique o fluxo de settings com tamanhos grandes de Dynamic Type
+/sipi-test Audite esta tela com Reduzir movimento e um filtro de cor ativados
 ```
+
+O `sipi a11y-audit` executa a parte mecânica pela linha de comando em qualquer simulador iniciado — áreas de toque pequenas demais, controles sem label, labels duplicados ambíguos, labels sem sentido, texto truncado — e sai com código diferente de zero diante de um achado de severidade error, então pode barrar o CI. A auditoria de acessibilidade do próprio Xcode só roda de dentro de um target de teste de UI.
 
 ## Estrutura do workspace
 
@@ -153,8 +160,10 @@ O SimPilot usa a seguinte estrutura padrão dentro de `.simpilot/`:
 
 ## Limitações conhecidas
 
-- A entrada de texto fora do padrão dos EUA é feita pela área de transferência (colar), não tecla por tecla
-- A digitação HID direta tecla por tecla cobre o layout de teclado dos EUA
+- A entrada de texto grava por padrão o valor de acessibilidade do campo (`set-text`), que dispensa teclado e aceita qualquer sistema de escrita. A entrada tecla a tecla (`type`) cola pela área de transferência por padrão; a digitação HID direta tecla por tecla cobre apenas o layout de teclado dos EUA
+- **Um simulador muito usado pode parar de entregar HID de teclado** (medido no Xcode 27.0 beta 4): colar, digitar tecla por tecla e selecionar tudo + apagar são ignorados, enquanto a entrada por toque continua funcionando. Isso acompanha a idade do dispositivo, não a versão do iOS, e nem `simctl erase` nem uma reinicialização o recuperam: crie um dispositivo novo. `type` detecta a condição e falha em vez de relatar sucesso; `set-text` não é afetado
+- Face ID / Touch ID, VoiceOver e as facetas de aparência de acessibilidade além de light/dark exigem o Xcode 27 — elas passam pelo `xcrun devicectl`, que só alcança simuladores dessa versão em diante
+- Taxas de contraste e texto cortado estão fora do escopo do `sipi a11y-audit`; ambos exigem análise de pixels do frame renderizado
 - Apenas simulador — dispositivos físicos não são suportados
 
 ## Note

@@ -55,7 +55,7 @@ For single keys and modifier combos, use `sipi key` / `sipi key-combo` (or `nati
 
 ## Driving primitives (reach for these before computing coordinates by hand)
 
-These first-class `sipi` commands are deterministic and usually beat hand-rolled coordinates. UDID comes first for all of them. Most are also expressible as saved v2 test actions (`long-press`, `slider`, `gesture`, `drag`, `key-combo`, `key-sequence`, `orientation`, `crown`) for `sipi-test` — see `../../sipi-test/references/json-reference.md`.
+These first-class `sipi` commands are deterministic and usually beat hand-rolled coordinates. UDID comes first for all of them. Most are also expressible as saved v2 test actions (`double-tap`, `long-press`, `slider`, `gesture`, `drag`, `pinch`, `multitouch`, `key-combo`, `key-sequence`, `orientation`, `crown`, `set-text`, `type`, plus the device-state actions `biometrics` / `display-state` / `voiceover`) for `sipi-test` — see `../../sipi-test/references/json-reference.md`.
 
 | Need | Command |
 |------|---------|
@@ -63,7 +63,12 @@ These first-class `sipi` commands are deterministic and usually beat hand-rolled
 | Precise reorder / handle / momentum drag | `sipi drag $UDID --start-x .. --start-y .. --end-x .. --end-y .. --steps 60` — interpolated touch-moves (`--steps` 1…1000, `--duration` default 0.6s); smoother than `swipe` |
 | Identify what sits at a coordinate / debug a mis-tap | `sipi describe-point $UDID -x .. -y ..` — single hit-test (`--pixel`/`--norm`); returns a one-element array, or `[]` if nothing is hit |
 | Disambiguate a label/value that matches >1 element | add `--element-type Button` / `--element-type Switch` / `--element-type Slider` to `tap`/`slider` (exact, case-sensitive describe-ui `type`, no `AX` prefix), e.g. `sipi tap $UDID --label "Notifications" --element-type Switch` |
-| Pinch / zoom (2-finger) | two stateful calls: `sipi multitouch $UDID 1 x1 y1 x2 y2` (begin/move) then `sipi multitouch $UDID 2 x1' y1' x2' y2'` (end) — phase `1`=begin/move, `2`=end (`--norm` 0…1 default) |
+| Pinch / zoom (2-finger) | `sipi pinch $UDID out` (zoom in) / `sipi pinch $UDID in` (zoom out) — interpolates both contacts around a center (`--center-x`/`--center-y`, `--separation`, `--duration`, `--steps`). Prefer this over hand-assembled phases: the interpolation is what the guest's pinch recognizer needs |
+| Two-finger gesture that is NOT a pinch (e.g. rotation) | `sipi multitouch $UDID 1 x1 y1 x2 y2` (begin/move), repeat for each move, then `sipi multitouch $UDID 2 x1' y1' x2' y2'` (end) — phase `1`=begin/move, `2`=end (`--norm` 0…1 default) |
+| Double-tap (zoom-to-fit, select word) | `sipi double-tap $UDID --label "Map"` or `-x .. -y ..` — two taps inside the system double-tap window, which two `tap` calls cannot guarantee |
+| Face ID / Touch ID prompt | `sipi biometrics $UDID enroll` then `match` / `no-match` (Xcode 27+; matching does nothing while unenrolled) |
+| Accessibility appearance beyond light/dark | `sipi appearance $UDID --reduce-motion on --reduce-transparency on --color-filter on --color-filter-type deuteranopia` — bare `sipi appearance $UDID` reads the current state (Xcode 27+) |
+| Mechanical accessibility pass | `sipi a11y-audit $UDID` — touch targets, missing/ambiguous/meaningless labels, truncated text. `--fast` skips the deep grid pass, `--fail-on none` inspects without failing |
 | Apple Watch Digital Crown | `sipi crown $UDID <delta>` — sign sets direction (watchOS simulators only) |
 | Ordered HID keycode burst | `sipi key-sequence --keycodes 11,8,15,15,18 $UDID` — each pressed+released in order (`--delay` default 0.1s) |
 
@@ -99,7 +104,7 @@ These first-class `sipi` commands are deterministic and usually beat hand-rolled
 ### Text Input
 
 - **Default: `sipi set-text $UDID "text" --id <identifier>`.** It writes the element's accessibility value, so it needs no focus, no keyboard, and no pasteboard, takes any script (Japanese, emoji), replaces the whole value, and verifies the write against the app instead of reporting a silent success. The field must be on screen (it is hit-tested like a tap — scroll it into view first). A secure field's value reads back as bullets and an empty field reports its placeholder, so those two need `--no-verify` plus an assertion on the app's own output
-- Use `sipi type` only when the KEYSTROKES are the subject (per-character `onChange`, keyboard toolbar, candidate bar, Return/submit): tap the field to focus it first, then `sipi type $UDID "text"` (pastes via the pasteboard by default; `--keyboard` injects US-only keystrokes; `--clear` selects all and deletes first). Measured on Xcode 27.0 beta 4: on an **iOS 27.0** runtime nothing is delivered at all (paste, `--keyboard`, `--clear`, bare `sipi key` — all no-ops while the command still prints `ok`), and under a **non-Latin IME** `--keyboard` text stays an uncommitted composition (`abc` → `あbc`, discarded when the composition is dismissed) while `--clear` deletes only one character and leaves the old text. Since nothing is typed by `set-text`, it also does not exercise input filters — a length cap or character whitelist may be bypassed (unmeasured)
+- Use `sipi type` only when the KEYSTROKES are the subject (per-character `onChange`, keyboard toolbar, candidate bar, Return/submit): tap the field to focus it first, then `sipi type $UDID "text"` (pastes via the pasteboard by default; `--keyboard` injects US-only keystrokes; `--clear` selects all and deletes first). Measured on Xcode 27.0 beta 4: a **worn-out simulator** delivers nothing at all (paste, `--keyboard`, `--clear`, bare `sipi key` — all no-ops; `sipi type` detects this and FAILS, but bare `sipi key` still returns `ok`). That follows device age, not the iOS version — see `troubleshooting.md`. Under a **non-Latin IME** `--keyboard` text stays an uncommitted composition (`abc` → `あbc`, discarded when the composition is dismissed) while `--clear` deletes only one character and leaves the old text. Since nothing is typed by `set-text`, it also does not exercise input filters — a length cap or character whitelist may be bypassed (unmeasured)
 - Clear existing: `sipi set-text` replaces the whole value, so no clear step is needed. If a keystroke-level clear is required anyway, `sipi type --clear` (or `sipi key-combo --modifiers 227 --key 4 $UDID` then `sipi key 42 $UDID`) works only when no IME composition is pending — send `sipi key 41` (Escape) first to discard one
 
 ### Scrolling
@@ -131,7 +136,9 @@ These first-class `sipi` commands are deterministic and usually beat hand-rolled
 
 ## Device Settings
 
-Dark mode and Dynamic Type use `xcrun simctl ui $UDID appearance light|dark` and the Settings app (no native driver needed). For rotation, use `native_orientation <portrait|portrait-upside-down|landscape-left|landscape-right|face-up|face-down>` (wraps `sipi orientation --set`). Wait `sleep 3` after rotation to let it settle, then optionally confirm it landed with `sipi orientation $UDID --json` (reads `{ orientation, raw }`).
+Dark mode and Dynamic Type use `xcrun simctl ui $UDID appearance light|dark` and the Settings app (no native driver needed). The accessibility facets simctl cannot reach — reduce motion, reduce transparency, show borders, color filters, Liquid Glass opacity, Larger Accessibility Sizes — go through `sipi appearance` (Xcode 27+), and VoiceOver through `sipi voiceover`.
+
+For rotation, use `native_orientation <portrait|portrait-upside-down|landscape-left|landscape-right|face-up|face-down>` (wraps `sipi orientation --set`). Wait `sleep 3` after rotation to let it settle, then confirm it landed. The plain READ (`sipi orientation $UDID --json`, `{ orientation, raw }`) only reports the four upright orientations — SimulatorKit cannot express the flat ones — so a `face-up` / `face-down` set must be confirmed with `sipi orientation $UDID --json --physical`, which adds `flat`, `physical`, and `locked` from devicectl.
 
 ---
 
@@ -160,7 +167,7 @@ Dark mode and Dynamic Type use `xcrun simctl ui $UDID appearance light|dark` and
 | Share Sheet | Separate process UI. Inspect with `ui_describe`; close with `ui_tap_label` on a visible label or downward `sipi swipe` (or `native_swipe`) |
 | `.borderless` Button in List (iOS 26) | `tap --label`/`--id`/`touch` all give fake success. Workaround: remove `.borderless` or tap the entire row |
 | Drag & Drop (single finger / reorder / handle) | Use `sipi drag $UDID --steps 60` for interpolated touch-moves (1…1000 steps) — smoother and more reliable than `swipe` |
-| Pinch / Rotation (2-finger) | `sipi multitouch` drives 2-finger phases (pinch/zoom directly; rotation is possible but manual — compute the rotated endpoints). Moves with more than 2 fingers are not supported |
+| Pinch / Rotation (2-finger) | `sipi pinch` drives zoom directly (interpolated, both as a CLI command and as a saved `pinch` action). Rotation is possible but manual — assemble it from `sipi multitouch` phases with the rotated endpoints computed per step. Moves with more than 2 fingers are not supported |
 | Menu in List (iOS 18.x) | List row absorbs gestures. All methods fail |
 | iPad iOS 26 describe-ui | May return `DockFolderViewService` |
 | iPad confirmationDialog | Cannot tap buttons inside popover |

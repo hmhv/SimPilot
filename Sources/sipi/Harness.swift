@@ -116,15 +116,81 @@ private struct HarnessAction: Decodable {
     var inputMethod: String?      // type: paste (default) or keyboard
     var clear: Bool?              // type: empty the field before inserting
     var verifyValue: Bool?        // set-text: confirm the written value (default true)
+    var verifyEffect: Bool?       // type: require the AX tree to change (default true)
+    // Multi-finger input.
+    var direction: String?        // pinch: in | out
+    var separation: Double?       // pinch: widest normalized finger separation
+    var points: [HarnessPoint]?   // multitouch: exactly two contacts
+    var phase: Int?               // multitouch: 1 = begin/move, 2 = end
+    // Device state reached through devicectl.
+    var settings: HarnessDisplaySettings? // display-state facets
 
     enum CodingKeys: String, CodingKey {
         case type, selector, point, text, usage, button, start, end, duration
         case value, tolerance, preset, modifiers, key, keycodes, delay, steps, orientation, delta
         case url, operation, service, latitude, longitude, appearance, enabled, payload, profile, arguments, environment, clear
+        case direction, separation, points, phase, settings
         case bundleID = "bundle-id"
         case contentSize = "content-size"
         case inputMethod = "input-method"
         case verifyValue = "verify-value"
+        case verifyEffect = "verify-effect"
+    }
+}
+
+/// The `display-state` action's `settings` object: the appearance and
+/// accessibility facets devicectl can write. Typed rather than a free-form
+/// dictionary so an unknown or misspelled facet is a validation error instead of
+/// a silently ignored key.
+///
+/// Deliberately EXCLUDES light/dark, text size, and Increase Contrast even though
+/// devicectl can write all three. Each already has its own action (`appearance`,
+/// `content-size`, `increase-contrast`) backed by simctl, and each captures its
+/// own restore baseline the first time that action runs. Allowing two mechanisms
+/// to move one facet means two independently captured baselines: a test that set
+/// light/dark through both would restore whichever ran last and leave the device
+/// on the wrong value. One facet, one owner.
+private struct HarnessDisplaySettings: Decodable {
+    var lookAndFeel: String?
+    var reduceMotion: Bool?
+    var reduceTransparency: Bool?
+    var showBorders: Bool?
+    var liquidGlassOpacity: Double?
+    var colorFilter: Bool?
+    var colorFilterType: String?
+    var colorFilterIntensity: Double?
+    var largerAccessibilitySizes: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case lookAndFeel = "look-and-feel"
+        case reduceMotion = "reduce-motion"
+        case reduceTransparency = "reduce-transparency"
+        case showBorders = "show-borders"
+        case liquidGlassOpacity = "liquid-glass-opacity"
+        case colorFilter = "color-filter"
+        case colorFilterType = "color-filter-type"
+        case colorFilterIntensity = "color-filter-intensity"
+        case largerAccessibilitySizes = "larger-accessibility-sizes"
+    }
+
+    var appearanceSettings: [AppearanceSetting] {
+        var settings: [AppearanceSetting] = []
+        if let lookAndFeel { settings.append(.lookAndFeel(lookAndFeel)) }
+        if let reduceMotion { settings.append(.reduceMotion(reduceMotion)) }
+        if let reduceTransparency { settings.append(.reduceTransparency(reduceTransparency)) }
+        if let showBorders { settings.append(.showBorders(showBorders)) }
+        if let liquidGlassOpacity { settings.append(.liquidGlassOpacity(liquidGlassOpacity)) }
+        if let colorFilter { settings.append(.colorFilter(colorFilter)) }
+        if let colorFilterType { settings.append(.colorFilterType(colorFilterType)) }
+        if let colorFilterIntensity { settings.append(.colorFilterIntensity(colorFilterIntensity)) }
+        if let largerAccessibilitySizes { settings.append(.largerAccessibilitySizes(largerAccessibilitySizes)) }
+        return settings
+    }
+
+    /// Facet names in the action, for the result's `value` field.
+    var summary: String {
+        appearanceSettings.compactMap { $0.arguments.first?.replacingOccurrences(of: "--", with: "") }
+            .joined(separator: ",")
     }
 }
 
@@ -151,6 +217,62 @@ private struct HarnessPoint: Decodable {
 private struct HarnessVerify: Decodable {
     var contains: [String]?
     var absent: [String]?
+    var matches: [String]?
+    var notMatches: [String]?
+    var elements: [HarnessElementCondition]?
+
+    enum CodingKeys: String, CodingKey {
+        case contains, absent, matches, elements
+        case notMatches = "not-matches"
+    }
+}
+
+/// JSON shape of one structured element assertion. Kept separate from
+/// `SimCore.ElementCondition` so the wire format's kebab-case keys stay in the
+/// harness layer and the evaluator stays a pure value type.
+private struct HarnessElementCondition: Decodable {
+    var id: String?
+    var label: String?
+    var value: String?
+    var elementType: String?
+    var exists: Bool?
+    var enabled: Bool?
+    var valueEquals: String?
+    var valueMatches: String?
+    var count: Int?
+    var minCount: Int?
+    var maxCount: Int?
+    var minWidth: Double?
+    var minHeight: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, value, exists, enabled, count
+        case elementType = "element-type"
+        case valueEquals = "value-equals"
+        case valueMatches = "value-matches"
+        case minCount = "min-count"
+        case maxCount = "max-count"
+        case minWidth = "min-width"
+        case minHeight = "min-height"
+    }
+
+    var condition: ElementCondition {
+        ElementCondition(
+            id: id,
+            label: label,
+            value: value,
+            elementType: elementType,
+            exists: exists,
+            enabled: enabled,
+            valueEquals: valueEquals,
+            valueMatches: valueMatches,
+            count: count,
+            minCount: minCount,
+            maxCount: maxCount,
+            minWidth: minWidth,
+            minHeight: minHeight
+        )
+    }
 }
 
 private struct HarnessSuite: Decodable {
@@ -240,6 +362,9 @@ private final class HarnessRunner {
     private var initialAppearance: String?
     private var initialContentSize: String?
     private var initialIncreaseContrast: String?
+    private var initialDisplayState: AppearanceState?
+    private var initialVoiceOver: Bool?
+    private var initialBiometricsEnrolled: Bool?
     private var locationWasModified = false
     private var statusBarWasModified = false
     private var activeNetworkConditionBundleID: String?
@@ -385,8 +510,138 @@ private final class HarnessRunner {
                 failures.append("increase contrast: \(error)")
             }
         }
+        if let initialDisplayState, !initialDisplayState.isEmpty {
+            do {
+                try DeviceCtl.setAppearance(udid: udid, settings: Self.restoreSettings(for: initialDisplayState))
+                self.initialDisplayState = nil
+            } catch {
+                failures.append("display state: \(error)")
+            }
+        }
+        if let initialVoiceOver {
+            do { try DeviceCtl.setVoiceOver(udid: udid, enabled: initialVoiceOver); self.initialVoiceOver = nil }
+            catch { failures.append("voiceover: \(error)") }
+        }
+        if let initialBiometricsEnrolled {
+            do {
+                try DeviceCtl.setBiometricsEnrollment(udid: udid, enabled: initialBiometricsEnrolled)
+                self.initialBiometricsEnrolled = nil
+            } catch {
+                failures.append("biometrics enrollment: \(error)")
+            }
+        }
 
         return failures
+    }
+
+    /// Turn a captured appearance state back into the writes that restore it.
+    ///
+    /// Only facets the runtime actually reported are written back: a nil field
+    /// means "unsupported / unknown", and writing it as `off` would leave the
+    /// device in a state it was never in.
+    ///
+    /// Restores exactly the facets `display-state` can set — light/dark, text
+    /// size, and Increase Contrast are owned by the `appearance`,
+    /// `content-size`, and `increase-contrast` actions and restored through their
+    /// own captured baselines. Writing them from here too would mean two restores
+    /// racing to set one facet from two different baselines.
+    private static func restoreSettings(for state: AppearanceState) -> [AppearanceSetting] {
+        var settings: [AppearanceSetting] = []
+        if let value = state.reduceMotion { settings.append(.reduceMotion(value)) }
+        if let value = state.reduceTransparency { settings.append(.reduceTransparency(value)) }
+        if let value = state.showBorders { settings.append(.showBorders(value)) }
+        if let value = state.liquidGlassOpacity { settings.append(.liquidGlassOpacity(value)) }
+        if let value = state.colorFilterEnabled { settings.append(.colorFilter(value)) }
+        if let value = state.largerAccessibilitySizes { settings.append(.largerAccessibilitySizes(value)) }
+        // The filter kind and intensity survive a disabled filter, so restore them
+        // too — otherwise re-enabling the filter later picks up the test's values
+        // instead of the user's. Skipped when the runtime reports no kind, and
+        // `grayscale` ignores intensity, which devicectl accepts either way.
+        if let value = state.colorFilterType { settings.append(.colorFilterType(value)) }
+        // devicectl REJECTS an intensity alongside the grayscale filter
+        // ("--color-filter-intensity is not supported for the grayscale filter
+        // type"), and a rejected restore leaves the whole batch unapplied — so
+        // the one facet that cannot take an intensity must not be sent one.
+        if let value = state.colorFilterIntensity, (0.25...1.0).contains(value),
+           state.colorFilterType != "grayscale" {
+            settings.append(.colorFilterIntensity(value))
+        }
+        // Only restorable when the runtime reports a look this build can map back
+        // to a settable token; the display name devicectl reports is not the one
+        // it accepts.
+        if let value = state.restorableLookAndFeel { settings.append(.lookAndFeel(value)) }
+        return settings
+    }
+
+    /// Facets the action wants to change that the captured baseline cannot restore.
+    ///
+    /// `restoreSettings(for:)` only writes back facets the runtime reported, so a
+    /// facet missing from the baseline is one the run would leave applied. Checking
+    /// before the write keeps the "change nothing you cannot put back" rule that
+    /// `captureBaseline` starts.
+    ///
+    /// `color-filter-type` / `color-filter-intensity` are exempt: devicectl reports
+    /// them only while the filter is on, and the validator already requires
+    /// `color-filter` alongside them — switching the filter back off is what
+    /// restores the screen, whatever kind is left configured behind it.
+    private static func unrestorableFacets(
+        requested: HarnessDisplaySettings?,
+        baseline: AppearanceState?
+    ) -> Set<String>? {
+        guard let requested, let baseline else { return nil }
+        var missing: Set<String> = []
+        func require(_ present: Bool, _ name: String) {
+            if !present { missing.insert(name) }
+        }
+        if requested.reduceMotion != nil { require(baseline.reduceMotion != nil, "reduce-motion") }
+        if requested.reduceTransparency != nil {
+            require(baseline.reduceTransparency != nil, "reduce-transparency")
+        }
+        if requested.showBorders != nil { require(baseline.showBorders != nil, "show-borders") }
+        if requested.liquidGlassOpacity != nil {
+            require(baseline.liquidGlassOpacity != nil, "liquid-glass-opacity")
+        }
+        if requested.colorFilter != nil { require(baseline.colorFilterEnabled != nil, "color-filter") }
+        if requested.largerAccessibilitySizes != nil {
+            require(baseline.largerAccessibilitySizes != nil, "larger-accessibility-sizes")
+        }
+        if requested.lookAndFeel != nil { require(baseline.restorableLookAndFeel != nil, "look-and-feel") }
+        return missing
+    }
+
+    /// Capture the restore baseline for a state-changing action, failing the step
+    /// when it cannot be read.
+    ///
+    /// The alternative — proceeding without a baseline — changes the device with
+    /// no way to change it back, so the run ends with the test's state still
+    /// applied and nothing in the artifacts saying so. A step that cannot
+    /// guarantee restoration must not run.
+    private func captureBaseline<T>(_ action: String, _ read: () throws -> T) throws -> T {
+        do {
+            return try read()
+        } catch {
+            throw HarnessError(
+                """
+                \(action): could not read the current state to restore afterward (\(error)). \
+                Refusing to change the device with no way to put it back.
+                """
+            )
+        }
+    }
+
+    /// Guard for the actions that need Xcode 27's simulator-capable devicectl.
+    /// Fails the step with an explanation rather than surfacing a raw
+    /// device-not-found error from devicectl.
+    private func requireSimulatorDeviceCtl(_ action: String) throws {
+        guard DeviceCtl.isSimulatorCapable() else {
+            throw HarnessError(
+                """
+                the \(action) action needs a devicectl that can target simulators, which arrived in \
+                Xcode 27. This toolchain's devicectl lists no SimulatorCoreDevicePlugin \
+                (check `xcrun devicectl list plugins`).
+                """
+            )
+        }
     }
 
     /// Strict, end-of-run restore. A residual failure is surfaced as a throw so a
@@ -520,6 +775,8 @@ private final class HarnessRunner {
             var verifyRows: [[String: Any]] = []
             var stepPassed = false
 
+            var retryUnsafeNote: String?
+
             for attempt in 0...retries {
                 // A throw before verify (resolution, invalid input, HID/sim error)
                 // is an `action` failure; a mismatch or error once verification has
@@ -537,6 +794,18 @@ private final class HarnessRunner {
                     lastFailureType = "verify"
                 } catch {
                     lastFailureType = stage
+                    // Some failures happen AFTER the action reached the device —
+                    // text that was sent but whose outcome could not be read back is
+                    // the case in hand. Re-running the action would repeat the side
+                    // effect (typing the string twice), so the step ends here and
+                    // says why in the result.
+                    if let advising = error as? RetryAdvisingError, !advising.retrySafe {
+                        retryUnsafeNote = String(describing: error)
+                        trace.event("step-retry-suppressed", fields: [
+                            "test": test.id, "step": stepNumber, "reason": String(describing: error)
+                        ])
+                        break
+                    }
                 }
                 if attempt < retries {
                     trace.event("step-retry", fields: ["test": test.id, "step": stepNumber, "attempt": attempt + 1])
@@ -546,23 +815,63 @@ private final class HarnessRunner {
                 }
             }
 
-            let after = try describeJSON(expect: firstExpectedString(step.verify))
-            try after.write(toFile: testDir + "/" + afterName, atomically: true, encoding: .utf8)
-            try driver.screenshot(to: URL(fileURLWithPath: testDir + "/" + screenshotName), udid: udid)
+            // The after-artifacts are EVIDENCE, not the verdict — which is already
+            // decided above. Capturing them best-effort keeps a step's conclusion
+            // and its reasoning in `result.json` even when the device cannot answer
+            // any more. That matters most in exactly the case where it is likeliest
+            // to fail: a stalled accessibility bridge is both why the step could not
+            // be verified and why the after-describe throws, and letting it escape
+            // would replace the "text was sent, do not blindly retry" note with a
+            // generic capture error.
+            // Two outcomes tracked separately, because they answer different
+            // questions: `after` is the tree text (used for the inline snapshot,
+            // which needs no file) and `afterFileWritten` says whether the file
+            // that `screenshots.after` would point at actually exists. Reading the
+            // tree can succeed while writing it fails — a full disk, a read-only
+            // run directory — and referencing a file that was never written is
+            // worse than omitting the reference.
+            var artifactErrors: [String] = []
+            var after = ""
+            var afterFileWritten = false
+            do {
+                let captured = try describeJSON(expect: firstExpectedString(step.verify))
+                after = captured
+                try captured.write(toFile: testDir + "/" + afterName, atomically: true, encoding: .utf8)
+                afterFileWritten = true
+            } catch {
+                artifactErrors.append("after describe-ui: \(error)")
+            }
+            var screenshotCaptured = true
+            do {
+                try driver.screenshot(to: URL(fileURLWithPath: testDir + "/" + screenshotName), udid: udid)
+            } catch {
+                screenshotCaptured = false
+                artifactErrors.append("after screenshot: \(error)")
+            }
 
             var result: [String: Any] = [
                 "passed": stepPassed,
                 "duration": Date().timeIntervalSince(stepStarted),
-                "screenshot": screenshotName,
-                "screenshots": ["before": beforeName, "after": afterName],
                 "verify": verifyRows,
                 "attempted-methods": attempted
             ]
+            // Reference only the artifacts that exist; a path to a file that was
+            // never written is worse than its absence.
+            if screenshotCaptured { result["screenshot"] = screenshotName }
+            var screenshots: [String: String] = ["before": beforeName]
+            if afterFileWritten { screenshots["after"] = afterName }
+            result["screenshots"] = screenshots
             if let action = step.action { result["action"] = actionDescription(action) }
-            if let note = step.note { result["note"] = note }
+            // The suppressed-retry reason is the more actionable note: it explains
+            // both the failure and why the harness did not try again. Artifact
+            // failures are appended rather than allowed to displace it.
+            let notes = [retryUnsafeNote ?? step.note].compactMap { $0 } + artifactErrors
+            if !notes.isEmpty { result["note"] = notes.joined(separator: " | ") }
             if !stepPassed {
                 result["failure-type"] = lastFailureType
-                result["describe-ui-snapshot"] = String(after.split(separator: "\n").prefix(50).joined(separator: "\n"))
+                if !after.isEmpty {
+                    result["describe-ui-snapshot"] = String(after.split(separator: "\n").prefix(50).joined(separator: "\n"))
+                }
             }
             trace.event("step-finish", fields: ["test": test.id, "step": stepNumber, "passed": stepPassed])
             return result.filterJSON()
@@ -590,6 +899,55 @@ private final class HarnessRunner {
             try driver.tap(point, udid: udid)
             return ["method": "touch-coordinate", "value": "\(pointSpec.x),\(pointSpec.y)"]
 
+        case "double-tap":
+            if let selector = action.selector {
+                try DoubleTapInput.perform(try resolveSelectorPoint(selector), driver: driver, udid: udid)
+                return attemptedMethod(for: selector)
+            }
+            guard let pointSpec = action.point else { throw HarnessError("double-tap action requires selector or point.") }
+            try DoubleTapInput.perform(try normalizedPoint(pointSpec), driver: driver, udid: udid)
+            return ["method": "touch-coordinate", "value": "\(pointSpec.x),\(pointSpec.y)"]
+
+        case "pinch":
+            guard let direction = action.direction, let pinchDirection = PinchDirection(rawValue: direction) else {
+                throw HarnessError(
+                    "pinch action requires direction: "
+                    + PinchDirection.allCases.map(\.rawValue).joined(separator: " or ") + ".")
+            }
+            // Center defaults to the middle of the screen, matching `sipi pinch`.
+            let center = try action.point.map(normalizedPoint) ?? Point(x: 0.5, y: 0.5)
+            let separation = action.separation ?? PinchPlan.defaultSeparation
+            let steps = action.steps ?? PinchPlan.defaultSteps
+            let duration = action.duration ?? 0.5
+            let plan: PinchPlan
+            do {
+                plan = try PinchPlan.make(
+                    center: center, separation: separation, direction: pinchDirection, steps: steps)
+            } catch let error as PinchPlanError {
+                throw HarnessError(error.description)
+            }
+            // One driver call for the whole gesture — see `multiTouchSequence`:
+            // per-frame calls re-resolve the orientation and AX extent and stall a
+            // rotated pinch past the point the guest still recognizes it.
+            try driver.multiTouchSequence(
+                plan.frames,
+                frameDelay: PinchPlan.frameDelay(duration: duration, steps: steps),
+                udid: udid
+            )
+            return ["method": "multitouch", "value": "pinch-\(direction)"]
+
+        case "multitouch":
+            guard let points = action.points, points.count == 2 else {
+                throw HarnessError("multitouch action requires exactly two points.")
+            }
+            guard let phaseValue = action.phase, let phase = TouchPhase(rawValue: phaseValue) else {
+                throw HarnessError("multitouch action requires phase 1 (begin/move) or 2 (end).")
+            }
+            let a = try normalizedPoint(points[0])
+            let b = try normalizedPoint(points[1])
+            try driver.multiTouch(a, b, phase: phase, udid: udid)
+            return ["method": "multitouch", "value": "phase:\(phaseValue)"]
+
         case "long-press":
             let hold = action.duration ?? 0.5
             if let selector = action.selector {
@@ -604,7 +962,16 @@ private final class HarnessRunner {
             guard let text = action.text else { throw HarnessError("type action requires text.") }
             let method = try resolveInputMethod(action.inputMethod)
             let clear = action.clear ?? false
-            try TextInput.insert(text, method: method, clear: clear, driver: driver, udid: udid)
+            // `verify-effect` defaults on: a runtime that drops keyboard HID would
+            // otherwise let the step pass while the app never received the text.
+            try TextInput.insert(
+                text,
+                method: method,
+                clear: clear,
+                driver: driver,
+                udid: udid,
+                verifyEffect: action.verifyEffect ?? true
+            )
             return ["method": "input", "value": clear ? "\(method.rawValue)+clear" : method.rawValue]
 
         case "set-text":
@@ -770,6 +1137,101 @@ private final class HarnessRunner {
             }
             try SimShell.setIncreaseContrast(udid: udid, enabled: enabled)
             return ["method": "simctl", "value": "increase-contrast:\(enabled)"]
+
+        case "display-state":
+            // The accessibility appearance facets simctl never exposed (reduce
+            // motion, reduce transparency, show borders, color filters, Liquid
+            // Glass opacity, Larger Accessibility Sizes). One devicectl call sets
+            // them all; the whole state is captured once per run and restored after.
+            let facets = action.settings?.appearanceSettings ?? []
+            guard !facets.isEmpty else {
+                throw HarnessError("display-state action requires settings with at least one facet.")
+            }
+            try requireSimulatorDeviceCtl("display-state")
+            // The baseline is the ONLY way this state gets restored, so a failed
+            // read must fail the step. Swallowing it (`try?`) would change the
+            // device and leave nothing to change it back with — the run would end
+            // with reduce-motion or a color filter still on. It also gates the
+            // look-and-feel check below.
+            if initialDisplayState == nil {
+                initialDisplayState = try captureBaseline("display-state") {
+                    try DeviceCtl.appearanceState(udid: udid)
+                }
+            }
+            // devicectl exits 0 for `--look-and-feel` on a runtime that offers
+            // only one look (iOS 27 has just "Liquid Glass"), so the write reads
+            // as a success while nothing changes. Fail the step instead of
+            // recording a state the device never entered.
+            if action.settings?.lookAndFeel != nil,
+               let state = initialDisplayState, !state.supportsLookAndFeelSwitching {
+                throw HarnessError(
+                    """
+                    look-and-feel cannot be set on this runtime: it offers only \
+                    \(state.supportedLooksAndFeels.joined(separator: ", ")). devicectl accepts the write \
+                    and ignores it, so the step would pass without changing anything.
+                    """
+                )
+            }
+            // A baseline that READ successfully is not automatically a baseline
+            // that can RESTORE: a runtime may simply not report a facet this
+            // action wants to change. Writing it anyway would leave it applied for
+            // the rest of the run, because the restore only writes back facets it
+            // actually captured.
+            if let unrestorable = Self.unrestorableFacets(
+                requested: action.settings, baseline: initialDisplayState
+            ), !unrestorable.isEmpty {
+                throw HarnessError(
+                    """
+                    display-state: this runtime does not report \(unrestorable.sorted().joined(separator: ", ")), \
+                    so there is no value to restore afterward. Refusing to change a facet the run cannot put back.
+                    """
+                )
+            }
+            try DeviceCtl.setAppearance(udid: udid, settings: facets)
+            return ["method": "devicectl", "value": "display-state:\(action.settings?.summary ?? "")"]
+
+        case "voiceover":
+            guard let enabled = action.enabled else {
+                throw HarnessError("voiceover action requires enabled.")
+            }
+            try requireSimulatorDeviceCtl("voiceover")
+            if initialVoiceOver == nil {
+                initialVoiceOver = try captureBaseline("voiceover") {
+                    // A runtime that reports no VoiceOver state gives nothing to
+                    // restore, which is as bad as a failed read.
+                    guard let enabled = try DeviceCtl.voiceOver(udid: udid) else {
+                        throw HarnessError("this runtime does not report VoiceOver state")
+                    }
+                    return enabled
+                }
+            }
+            try DeviceCtl.setVoiceOver(udid: udid, enabled: enabled)
+            return ["method": "devicectl", "value": "voiceover:\(enabled)"]
+
+        case "biometrics":
+            guard let operation = action.operation,
+                  ["enroll", "unenroll", "match", "no-match"].contains(operation) else {
+                throw HarnessError("biometrics action requires operation enroll, unenroll, match, or no-match.")
+            }
+            try requireSimulatorDeviceCtl("biometrics")
+            switch operation {
+            case "enroll", "unenroll":
+                // Enrollment is device state, so capture the baseline for restore.
+                // Match events are transient and need no restore.
+                if initialBiometricsEnrolled == nil {
+                    initialBiometricsEnrolled = try captureBaseline("biometrics") {
+                        let state = try DeviceCtl.biometricsEnrollment(udid: udid)
+                        guard !state.isEmpty else {
+                            throw HarnessError("this device reports no biometric hardware")
+                        }
+                        return state.values.allSatisfy { $0 }
+                    }
+                }
+                try DeviceCtl.setBiometricsEnrollment(udid: udid, enabled: operation == "enroll")
+            default:
+                try DeviceCtl.simulateBiometrics(udid: udid, success: operation == "match")
+            }
+            return ["method": "devicectl", "value": "biometrics:\(operation)"]
 
         case "status-bar":
             guard let operation = action.operation, ["override", "clear"].contains(operation) else {
@@ -1036,7 +1498,8 @@ private final class HarnessRunner {
 
     private func canResolve(action: HarnessAction) -> Bool {
         // Only selector-targeted actions can be "not found" and thus skipped when optional.
-        guard ["tap", "long-press", "slider"].contains(action.type), let selector = action.selector else { return true }
+        guard ["tap", "double-tap", "long-press", "slider"].contains(action.type),
+              let selector = action.selector else { return true }
         do {
             let query = try accessibilityQuery(selector)
             let fast = try driver.describe(udid, deep: false)
@@ -1056,15 +1519,27 @@ private final class HarnessRunner {
         guard let verify else { return [] }
         let contains = verify.contains ?? []
         let absent = verify.absent ?? []
+        let matches = verify.matches ?? []
+        let notMatches = verify.notMatches ?? []
+        let elements = (verify.elements ?? []).map(\.condition)
         let deadline = Date().addingTimeInterval(max(0, timeout))
         var rows: [VerifyEvaluator.Row] = []
         repeat {
-            // `absent` conditions are evaluated against the deep tree (see
+            // Absence-shaped conditions are evaluated against the deep tree (see
             // VerifyEvaluator): a forbidden string only in System UI / the grid
-            // pass must not be missed. `contains` escalates to deep on demand.
-            let fastJSON = try AXNodeJSON.string(for: driver.describe(udid, deep: false))
-            rows = try VerifyEvaluator.evaluate(contains: contains, absent: absent, fastJSON: fastJSON) {
-                try AXNodeJSON.string(for: self.driver.describe(self.udid, deep: true))
+            // pass must not be missed. Presence escalates to deep on demand.
+            let fastNodes = try driver.describe(udid, deep: false)
+            let fast = VerifyEvaluator.Capture(json: try AXNodeJSON.string(for: fastNodes), nodes: fastNodes)
+            rows = try VerifyEvaluator.evaluate(
+                contains: contains,
+                absent: absent,
+                matches: matches,
+                notMatches: notMatches,
+                elements: elements,
+                fast: fast
+            ) {
+                let deepNodes = try self.driver.describe(self.udid, deep: true)
+                return VerifyEvaluator.Capture(json: try AXNodeJSON.string(for: deepNodes), nodes: deepNodes)
             }
             if rows.allSatisfy({ $0.found }) {
                 return rows.map(Self.verifyRowDict)
@@ -1213,6 +1688,24 @@ private final class HarnessRunner {
             }
             if let point = action.point { return "long-press \(point.x),\(point.y)" }
             return "long-press"
+        case "double-tap":
+            if let selector = action.selector {
+                if let id = selector.id { return "double-tap id \(id)" }
+                if let label = selector.label { return "double-tap label \(label)" }
+                if let value = selector.value { return "double-tap value \(value)" }
+            }
+            if let point = action.point { return "double-tap \(point.x),\(point.y)" }
+            return "double-tap"
+        case "pinch":
+            return "pinch \(action.direction ?? "")"
+        case "multitouch":
+            return "multitouch phase \(action.phase ?? 0)"
+        case "display-state":
+            return "display-state \(action.settings?.summary ?? "")"
+        case "voiceover":
+            return "voiceover \(action.enabled.map { String($0) } ?? "")"
+        case "biometrics":
+            return "biometrics \(action.operation ?? "")"
         case "type":
             return (action.clear ?? false) ? "type text (clear)" : "type text"
         case "set-text":

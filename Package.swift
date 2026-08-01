@@ -89,7 +89,10 @@ let package = Package(
         // the existing SimBridge (CSimBridge) ObjC APIs.
         .target(
             name: "SimNative",
-            dependencies: ["SimCore", "SimBridge"],
+            // SimShell for the public-tooling fallbacks the private bridge cannot
+            // cover on its own (devicectl orientation SET reaches face-up /
+            // face-down without Simulator.app, which Xcode 27 removed).
+            dependencies: ["SimCore", "SimBridge", "SimShell"],
             path: "Sources/SimNative",
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -139,6 +142,22 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
             path: "Sources/sipi",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("QuartzCore"),
+                .linkedFramework("IOSurface"),
+                .linkedFramework("CoreImage"),
+                .linkedFramework("CoreVideo")
+            ]
+        ),
+        // Simulator-free tests for the CLI layer's own policy logic — the parts
+        // that decide whether an action worked, which cannot be reached from
+        // SimCoreTests because they live in the executable target. Drives the
+        // policy through a scripted SimDriver, so no device is involved.
+        .testTarget(
+            name: "SipiTests",
+            dependencies: ["sipi", "SimCore"],
+            path: "Tests/SipiTests",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("QuartzCore"),

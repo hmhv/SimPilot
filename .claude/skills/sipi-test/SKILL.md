@@ -23,7 +23,7 @@ This skill **creates tests based on facts observed and confirmed directly on the
 ## Run Integrity (hard rules)
 
 1. **RUN and FIX are separate phases.** During a RUN, do not edit test steps, verify strings, `config.json`, or app source. If verify fails, accept the harness result as FAIL. Fixes happen later, in an explicit FIX phase (`references/test-fix-policy.md`).
-2. **A retry re-executes the same action and re-checks the SAME verify object.** Changing `action` or `verify` mid-run is a FIX, not a retry.
+2. **A retry re-executes the same action and re-checks the SAME verify object.** Changing `action` or `verify` mid-run is a FIX, not a retry. The harness skips the retry when re-running would repeat a side effect it cannot confirm — text that was sent but could not be read back is the case in hand — and records why in the step's `note`.
 3. **A verify must assert a state that is ABSENT on the failure path** (negative control). Before trusting a PASS, confirm the `verify.contains` text would not also appear if the feature were broken.
 
 ## Preflight
@@ -63,8 +63,8 @@ Beyond functional regression tests, this skill supports specialized quality audi
 
 | Mode | Doc | Use when |
 |------|-----|----------|
-| Accessibility | `docs/a11y-audit.md` | Auditing labels, reading order, identifiers, contrast |
-| Appearance | `docs/appearance-check.md` | Checking Dark Mode, Dynamic Type regressions |
+| Accessibility | `docs/a11y-audit.md` | Auditing labels, reading order, identifiers, touch targets, contrast — `sipi a11y-audit` decides the mechanical rules, you judge the rest |
+| Appearance | `docs/appearance-check.md` | Checking Dark Mode, Dynamic Type, and accessibility-appearance regressions |
 | Localization | `docs/l10n-check.md` | Verifying translations, clipped text, locale switching |
 
 Read the relevant doc before starting an audit.
