@@ -6,104 +6,94 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 
 # iOS Simulator UI Test Automation
 
-Use SimPilot's deterministic v2 harness. Create explicit JSON specs, then run them with `sipi run-test` or `sipi run-suite`. Do not manually reconstruct the old Bash step loop.
+Write explicit v2 JSON specs, then hand execution to `sipi run-test` /
+`sipi run-suite`.
 
-Read `references/test-fix-policy.md` before proposing or applying source-code changes.
+## Who owns what
+
+**The harness owns** the step loop, target resolution, retry policy, conditional
+waits, screenshot and describe-ui capture, verify evaluation, `result.json`,
+`trace.jsonl`, `summary.json`, and `report.html`. Do not reconstruct any of it
+with Bash.
+
+**You own** intent, the spec, the choice of targets, verify semantics and their
+negative controls, failure diagnosis, and source-fix proposals.
 
 ## Core Principles
 
-This skill **creates tests based on facts observed and confirmed directly on the simulator**, then hands execution to `sipi` so results can be trusted on re-run.
+Tests are built from facts observed on the simulator, not from reading source.
 
-- Build v2 specs from operations that actually succeeded on the real screen. Checking source code and adding `.accessibilityIdentifier()` are supplementary tools to stabilize real-screen verification — not the primary approach (procedure: `docs/create.md`)
-- Judge whether UI state is *meaningfully* correct for the action taken, not just "visible". Use a skeptical mindset — expose weaknesses, do not force a PASS (procedure: `docs/run.md`)
-- When the root cause is in app code, propose and apply the smallest useful source change per `references/test-fix-policy.md`
-- Use real simulator controls for permissions, links, pushes, location, appearance, and configured network conditions; read `references/adverse-state-testing.md` for adverse/error-state tests
-- **The value of a test is not "making it pass" but "being able to trust results when re-run under the same rules."** A FAIL that correctly catches a regression is more valuable than a forced PASS that hides one
+- Build specs from operations that actually succeeded on the real screen.
+  Reading source and adding `.accessibilityIdentifier()` are tools to stabilize
+  real-screen verification, not substitutes for it (`docs/create.md`).
+- Judge whether UI state is *meaningfully* correct for the action taken, not
+  merely "visible". Expose weaknesses; do not force a PASS (`docs/run.md`).
+- When the root cause is in app code, apply the smallest useful change per
+  `references/test-fix-policy.md`.
+- Use real simulator controls for permissions, links, pushes, location,
+  appearance, and network conditions (`references/adverse-state-testing.md`).
+- **A test's value is not "it passes" but "its result can be trusted on
+  re-run."** A FAIL that catches a regression beats a forced PASS that hides one.
 
 ## Run Integrity (hard rules)
 
-1. **RUN and FIX are separate phases.** During a RUN, do not edit test steps, verify strings, `config.json`, or app source. If verify fails, accept the harness result as FAIL. Fixes happen later, in an explicit FIX phase (`references/test-fix-policy.md`).
-2. **A retry re-executes the same action and re-checks the SAME verify object.** Changing `action` or `verify` mid-run is a FIX, not a retry. The harness skips the retry when re-running would repeat a side effect it cannot confirm — text that was sent but could not be read back is the case in hand — and records why in the step's `note`.
-3. **A verify must assert a state that is ABSENT on the failure path** (negative control). Before trusting a PASS, confirm the `verify.contains` text would not also appear if the feature were broken.
+1. **RUN and FIX are separate phases.** During a RUN, do not edit test steps,
+   verify strings, `config.json`, or app source. A failed verify is a FAIL.
+   Fixes happen later, in an explicit FIX phase.
+2. **A retry re-executes the same action against the SAME verify object.**
+   Changing `action` or `verify` mid-run is a FIX, not a retry. The harness skips
+   a retry that would repeat an unconfirmable side effect — text sent but not
+   readable back is the case in hand — and records why in the step's `note`.
+3. **A verify must assert a state that is ABSENT on the failure path.** Before
+   trusting a PASS, confirm the `verify` text would not also appear if the
+   feature were broken.
 
-## Preflight
+## Workflow
 
-Read `../sipi-common/docs/preflight.md` and complete all checks before proceeding.
-Confirm the native driver is ready with `sipi doctor` (exit 0). If it fails, report the failing capability and stop.
-
-## Element Interaction Fallback Chain
-
-Use `sipi describe-ui` and screenshots during authoring to discover stable identifiers and text. The harness owns tap resolution, retry, wait, verify, screenshots, result JSON, trace, summary, and report generation.
-
-## Test Creation
-
-See `docs/create.md` for the full procedure. Summary: understand requirements → observe simulator → generate explicit v2 JSON → save → run with `sipi run-test`. If asked to "create and run", proceed without waiting for confirmation.
-
-## Test Execution
-
-See `docs/run.md` for the full procedure. Key command:
+1. Complete `../sipi-common/docs/preflight.md`.
+2. Create or update the spec — `docs/create.md`. Summary: understand the
+   requirement → observe the simulator with `sipi describe-ui` and screenshots →
+   write explicit v2 JSON → `sipi validate .simpilot`. Key names must match
+   `references/json-reference.md` exactly; do not invent your own.
+3. Run it — `docs/run.md`:
 
 ```bash
 sipi run-test .simpilot/tests/<id>.json --workspace .simpilot
 sipi run-suite .simpilot/suites/<name>.json --workspace .simpilot
 ```
 
-The harness writes `run.json`, per-test `result.json`, `trace.jsonl`, `summary.json`, screenshots, describe snapshots, and `report.html`.
+4. Read `"$RUN_DIR/summary.json"` for the compact result; open
+   `"$RUN_DIR/report.html"` for the screenshots and failure detail.
 
-## Saving and Displaying Results
-
-- The harness writes `result.json` incrementally and `run.json` after each test.
-- **Key names must exactly match `references/json-reference.md`** — do not invent custom key names.
-- After saving specs, run `sipi validate .simpilot` and fix schema issues before executing.
-- After execution, open `"$RUN_DIR/report.html"` and inspect `"$RUN_DIR/summary.json"` for a compact result.
+If asked to "create and run", proceed without waiting for confirmation.
 
 ## Quality Audits
 
-Beyond functional regression tests, this skill supports specialized quality audits. Each mode has its own workflow and fix priority documented in a dedicated file.
+Beyond functional regression, three audit modes each have their own workflow and
+fix priority:
 
 | Mode | Doc | Use when |
 |------|-----|----------|
-| Accessibility | `docs/a11y-audit.md` | Auditing labels, reading order, identifiers, touch targets, contrast — `sipi a11y-audit` decides the mechanical rules, you judge the rest |
-| Appearance | `docs/appearance-check.md` | Checking Dark Mode, Dynamic Type, and accessibility-appearance regressions |
-| Localization | `docs/l10n-check.md` | Verifying translations, clipped text, locale switching |
+| Accessibility | `docs/a11y-audit.md` | Labels, reading order, identifiers, touch targets, contrast. `sipi a11y-audit` decides the mechanical rules; you judge the rest |
+| Appearance | `docs/appearance-check.md` | Dark Mode, Dynamic Type, accessibility-appearance regressions |
+| Localization | `docs/l10n-check.md` | Translations, clipped text, locale switching |
 
-Read the relevant doc before starting an audit.
-
-Device selection and suite execution are handled by `sipi run-test` / `sipi run-suite` flags documented in `docs/run.md`.
+Read the relevant doc before starting.
 
 ## References
 
-### Always read
-
-| File | Purpose |
-|------|---------|
-| `../sipi-common/docs/preflight.md` | Session setup checklist (includes `sipi doctor`) |
-| `references/json-reference.md` | v2 JSON schema |
-
-### Read for specific operations
-
 | File | When |
 |------|------|
+| `../sipi-common/docs/preflight.md` | Every session, before anything else |
+| `references/json-reference.md` | Authoring any spec — file, step, selector, verify schema |
+| `references/actions.md` | The JSON shape and constraints of a specific action |
 | `docs/create.md` | Creating or updating tests |
-| `docs/run.md` | Running tests with the deterministic harness |
-| `docs/report.md` | Generating the HTML report |
-| `../sipi-common/docs/build.md` | Building or installing the app |
-| `../sipi-common/docs/troubleshooting.md` | When problems occur |
-
-### Read before proposing code changes
-
-| File | When |
-|------|------|
-| `references/test-fix-policy.md` | Any source-code change for test stability |
-| `references/adverse-state-testing.md` | Network errors, offline/timeout UI, permissions, deep links, push, location, and system-state controls |
+| `docs/run.md` | Running the harness; flags and semantics |
+| `docs/report.md` | Regenerating or reading the HTML report |
+| `references/test-fix-policy.md` | **Before proposing or applying any source change** |
+| `references/adverse-state-testing.md` | Network errors, permissions, deep links, push, location, system state |
 | `references/a11y-best-practices.md` | Accessibility fixes |
 | `references/appearance-fix-policy.md` | Appearance / Dark Mode fixes |
 | `references/l10n-fix-policy.md` | Localization fixes |
-
-### Quality audit workflows
-
-| File | When |
-|------|------|
-| `docs/a11y-audit.md` | Accessibility audit |
-| `docs/appearance-check.md` | Dark Mode / Dynamic Type check |
-| `docs/l10n-check.md` | Localization verification |
+| `../sipi-common/docs/build.md` | Building or installing |
+| `../sipi-common/docs/troubleshooting.md` | Any failure |

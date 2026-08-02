@@ -101,7 +101,8 @@ struct BuildInfo {
     /// Walk up from `start` looking for a SimPilot checkout: a git working tree
     /// whose package is this one. All three markers are required so an unrelated
     /// Swift package (or an unrelated repo containing one) is never mistaken for
-    /// SimPilot — the same conservatism `preflight.md`'s resolver uses.
+    /// SimPilot — this powers the `doctor` staleness note, which must not accuse
+    /// an unrelated repo's HEAD of being newer than the installed binary.
     private static func simPilotCheckout(startingAt start: String) -> String? {
         let fileManager = FileManager.default
         var directory = URL(fileURLWithPath: start).standardizedFileURL

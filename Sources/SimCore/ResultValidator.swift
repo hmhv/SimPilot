@@ -728,6 +728,21 @@ public enum ResultValidator {
             if a["start"] == nil || a["end"] == nil {
                 diag.errors.append("\(path): \(ordinal) (\(type)) requires start and end points")
             }
+            if type == "drag" {
+                // Bound `steps` here rather than leaving it to the harness, which
+                // clamps silently: a spec asking for 5000 interpolated moves would
+                // run 1000 and report success, so the count in the file would not
+                // be the count that ran. Mirrors the pinch bound above.
+                if let steps = a["steps"] as? Int, !(1...1000).contains(steps) {
+                    diag.errors.append("\(path): \(ordinal).steps must be between 1 and 1000")
+                }
+            } else if a["steps"] != nil {
+                // `swipe` is a single driver call with no interpolated moves, so
+                // it never reads `steps`. Same rule as a slider's `point`: a
+                // number the run ignores must not sit in the file looking load-
+                // bearing.
+                diag.errors.append("\(path): \(ordinal) (swipe) does not take steps — use drag for an interpolated move")
+            }
         case "gesture":
             if let preset = a["preset"] as? String {
                 if GesturePreset(rawValue: preset) == nil {
@@ -743,6 +758,13 @@ public enum ResultValidator {
                 }
             } else {
                 diag.errors.append("\(path): \(ordinal) (slider) requires a selector")
+            }
+            // A slider is resolved through its selector so the drag can be planned
+            // from the element's frame; the harness never reads `point` for this
+            // action. Rejecting it keeps the file honest — a point here used to
+            // validate and then be silently ignored.
+            if a["point"] != nil {
+                diag.errors.append("\(path): \(ordinal) (slider) does not take a point — target it with selector id or label")
             }
             if let value = numberValue(a["value"]) {
                 if !(value >= 0 && value <= 100) { diag.errors.append("\(path): \(ordinal).value must be between 0 and 100") }

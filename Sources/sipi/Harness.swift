@@ -555,8 +555,7 @@ private final class HarnessRunner {
         if let value = state.largerAccessibilitySizes { settings.append(.largerAccessibilitySizes(value)) }
         // The filter kind and intensity survive a disabled filter, so restore them
         // too — otherwise re-enabling the filter later picks up the test's values
-        // instead of the user's. Skipped when the runtime reports no kind, and
-        // `grayscale` ignores intensity, which devicectl accepts either way.
+        // instead of the user's. Skipped when the runtime reports no kind.
         if let value = state.colorFilterType { settings.append(.colorFilterType(value)) }
         // devicectl REJECTS an intensity alongside the grayscale filter
         // ("--color-filter-intensity is not supported for the grayscale filter
@@ -608,6 +607,7 @@ private final class HarnessRunner {
         if requested.lookAndFeel != nil { require(baseline.restorableLookAndFeel != nil, "look-and-feel") }
         return missing
     }
+
 
     /// Capture the restore baseline for a state-changing action, failing the step
     /// when it cannot be read.
@@ -761,7 +761,7 @@ private final class HarnessRunner {
             let before = try describeJSON(expect: nil)
             try before.write(toFile: testDir + "/" + beforeName, atomically: true, encoding: .utf8)
 
-            if step.optional == true, let action = step.action, !canResolve(action: action) {
+            if step.optional == true, let action = step.action, targetIsDefinitelyAbsent(action: action) {
                 return [
                     "passed": true,
                     "skipped": true,
@@ -776,12 +776,29 @@ private final class HarnessRunner {
             var stepPassed = false
 
             var retryUnsafeNote: String?
+            var lastActionError: String?
 
             for attempt in 0...retries {
                 // A throw before verify (resolution, invalid input, HID/sim error)
                 // is an `action` failure; a mismatch or error once verification has
                 // begun is a `verify` failure.
                 var stage = "action"
+                // Everything that describes HOW THIS ATTEMPT WENT resets here; the
+                // result reports how the step ENDED, so nothing may leak forward
+                // from an earlier attempt. Two ways that bit:
+                //
+                //  - a first-attempt exception pinned an action error onto a step
+                //    that later reached verify and failed there, and
+                //  - a first-attempt verify mismatch survived into a step whose
+                //    retry threw at the action stage, so `failure-type: action`
+                //    was reported next to a "Missing Verify" row in the report
+                //    and in summary.json.
+                //
+                // Both are still in the trace. `attempted` is the exception: it
+                // deliberately accumulates, because attempted-methods is the log
+                // of everything that was tried.
+                lastActionError = nil
+                verifyRows = []
                 do {
                     if let action = step.action {
                         attempted.append(try perform(action: action))
@@ -792,8 +809,28 @@ private final class HarnessRunner {
                     stepPassed = verifyRows.allSatisfy { $0["found"] as? Bool == true }
                     if stepPassed { break }
                     lastFailureType = "verify"
+                    // A mismatch does not throw, so it would otherwise leave no
+                    // trace entry — and "every failed attempt is traced" is the
+                    // contract `json-reference.md` states.
+                    trace.event("step-attempt-error", fields: [
+                        "test": test.id, "step": stepNumber, "attempt": attempt,
+                        "stage": "verify",
+                        "error": StepNote.verifyMismatchSummary(verifyRows)
+                    ])
                 } catch {
                     lastFailureType = stage
+                    // Keep the message, not just the category. `failure-type:
+                    // action` alone cannot tell an ambiguous selector from a dead
+                    // bridge, and the resolver's error is the part that says which
+                    // ("Multiple (3) elements matched label 'Delete'..."). It
+                    // matters most for a step whose optional pre-resolution
+                    // declined and fell through to here: without this the reason it
+                    // declined never reaches the result.
+                    lastActionError = String(describing: error)
+                    trace.event("step-attempt-error", fields: [
+                        "test": test.id, "step": stepNumber, "attempt": attempt,
+                        "stage": stage, "error": lastActionError ?? ""
+                    ])
                     // Some failures happen AFTER the action reached the device —
                     // text that was sent but whose outcome could not be read back is
                     // the case in hand. Re-running the action would repeat the side
@@ -865,8 +902,14 @@ private final class HarnessRunner {
             // The suppressed-retry reason is the more actionable note: it explains
             // both the failure and why the harness did not try again. Artifact
             // failures are appended rather than allowed to displace it.
-            let notes = [retryUnsafeNote ?? step.note].compactMap { $0 } + artifactErrors
-            if !notes.isEmpty { result["note"] = notes.joined(separator: " | ") }
+            let notes = StepNote.compose(
+                retryUnsafeNote: retryUnsafeNote,
+                stepNote: step.note,
+                lastActionError: lastActionError,
+                artifactErrors: artifactErrors,
+                passed: stepPassed
+            )
+            if !notes.isEmpty { result["note"] = notes }
             if !stepPassed {
                 result["failure-type"] = lastFailureType
                 if !after.isEmpty {
@@ -1187,6 +1230,30 @@ private final class HarnessRunner {
                     """
                 )
             }
+            // A reported value is not automatically a WRITABLE one. The
+            // kind/intensity pair is exempt from the check above only because a
+            // baseline with the filter OFF is restored by switching it off. With
+            // the filter already ON, the restore has to write back whichever of
+            // the pair this step changes — so ask about exactly those facets,
+            // not about the baseline in the abstract. A step that leaves the
+            // pair alone needs nothing from the restore.
+            //
+            // The blocker carries its own consequence, because they differ: most
+            // leave the SCREEN wrong, while a grayscale baseline comes back
+            // looking right and leaks only the stored intensity.
+            if let requested = action.settings, let baseline = initialDisplayState,
+               let blocker = baseline.colorFilterRestoreBlocker(
+                   changingType: requested.colorFilterType != nil,
+                   changingIntensity: requested.colorFilterIntensity != nil
+               ) {
+                throw HarnessError(
+                    """
+                    display-state: \(blocker). Refusing to change a facet the run cannot restore — turn \
+                    the device's colour filter off, set it to a restorable value, or use a disposable \
+                    simulator.
+                    """
+                )
+            }
             try DeviceCtl.setAppearance(udid: udid, settings: facets)
             return ["method": "devicectl", "value": "display-state:\(action.settings?.summary ?? "")"]
 
@@ -1496,21 +1563,46 @@ private final class HarnessRunner {
         Point(x: min(max(p.x, 0), 1), y: min(max(p.y, 0), 1))
     }
 
-    private func canResolve(action: HarnessAction) -> Bool {
-        // Only selector-targeted actions can be "not found" and thus skipped when optional.
-        guard ["tap", "double-tap", "long-press", "slider"].contains(action.type),
-              let selector = action.selector else { return true }
+    /// Whether an `optional` step's target is DEFINITIVELY absent — the one
+    /// condition that may turn the step into a passing skip. A malformed
+    /// selector is a real defect, not an absent target, so it does not skip.
+    private func targetIsDefinitelyAbsent(action: HarnessAction) -> Bool {
+        guard OptionalStepSkip.skippableActionTypes.contains(action.type),
+              let selector = action.selector,
+              let query = try? accessibilityQuery(selector) else { return false }
+        return OptionalStepSkip.targetIsDefinitelyAbsent { deep in
+            try self.resolvesTarget(query: query, elementType: selector.elementType, deep: deep)
+        }
+    }
+
+    /// True when the selector resolves, false when the tree definitively does not
+    /// contain it. Any other outcome throws so the caller can tell "absent" apart
+    /// from "could not tell".
+    ///
+    /// A degenerate tree is the important case. Right after a launch the bridge
+    /// answers with a single empty root, and resolving against it reports every
+    /// selector as missing — which for an `optional` step would mean a passing
+    /// skip for an element that is simply not up yet. So wait it out the same way
+    /// `resolvingRoots` does, and if it never becomes usable, throw rather than
+    /// call the target absent.
+    private func resolvesTarget(query: AccessibilityQuery, elementType: String?, deep: Bool) throws -> Bool {
+        var roots = try driver.describe(udid, deep: deep)
+        if !deep, ChildTree.isDegenerate(roots) {
+            roots = waitForUsableTree()
+        }
+        guard !ChildTree.isDegenerate(roots) else {
+            throw HarnessError(
+                "accessibility tree is still degenerate; cannot tell whether the target is absent"
+            )
+        }
         do {
-            let query = try accessibilityQuery(selector)
-            let fast = try driver.describe(udid, deep: false)
-            do {
-                _ = try AccessibilityTargetResolver.resolveElement(roots: fast, query: query, elementType: selector.elementType)
-                return true
-            } catch let error as ElementResolutionError where error.isNotFound {
-                _ = try AccessibilityTargetResolver.resolveElement(roots: try driver.describe(udid, deep: true), query: query, elementType: selector.elementType)
-                return true
-            }
-        } catch {
+            _ = try AccessibilityTargetResolver.resolveElement(
+                roots: roots,
+                query: query,
+                elementType: elementType
+            )
+            return true
+        } catch let error as ElementResolutionError where error.isNotFound {
             return false
         }
     }

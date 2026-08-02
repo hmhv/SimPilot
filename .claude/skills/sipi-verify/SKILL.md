@@ -6,81 +6,101 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 
 # Implementation Verification on iOS Simulator
 
-Verify that a feature implementation or bug fix works correctly by checking it on the iOS Simulator. By default, capture 4 variants: iPhone light, iPhone dark, iPad light, iPad dark. Use `sipi verify-session` to own artifact layout, screenshots, findings, and report generation.
+Confirm a feature or fix on the iOS Simulator, capturing 4 variants by default:
+iPhone light, iPhone dark, iPad light, iPad dark.
 
-This skill **observes and reports only — it never patches product source.** It records findings through `sipi verify-session finding` and generates the report through `sipi verify-session finalize`. If verification surfaces a code-level problem, describe it in the findings and hand the fix to sipi-test, which owns source changes.
+## Who owns what
 
-## When This Skill Is Used
+**`sipi verify-session` owns** the artifact layout, screenshot naming, variant
+alignment, `checks.json`, `findings.json`, and the HTML report. Do not hand-build
+any of them.
 
-- After implementing a new feature → verify it works as intended
-- After fixing a bug → verify the fix resolves the issue
+**You own** what to check, the judgment calls, and the findings.
+
+**This skill observes and reports — do not patch product source.** That is a
+behavioral rule, not something the tool list enforces: `Edit` is deliberately
+absent, but `Write` can still overwrite a file and `Bash` can change anything, so
+the discipline is yours. Use `Write` for session artifacts only. When
+verification surfaces a code-level problem, record it as a finding and hand the
+fix to `sipi-test`, which owns source changes.
+
+## When this skill is used
+
+- After a new feature → verify it works as intended
+- After a bug fix → verify the issue is resolved
 - After UI changes → verify the appearance is correct
-- When the user says "check this on the simulator", "verify this works", "does this look right"
+- "Check this on the simulator", "verify this works", "does this look right"
 
 ## Core Principles
 
-- **Understand first, then verify** — read the changes to know what to check
-- **Check what matters** — focus on the specific behavior that was changed, not everything
-- **Be honest** — if something looks wrong or broken, say so clearly
-- **Show evidence** — use `ui_screenshot` captures and `ui_describe` output (the `sipi-common` ui-driver.md shell wrappers around `sipi screenshot` / `sipi describe-ui`; see Preflight) to support findings
-- **Confirm the new state before declaring all-OK** — before writing `findings.json` as an empty `[]`, confirm for the SPECIFIC changed behavior that you observed the NEW state via `ui_describe` (not the screenshot alone), and can state why that state would be absent if the change had not worked. Appearance/visual checks remain screenshot-first and exploratory
-- **4 variants by default** — always capture iPhone light, iPhone dark, iPad light, iPad dark. Drop a device class only when it is clearly inapplicable (an iPhone-only or iPad-only app, or a change that cannot appear on the other class). When you skip a variant, state in the summary which variants were skipped and why
-- **Suggest follow-up** — if the verification reveals a good regression test candidate, suggest the user run `/sipi-test` to capture this as a regression test
+- **Understand first** — read the change to know what to check.
+- **Check what matters** — the behavior that was changed, not everything.
+- **Be honest** — if something looks wrong, say so plainly.
+- **Show evidence** — `sipi screenshot` captures and `sipi describe-ui` output.
+- **Confirm the new state before declaring all-OK** — before leaving
+  `findings.json` empty, confirm you observed the NEW state for the specific
+  changed behavior via `describe-ui` (not the screenshot alone), and can say why
+  that state would be absent if the change had not worked. Appearance checks stay
+  screenshot-first and exploratory.
+- **4 variants by default** — drop a device class only when it is clearly
+  inapplicable (an iPhone-only or iPad-only app, or a change that cannot appear
+  on the other class). State any skipped variant and why in the summary.
+- **Suggest follow-up** — if the check is a good regression candidate, suggest
+  `/sipi-test`.
 
-## Preflight
+## Approach
 
-Read `../sipi-common/docs/preflight.md` and complete all checks before proceeding.
-Read `../sipi-common/docs/ui-driver.md` and define its shell prelude in every Bash call that inspects or taps UI.
-Confirm the native driver is ready with `sipi doctor` (exit 0). If it fails, report the failing capability and stop.
+Exploratory, not scripted. Unlike regression tests: no predefined JSON steps;
+screenshots are first-class evidence; flag anything that looks off even when
+`describe-ui` says it is fine; cover the happy path and the obvious edge cases.
 
 ## Workflow
 
-See `docs/verify-workflow.md` for the detailed procedure. Summary:
+Full procedure in `docs/verify-workflow.md`:
 
-1. **Understand the change** — read the diff or context provided
-2. **Plan checks** — decide what to verify (behavior, appearance, edge cases)
-3. **Build & install** — rebuild if source was modified, install on both iPhone and iPad simulators
-4. **Execute checks** — run the same checks across 4 variants (iPhone light/dark, iPad light/dark)
-5. **Record findings** — use `sipi verify-session finding` for every issue
-6. **Generate report** — use `sipi verify-session finalize`
-7. **Summarize** — output the result path and findings summary
+1. Complete `../sipi-common/docs/preflight.md`.
+2. **Understand the change** — read the diff or context.
+3. **Plan checks** — behavior, appearance, edge cases.
+4. **Build & install** — rebuild if source changed; install on both devices.
+5. **Execute** — the same checks across all 4 variants.
+6. **Record findings** — `sipi verify-session finding` for every issue.
+7. **Finalize** — `sipi verify-session finalize`.
+
+Use the element-interaction fallback chain in
+`../sipi-common/docs/patterns.md` when a tap misbehaves.
 
 ## Output
 
-Screenshots, `checks.json`, `findings.json`, and a self-contained HTML report are saved under `.simpilot/verify/<timestamp>_<description>/`. See `docs/report.md` for the directory layout, naming rules, and the `findings.json` contract.
+Screenshots, `checks.json`, `findings.json`, and a self-contained HTML report
+land in `.simpilot/verify/<timestamp>_<description>/`.
 
-Generate the report with `sipi verify-session finalize "$VERIFY_DIR" --title "Description"` — the sole verification-session finalizer. `finalize` has no status flag — status is derived from `findings.json` (empty `[]` → All OK, any finding → Issues Found). To assert an OK result, record an empty findings array; never reach for `verify-report --status ok`, which only takes effect when `findings.json` is absent and is ignored (with a stderr warning) when a real findings file exists.
+```bash
+sipi verify-session finalize "$VERIFY_DIR" --title "Description"
+```
+
+`finalize` is the only finalizer this skill uses and it has no status flag —
+status is derived from `findings.json` (empty `[]` → All OK, any finding →
+Issues Found). To assert an OK result, record an empty findings array. See
+`docs/report.md` for the directory layout, naming rules, and the `findings.json`
+contract.
 
 ### Returning results to the caller
 
-**Always** output the result path so calling skills or the user can locate the artifacts. This line must appear in the conversation output; calling skills rely on it to read the screenshots and HTML report for further review (e.g., comparing against design references):
+**Always** output the result path. Calling skills rely on this line to locate the
+screenshots and report:
 
 ```
 Verify results: <absolute path to $VERIFY_DIR>
 ```
 
-## Element Interaction
-
-Use the shared element-interaction fallback chain defined in `../sipi-common/docs/patterns.md`. That file also has control-specific guidance and known quirks.
-
-## Verification Approach
-
-This is **exploratory, not scripted**. Unlike regression tests:
-
-- No predefined JSON steps — determine what to check based on the change
-- Use judgement — if something looks off visually, flag it even if `ui_describe` says it's fine
-- Screenshots are first-class evidence here (unlike regression tests where describe-ui is required)
-- Check both the happy path and obvious edge cases
-- All 4 variants are always captured for comparison
-
 ## References
 
-| File | When to Read |
-|------|-------------|
+| File | When |
+|------|------|
+| `../sipi-common/docs/preflight.md` | Every session, before anything else |
 | `docs/verify-workflow.md` | Before starting verification |
-| `docs/report.md` | When generating the HTML report |
-| `../sipi-common/docs/patterns.md` | When interacting with UI elements (shared fallback chain + control quirks) |
-| `../sipi-common/docs/preflight.md` | Before starting any session |
-| `../sipi-common/docs/ui-driver.md` | UI driver shell prelude and native bridge wrappers |
-| `../sipi-common/docs/build.md` | When building or installing |
-| `../sipi-common/docs/troubleshooting.md` | When problems occur |
+| `docs/report.md` | Report layout and the `findings.json` contract |
+| `../sipi-common/docs/ui-driver.md` | Driver commands |
+| `../sipi-common/docs/patterns.md` | Element interaction and control quirks |
+| `../sipi-common/docs/build.md` | Building or installing |
+| `../sipi-common/docs/troubleshooting.md` | Any failure |

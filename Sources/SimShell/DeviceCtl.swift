@@ -115,6 +115,67 @@ public struct AppearanceState: Equatable, Sendable {
     /// to avoid reporting a change that never happened.
     public var supportsLookAndFeelSwitching: Bool { supportedLooksAndFeels.count > 1 }
 
+    /// Why this state's colour filter could not be put back after a run that
+    /// changes the facets named by the flags — or nil when it can.
+    ///
+    /// Restorability is a property of the baseline AND of what the run touches,
+    /// not of the baseline alone. A facet the run never writes is still sitting
+    /// on the device afterward, so it needs nothing from the restore: a run that
+    /// only toggles the filter off and on leaves an out-of-range stored intensity
+    /// exactly as it found it, and refusing that run would block a safe
+    /// operation.
+    ///
+    /// For a facet the run DOES change, the restore has to write the baseline
+    /// value back, so the baseline must both HAVE that value and be able to take
+    /// it back:
+    ///
+    /// - `colorFilterType` needs a reported value; without one the run's kind
+    ///   stays.
+    /// - `colorFilterIntensity` needs a reported value inside 0.25...1.0, the
+    ///   range devicectl accepts.
+    ///
+    /// With the filter OFF in the baseline none of this applies: the restore
+    /// switches it off and the screen matches, whatever is configured behind it.
+    ///
+    /// A `grayscale` baseline blocks an intensity change, because devicectl
+    /// refuses an intensity alongside grayscale and the restore is a single
+    /// batch. A staged restore (write the intensity under a temporary
+    /// non-grayscale kind, then set grayscale) might lift that, but the ordering
+    /// is unverified against a real runtime, so this refuses rather than guesses.
+    public func colorFilterRestoreBlocker(
+        changingType: Bool,
+        changingIntensity: Bool
+    ) -> String? {
+        guard colorFilterEnabled == true else { return nil }
+        if changingType, colorFilterType == nil {
+            return "this runtime does not report the current colour-filter type, so the run's kind "
+                + "would stay on the device and the screen would not go back to how it looked"
+        }
+        if changingIntensity {
+            // Grayscale first, and deliberately: it decides the CONSEQUENCE, and
+            // the checks below would otherwise answer for it with the wrong one.
+            // Here the kind is restorable and grayscale ignores intensity, so the
+            // screen does come back — only the stored value leaks. Saying "the
+            // screen would keep the run's intensity" would be false.
+            if colorFilterType == "grayscale" {
+                return "the colour filter is set to grayscale and devicectl refuses an intensity "
+                    + "alongside it, so the original intensity could not be written back. The screen "
+                    + "would return to grayscale, but the run's intensity would persist in the "
+                    + "device's stored settings"
+            }
+            guard let colorFilterIntensity else {
+                return "this runtime does not report the current colour-filter intensity, so the "
+                    + "run's intensity would stay and the screen would not go back to how it looked"
+            }
+            guard (0.25...1.0).contains(colorFilterIntensity) else {
+                return "the current colour-filter intensity (\(colorFilterIntensity)) is outside the "
+                    + "0.25...1.0 range devicectl accepts, so it could not be written back and the "
+                    + "filter would return at the run's intensity instead"
+            }
+        }
+        return nil
+    }
+
     /// A stable dictionary for JSON emission and result diffing. Nil fields are
     /// omitted so consumers can tell "unsupported" from "false".
     public var jsonObject: [String: Any] {

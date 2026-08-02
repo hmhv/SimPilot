@@ -171,11 +171,27 @@ the matching CLI command.
 Beyond input, the harness owns simulator state: `open-url`, `privacy`, `push`,
 `location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`,
 `launch`, `terminate`, `network-condition` (simctl / provider), plus
-`display-state`, `voiceover`, and `biometrics` (devicectl, Xcode 27+). Each
-captures a baseline the first time it runs and is restored between tests and at
-end of run. A facet has exactly one owning action: `display-state` deliberately
-cannot set light/dark, text size, or Increase Contrast, because two mechanisms
-capturing two baselines for one facet would restore whichever ran last.
+`display-state`, `voiceover`, and `biometrics` (devicectl, Xcode 27+).
+
+Cleanup runs between tests and at end of run, but it is **not** uniform across
+that list, and specs have to plan around the difference:
+
+- **Restored to a captured baseline** — `appearance`, `content-size`,
+  `increase-contrast`, `display-state`, `voiceover`, `biometrics` enrollment.
+  The baseline is captured before the first write and a step fails when it
+  cannot be read, or when a facet it wants to change could not be put back.
+- **Cleared only** — `location`, `status-bar`, `network-condition`. Reset to "no
+  override"; a value the device already had is not returned.
+- **Not touched** — `privacy`, `open-url`, `push`, `launch`, `terminate`. These
+  need recovery steps in the spec itself.
+
+A facet has exactly one owning action: `display-state` deliberately cannot set
+light/dark, text size, or Increase Contrast, because two mechanisms capturing two
+baselines for one facet would restore whichever ran last.
+
+The tier table, the colour-filter restore limits, and the recovery guidance are
+in
+[adverse-state-testing.md](../.claude/skills/sipi-test/references/adverse-state-testing.md).
 
 The full per-action JSON shapes are in
 [json-reference.md](../.claude/skills/sipi-test/references/json-reference.md).

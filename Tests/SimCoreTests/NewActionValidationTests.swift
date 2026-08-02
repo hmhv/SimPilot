@@ -413,4 +413,99 @@ final class NewActionValidationTests: XCTestCase {
             "type": "type", "text": "hello", "verify-effect": "no"
         ])).isValid)
     }
+
+    // MARK: - slider targeting
+    //
+    // A slider is planned from the resolved element's frame, so `point` is never
+    // read for this action. It used to validate and then be silently ignored.
+
+    func testSliderWithSelectorValidates() throws {
+        let outcome = try validate(id: "sl-ok", steps: action([
+            "type": "slider", "selector": ["label": "Volume"], "value": 75
+        ]))
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testSliderRejectsPointAlongsideSelector() throws {
+        let outcome = try validate(id: "sl-both", steps: action([
+            "type": "slider",
+            "selector": ["label": "Volume"],
+            "point": ["x": 0.5, "y": 0.5],
+            "value": 50
+        ]))
+        XCTAssertFalse(outcome.isValid, "a point the harness ignores must not validate")
+        XCTAssertTrue(
+            outcome.errors.contains { $0.contains("(slider) does not take a point") },
+            "\(outcome.errors)"
+        )
+    }
+
+    func testSliderRejectsPointOnly() throws {
+        XCTAssertFalse(try validate(id: "sl-point", steps: action([
+            "type": "slider", "point": ["x": 0.5, "y": 0.5], "value": 50
+        ])).isValid)
+    }
+
+    func testSliderRejectsValueSelector() throws {
+        XCTAssertFalse(try validate(id: "sl-val", steps: action([
+            "type": "slider", "selector": ["value": "50"], "value": 50
+        ])).isValid)
+    }
+
+    // MARK: - drag steps
+    //
+    // The harness clamps `steps` to 1...1000. Without this bound a spec asking
+    // for 5000 moves would run 1000 and report success, so the file would not
+    // describe what ran.
+
+    func testDragAcceptsStepsInRange() throws {
+        for steps in [1, 60, 1000] {
+            let outcome = try validate(id: "dr-ok-\(steps)", steps: action([
+                "type": "drag",
+                "start": ["x": 0.5, "y": 0.7], "end": ["x": 0.5, "y": 0.3],
+                "steps": steps
+            ]))
+            XCTAssertTrue(outcome.isValid, "steps=\(steps): \(outcome.errors)")
+        }
+    }
+
+    func testDragRejectsStepsOutOfRange() throws {
+        for steps in [0, -5, 1001, 99999] {
+            let outcome = try validate(id: "dr-bad-\(steps)", steps: action([
+                "type": "drag",
+                "start": ["x": 0.5, "y": 0.7], "end": ["x": 0.5, "y": 0.3],
+                "steps": steps
+            ]))
+            XCTAssertFalse(outcome.isValid, "steps=\(steps) must not validate")
+            XCTAssertTrue(
+                outcome.errors.contains { $0.contains("steps must be between 1 and 1000") },
+                "steps=\(steps): \(outcome.errors)"
+            )
+        }
+    }
+
+    func testSwipeRejectsSteps() throws {
+        // `swipe` is a single driver call and never reads `steps`. Accepting one
+        // would put a number in the file that has no bearing on what runs — the
+        // same defect as a slider's ignored `point`.
+        let outcome = try validate(id: "sw-steps", steps: action([
+            "type": "swipe",
+            "start": ["x": 0.5, "y": 0.7], "end": ["x": 0.5, "y": 0.3],
+            "steps": 60
+        ]))
+        XCTAssertFalse(outcome.isValid, "swipe ignores steps, so it must not validate")
+        XCTAssertTrue(
+            outcome.errors.contains { $0.contains("(swipe) does not take steps") },
+            "\(outcome.errors)"
+        )
+    }
+
+    func testSwipeWithoutStepsValidates() throws {
+        let outcome = try validate(id: "sw-ok", steps: action([
+            "type": "swipe",
+            "start": ["x": 0.5, "y": 0.7], "end": ["x": 0.5, "y": 0.3],
+            "duration": 0.3
+        ]))
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
 }

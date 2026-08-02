@@ -1,88 +1,87 @@
 # Localization Verification
 
-Use the native `sipi` UI driver (via the `ui_*` helpers) and the iOS Simulator Settings app to switch languages, capture screens, and compare localized UI output. Simulator observation is the primary source of truth; source code review is supplementary for finding untranslated strings and fixing issues at the source.
+Switch languages, capture screens, and compare localized output. Simulator
+observation is the source of truth; source review finds untranslated strings and
+fixes them at the origin. Be skeptical — expose localization weaknesses, do not
+rationalize them away.
 
-Read `../references/l10n-fix-policy.md` before proposing or applying source-code changes.
+Read `../references/l10n-fix-policy.md` before proposing or applying source
+changes.
 
-Judge whether each localized UI is semantically correct: the wording matches the intended meaning, terminology is consistent, and the layout still communicates the right action and hierarchy. Use a skeptical review mindset - expose localization weaknesses, do not rationalize them away.
+The question for each locale: does the wording match the intended meaning, is
+terminology consistent, and does the layout still communicate the right action
+and hierarchy?
 
 ## Workflow
 
 1. Decide the locale list and target screens.
-2. For each locale:
-   - switch simulator language in `Settings.app`
-   - relaunch the app
-   - navigate to each target screen
-   - run `ui_describe` (add `--expect "<expected localized string>"` to deterministically confirm a translation rendered — presence only; it does not assert absence or change the exit code, so keep the manual scan in step 3 for the untranslated/clipped checks)
-   - save `ui_screenshot`
-3. Compare locale outputs for:
-   - untranslated labels
-   - mixed-language strings
-   - clipped or off-screen text
-   - layout regressions between locales
-4. If the root cause is not obvious from the simulator, inspect source strings, localization tables, and relevant UI code. Apply fixes that meet the Fix Priority criteria below.
+2. Per locale: switch the simulator language → relaunch the app → navigate to
+   each screen → `sipi describe-ui "$UDID" --expect "<expected localized string>"`
+   → `sipi screenshot "$UDID" <path>`.
+3. Compare locale outputs for untranslated labels, mixed-language strings,
+   clipped or off-screen text, and layout regressions.
+4. When the cause is not obvious from the simulator, inspect source strings,
+   localization tables, and the relevant UI code. Apply fixes that meet the Fix
+   Priority below.
 
-## Language Switching
+`--expect` confirms presence only. It does not assert absence and does not change
+the exit code, so keep the manual scan in step 3 for the untranslated and clipped
+checks.
 
-Language switching is primarily done by operating `Settings.app` with the native `sipi` UI driver (`ui_*` helpers).
+## Language switching
 
-Preferred flow:
-
-1. Launch Settings:
+Drive `Settings.app` with `sipi`:
 
 ```bash
-xcrun simctl launch <UDID> com.apple.Preferences
+xcrun simctl launch "$UDID" com.apple.Preferences
 ```
 
-2. Navigate with the `ui_*` helpers through:
-   - `General`
-   - `Language & Region`
-   - `Add Language...` or current language
-   - choose the target language
-   - confirm the language change
+Then navigate: General → Language & Region → "Add Language…" or the current
+language → target language → confirm. Accept any continue/restart prompt and let
+the simulator settle.
 
-3. If iOS asks to continue or restart apps, accept it and wait for the simulator to settle.
-
-4. Terminate and relaunch the target app before capturing:
+Relaunch the target app before capturing:
 
 ```bash
-xcrun simctl terminate <UDID> <BUNDLE_ID> 2>/dev/null
-xcrun simctl launch <UDID> <BUNDLE_ID>
+xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null
+xcrun simctl launch "$UDID" "$BUNDLE_ID"
 ```
 
-Example target locales: `English (US)`, `Japanese`, `French`, `German`, `Chinese, Simplified`, `Chinese, Traditional`.
+Example locales: English (US), Japanese, French, German, Chinese Simplified,
+Chinese Traditional.
 
-Use `simctl` only as a helper for launching apps, rebooting the simulator, or recovering from a stuck language change. Do not rely on `simctl boot` flags or `LANG` environment variables as the primary locale-switching method.
+Use `simctl` only to launch, reboot, or recover from a stuck language change. Do
+not use `simctl boot` flags or `LANG` environment variables as the primary
+locale-switching method.
 
-## Settings Navigation Notes
+### Settings navigation notes
 
-- Prefer visible labels in `Settings.app` first
-- If the Settings hierarchy changes across iOS versions, re-check with `ui_describe` before tapping
-- Record the exact path that worked for the current simulator runtime in the report or note
-- If the locale switch path is too unstable, inspect source localization files first and then return to the simulator for final verification
+- Prefer visible labels in `Settings.app`.
+- The Settings hierarchy shifts across iOS versions — re-read with `describe-ui`
+  before tapping.
+- Record the exact path that worked for the current runtime in the report.
+- If the switch path is too unstable, inspect the localization resources first
+  and return to the simulator for final verification.
 
 ## Checks
 
-- Label still appears in source language
-- Placeholder or button text is longer than its visible frame
-- Frame extends past screen bounds
-- Same screen diverges materially between locales without intent
+- label still in the source language
+- placeholder or button text longer than its visible frame
+- frame extending past screen bounds
+- the same screen diverging materially between locales without intent
 
 ## Fix Priority
-
-Prefer fixes in this order:
 
 1. missing translation or wrong localization key
 2. text clipping caused by local layout constraints
 3. inconsistent terminology across locales
 4. fallback-to-source-language issues in code or resource loading
 
-If the issue is local and unambiguous, implement the source fix instead of only reporting it.
-Do not accept mixed-language, clipped, or misleading output just because a user could probably infer the meaning.
+Implement the source fix rather than only reporting it when the issue is local
+and unambiguous. Do not accept mixed-language, clipped, or misleading output on
+the grounds that a user could probably infer the meaning.
 
 ## Output
-
-Summarize findings by locale and screen:
 
 ```text
 Locale: ja
@@ -93,6 +92,7 @@ Screen: onboarding-step-2
 
 ## Guardrails
 
-- Do not assume a string is wrong just because it is shorter or longer
-- Treat truncation as a likely issue, not a guaranteed bug, unless the screenshot confirms it
-- Keep one simulator device and orientation fixed while comparing locales
+- A string is not wrong merely because it is shorter or longer
+- Treat truncation as a likely issue, not a guaranteed bug, until a screenshot
+  confirms it
+- Keep one device and orientation fixed while comparing locales
