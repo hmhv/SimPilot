@@ -65,6 +65,9 @@ shutdown/boot (measured: `--enable`, shutdown, boot, and `voiceover --json` stil
 reports `enabled: true`). `--disable` alone leaves the tree broken. Both, in that
 order, end with a readable tree and VoiceOver off.
 
+If VoiceOver was already on before the session, leave it on instead: the tree
+reads fine while it is enabled, and turning it off is the thing that breaks it.
+
 ### Taps return `ok` but nothing happens, on EVERY device
 
 The host `CoreSimulatorService` has been up too long (measured: 10+ days).

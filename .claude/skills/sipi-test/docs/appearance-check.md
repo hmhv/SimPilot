@@ -49,18 +49,26 @@ sipi voiceover "$UDID" --enable
 These are ad-hoc commands with no automatic restore, unlike the saved-test
 `display-state` action — read the baseline first and write it back when done.
 
-**VoiceOver needs two steps to write back, in order:** `--disable`, then a device
-restart. On iOS 27, turning it off is what leaves the device unable to report an
-accessibility tree for any app foregrounded afterwards, and only the restart
-recovers it; and because the setting survives shutdown/boot, a restart alone
-leaves VoiceOver on. Put `sipi voiceover --enable` last in the pass and end with
-both (`../../sipi-common/docs/troubleshooting.md` → "`describe-ui` returns a
-single empty root").
+**VoiceOver writes back differently depending on the baseline**, so read it before
+the pass (`sipi voiceover "$UDID" --json`) and put `--enable` last in the pass.
 
-```bash
-sipi voiceover "$UDID" --disable
-xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
-```
+- **Baseline off** — the usual case. Two steps, in order: `--disable`, then a
+  device restart. On iOS 27, turning VoiceOver off is what leaves the device
+  unable to report an accessibility tree for any app foregrounded afterwards, and
+  only the restart recovers it; and because the setting survives shutdown/boot, a
+  restart alone would leave VoiceOver on.
+
+  ```bash
+  sipi voiceover "$UDID" --disable
+  xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
+  ```
+
+- **Baseline on** — leave it on and do nothing. The tree reads fine while
+  VoiceOver is enabled; it is the off-after-on transition that breaks it, so
+  there is nothing to undo and no reason to restart.
+
+See `../../sipi-common/docs/troubleshooting.md` → "`describe-ui` returns a single
+empty root".
 
 The colour filter is the exception you cannot generally undo. `--json` reports
 the type and intensity only while the filter is on, and writing them back goes

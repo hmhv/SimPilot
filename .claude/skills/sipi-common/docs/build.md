@@ -90,14 +90,15 @@ SETTINGS=$(xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -showBuildSettings -json 2>/dev/null)
 
 # One entry per build target in the scheme, ordered by target name — NOT app
-# first. Take the entry whose PRODUCT_TYPE is an application.
-IDX=0
-while true; do
-  TYPE=$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.PRODUCT_TYPE" raw - 2>/dev/null) \
-    || { echo "no application target in scheme MyApp" >&2; IDX=""; break; }
-  [ "$TYPE" = "com.apple.product-type.application" ] && break
-  IDX=$((IDX + 1))
+# first. Take the entry whose PRODUCT_TYPE is an application, and stop if there
+# is none: continuing with an unset index resolves APP_PATH to "/".
+IDX=""
+N=0
+while TYPE=$(printf '%s' "$SETTINGS" | plutil -extract "$N.buildSettings.PRODUCT_TYPE" raw - 2>/dev/null); do
+  if [ "$TYPE" = "com.apple.product-type.application" ]; then IDX="$N"; break; fi
+  N=$((N + 1))
 done
+[ -n "$IDX" ] || { echo "no application target in scheme MyApp" >&2; exit 1; }
 
 APP_PATH="$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.BUILT_PRODUCTS_DIR" raw -)/$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.FULL_PRODUCT_NAME" raw -)"
 BUNDLE_ID=$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.PRODUCT_BUNDLE_IDENTIFIER" raw -)
@@ -109,6 +110,9 @@ BUNDLE_ID=$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.PRODUC
   `AAAKit.framework` and `MyApp.app` puts the framework at `0`, so `APP_PATH`
   would be a `.framework` and `simctl install` would fail. Embedded app
   extensions do not add entries
+- The loop takes the FIRST application entry. If a scheme builds more than one
+  app (an app plus a helper app), name the target you want instead:
+  `plutil -extract "$N.target" raw -` says which entry is which
 - Takes under a second, so run it after every build rather than caching the path
 - For `-workspace`, replace `-project` with `-workspace MyApp.xcworkspace`
 - For SPM, omit `-project`/`-workspace` and specify only `-scheme`
