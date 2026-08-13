@@ -85,11 +85,15 @@ xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -quiet clean build
 
 # 2. Get the .app path and bundle id (pass the same -destination as the build)
-# The `||` handler, not a bare assignment: under `set -e` bash aborts on a failing
-# command substitution before any check below could name the cause.
+# stderr is NOT redirected: only stdout is captured, so letting xcodebuild's own
+# error through costs nothing and is often the whole answer — a scheme that also
+# builds a watchOS app, say, cannot resolve an iOS Simulator destination at all,
+# and it says exactly that. The `||` handler rather than a bare assignment because
+# under `set -e` bash aborts on a failing command substitution before any check
+# below could run.
 SETTINGS=$(xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -destination 'generic/platform=iOS Simulator' \
-  -showBuildSettings -json 2>/dev/null) \
+  -showBuildSettings -json) \
   || { echo "xcodebuild -showBuildSettings failed for scheme MyApp" >&2; exit 1; }
 [ -n "$SETTINGS" ] || { echo "xcodebuild -showBuildSettings returned nothing" >&2; exit 1; }
 
