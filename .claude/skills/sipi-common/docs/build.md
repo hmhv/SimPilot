@@ -88,6 +88,9 @@ xcodebuild -project MyApp.xcodeproj -scheme MyApp \
 SETTINGS=$(xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -destination 'generic/platform=iOS Simulator' \
   -showBuildSettings -json 2>/dev/null)
+# Empty means xcodebuild itself failed (its stderr went to /dev/null). Say so,
+# rather than letting the loop below report "no application target".
+[ -n "$SETTINGS" ] || { echo "xcodebuild -showBuildSettings failed for scheme MyApp" >&2; exit 1; }
 
 # One entry per build target in the scheme, ordered by target name — NOT app
 # first. Take the entry whose PRODUCT_TYPE is an application, and stop if there

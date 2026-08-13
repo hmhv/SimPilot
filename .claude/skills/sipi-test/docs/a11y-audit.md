@@ -58,14 +58,15 @@ defects appear nowhere else (Xcode 27+):
 
 ```bash
 sipi appearance "$UDID" --json                 # capture the baseline FIRST
+sipi voiceover "$UDID" --json                  # and the VoiceOver baseline, BEFORE --enable
 sipi appearance "$UDID" --reduce-motion on --reduce-transparency on --show-borders on
 sipi appearance "$UDID" --larger-accessibility-sizes on --text-size accessibility-extra-large
-sipi voiceover "$UDID" --enable
+sipi voiceover "$UDID" --enable                # LAST: how you put this back depends on the baseline
 ```
 
-Restore what you changed when the pass is done. Read the VoiceOver baseline first
-(`sipi voiceover "$UDID" --json`) and run VoiceOver LAST in the pass, because how
-you put it back depends on where it started.
+Restore what you changed when the pass is done. VoiceOver has to be read before
+`--enable`, not at restore time — once the pass has turned it on, reading it back
+just says `enabled: true` and tells you nothing about where the device started.
 
 **Baseline off** — two steps, and neither is optional:
 
