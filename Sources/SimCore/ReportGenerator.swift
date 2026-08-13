@@ -188,8 +188,13 @@ public enum ReportGenerator {
     </div>
     """
 
+    /// Note the `lightboxOpen()` guard on the key handler: without it a closed
+    /// lightbox still owns the arrow keys, so scrolling the page after pressing
+    /// Escape re-opened the last image instead of scrolling.
     private static let lightboxJS = """
     var lbGroup=[],lbIndex=0;
+    function lightboxEl(){return document.getElementById('lightbox');}
+    function lightboxOpen(){return lightboxEl().classList.contains('active');}
     function openLightbox(el){if(!el)return;
     var g=el.closest('[data-lightbox-group]');
     lbGroup=g?Array.prototype.slice.call(g.querySelectorAll('img[data-cap]')):[el];
@@ -198,14 +203,15 @@ public enum ReportGenerator {
     function renderLightbox(){var el=lbGroup[lbIndex];if(!el)return;
     document.getElementById('lightbox-img').src=el.src;
     document.getElementById('lightbox-cap').textContent=el.getAttribute('data-cap')||'';
-    document.getElementById('lightbox').classList.add('active');}
-    function moveLightbox(d){if(lbGroup.length<2)return;
+    lightboxEl().classList.add('active');}
+    function moveLightbox(d){if(!lightboxOpen()||lbGroup.length<2)return;
     lbIndex=(lbIndex+d+lbGroup.length)%lbGroup.length;renderLightbox();}
-    function closeLightbox(){document.getElementById('lightbox').classList.remove('active');}
+    function closeLightbox(){lightboxEl().classList.remove('active');}
     document.addEventListener('keydown',function(e){
-    if(e.key==='Escape')closeLightbox();
-    else if(e.key==='ArrowRight')moveLightbox(1);
-    else if(e.key==='ArrowLeft')moveLightbox(-1);});
+    if(!lightboxOpen())return;
+    if(e.key==='Escape'){closeLightbox();}
+    else if(e.key==='ArrowRight'){e.preventDefault();moveLightbox(1);}
+    else if(e.key==='ArrowLeft'){e.preventDefault();moveLightbox(-1);}});
     """
 
     // MARK: - Test run report (formerly generate_test_report.swift)
@@ -240,26 +246,13 @@ public enum ReportGenerator {
             }
         }
 
-        // Table rows keep run order: the table is the index of the run.
-        var tableRows = ""
-        for entry in tests {
-            let tid = entry["id"] as? String ?? ""
-            let b = badge(entry)
-            let dur = entry["duration"] as? Double ?? 0
-            let result = results[tid] ?? [:]
-            let steps = result["steps"] as? [JSON] ?? []
-            let notes = steps.compactMap { $0["note"] as? String }.joined(separator: "; ")
-            tableRows += "<tr><td><span class=\"badge \(b.cls)\">\(b.label)</span></td>"
-            tableRows += "<td><a href=\"#test-\(esc(slug(tid)))\">\(esc(tid))</a></td>"
-            tableRows += "<td>\(String(format: "%.1f", dur))s</td>"
-            tableRows += "<td class=\"note\">\(esc(notes))</td></tr>\n"
-        }
-
         // Detail sections lead with what went wrong: failures, then anything
         // flagged for review, then the passes. Reading order inside each bucket
-        // stays run order.
+        // stays run order. Built before the table so the table only links to
+        // tests that actually rendered a section to jump to.
         var details = ""
         var failureHighlights = ""
+        var anchored: Set<String> = []
         for entry in tests.enumerated().sorted(by: { detailRank($0.element) < detailRank($1.element) }).map(\.element) {
             let tid = entry["id"] as? String ?? ""
             let b = badge(entry)
@@ -313,6 +306,7 @@ public enum ReportGenerator {
                 }
             }
             if stepsHTML.isEmpty && failedHTML.isEmpty { continue }
+            anchored.insert(tid)
 
             details += "<div class=\"detail\" id=\"test-\(esc(slug(tid)))\">"
             details += "<h3><span class=\"badge \(b.cls)\">\(b.label)</span> \(esc(tid))</h3>"
@@ -323,6 +317,27 @@ public enum ReportGenerator {
                 details += failedHTML
             }
             details += "</div>\n"
+        }
+
+        // The table is the index of the run, so it keeps run order. A test links
+        // to its detail section only when one exists: a test with no screenshots
+        // and nothing failed renders no section, and a link to it would go
+        // nowhere.
+        var tableRows = ""
+        for entry in tests {
+            let tid = entry["id"] as? String ?? ""
+            let b = badge(entry)
+            let dur = entry["duration"] as? Double ?? 0
+            let result = results[tid] ?? [:]
+            let steps = result["steps"] as? [JSON] ?? []
+            let notes = steps.compactMap { $0["note"] as? String }.joined(separator: "; ")
+            let name = anchored.contains(tid)
+                ? "<a href=\"#test-\(esc(slug(tid)))\">\(esc(tid))</a>"
+                : esc(tid)
+            tableRows += "<tr><td><span class=\"badge \(b.cls)\">\(b.label)</span></td>"
+            tableRows += "<td>\(name)</td>"
+            tableRows += "<td>\(String(format: "%.1f", dur))s</td>"
+            tableRows += "<td class=\"note\">\(esc(notes))</td></tr>\n"
         }
 
         // Summary

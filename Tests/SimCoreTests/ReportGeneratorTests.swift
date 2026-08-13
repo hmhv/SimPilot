@@ -338,6 +338,42 @@ final class ReportGeneratorTests: XCTestCase {
                       "the table itself stays in run order")
     }
 
+    /// A detail section is only rendered for a test with screenshots or failures,
+    /// so only those tests may be linked. The table used to link every test,
+    /// including ones whose anchor was never emitted.
+    func testTestsWithoutADetailSectionAreNotLinked() throws {
+        let runDir = tempDir.appendingPathComponent("run-anchors", isDirectory: true)
+        for tid in ["has-shot", "no-shot"] {
+            let dir = runDir.appendingPathComponent(tid, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            var step: [String: Any] = ["passed": true, "action": "tap Go", "duration": 1.0]
+            if tid == "has-shot" {
+                try writePNG(to: dir.appendingPathComponent("step-001.png"))
+                step["screenshot"] = "step-001.png"
+            }
+            let result: [String: Any] = ["id": tid, "passed": true, "duration": 1.0,
+                                         "steps": [step]]
+            try Data(JSONSerialization.data(withJSONObject: result))
+                .write(to: dir.appendingPathComponent("result.json"))
+        }
+        try writeRunJSON(at: runDir,
+                         tests: [["id": "has-shot", "passed": true, "duration": 1.0],
+                                 ["id": "no-shot", "passed": true, "duration": 1.0]],
+                         summary: ["total": 2, "passed": 2, "failed": 0])
+
+        let html = try ReportGenerator.testReportHTML(runDir: runDir.path)
+
+        XCTAssertTrue(html.contains("href=\"#test-has-shot\""),
+                      "a test with a detail section should link to it")
+        XCTAssertTrue(html.contains("id=\"test-has-shot\""), "and that section should exist")
+        XCTAssertFalse(html.contains("href=\"#test-no-shot\""),
+                       "a test with no detail section must not link to a missing anchor")
+        XCTAssertFalse(html.contains("id=\"test-no-shot\""),
+                       "no section is rendered for it")
+        XCTAssertTrue(html.contains(">no-shot</td>"),
+                      "it still belongs in the table, just as plain text")
+    }
+
     /// Both reports are read next to the screenshots they embed, including dark
     /// ones, so the page follows the reader's colour scheme.
     func testBothReportsFollowTheReadersColorScheme() throws {
@@ -391,6 +427,19 @@ final class ReportGeneratorTests: XCTestCase {
         XCTAssertTrue(html.contains("moveLightbox"), "expected arrow-key navigation")
         XCTAssertTrue(html.contains("ArrowRight") && html.contains("ArrowLeft"),
                       "both arrow keys should be bound")
+
+        // The group has to be scoped to the marked ancestor. Widening the
+        // selector to the table would silently make the arrows walk every
+        // capture in the report.
+        XCTAssertTrue(html.contains("closest('[data-lightbox-group]')"),
+                      "the group must be resolved from the marked ancestor")
+
+        // A closed lightbox must not own the arrow keys: without these guards,
+        // scrolling the page after Escape re-opened the last image.
+        XCTAssertTrue(html.contains("if(!lightboxOpen())return;"),
+                      "the key handler must be inert while the lightbox is closed")
+        XCTAssertTrue(html.contains("function moveLightbox(d){if(!lightboxOpen()"),
+                      "moveLightbox must refuse to render into a closed lightbox")
         XCTAssertTrue(html.contains("data-cap=\"home · iPhone Light\""),
                       "each image should caption itself for the lightbox")
     }
@@ -398,7 +447,7 @@ final class ReportGeneratorTests: XCTestCase {
     // MARK: - Screenshot downscale
 
     func testOversizedCaptureIsDownscaledBeforeEmbedding() throws {
-        let big = try noisyPNGData(width: 400, height: 400)
+        let big = try syntheticCapturePNG(width: 400, height: 400)
         let shrunk = ReportGenerator.downscaledPNG(big, maxPixel: 100)
         let unwrapped = try XCTUnwrap(shrunk, "an oversized capture should be re-encoded smaller")
         XCTAssertLessThan(unwrapped.count, big.count,
@@ -413,11 +462,54 @@ final class ReportGeneratorTests: XCTestCase {
     }
 
     func testCaptureWithinTheCeilingIsEmbeddedUnchanged() throws {
-        let small = try noisyPNGData(width: 80, height: 80)
+        let small = try syntheticCapturePNG(width: 80, height: 80)
         XCTAssertNil(ReportGenerator.downscaledPNG(small, maxPixel: 100),
                      "an image already within the ceiling should be embedded as-is")
         XCTAssertNil(ReportGenerator.downscaledPNG(Data("not a png".utf8), maxPixel: 100),
                      "unreadable bytes should fall back to embedding the original")
+    }
+
+    /// `downscaledPNG` being correct is not the same as the reports using it.
+    /// This asserts against what actually lands in the HTML.
+    func testReportsEmbedTheDownscaleAndNotTheOriginalCapture() throws {
+        let native = try syntheticCapturePNG(width: 700, height: 1500)
+
+        let verifyDir = tempDir.appendingPathComponent("verify-embed", isDirectory: true)
+        let vdir = verifyDir.appendingPathComponent("iphone-light", isDirectory: true)
+        try FileManager.default.createDirectory(at: vdir, withIntermediateDirectories: true)
+        try native.write(to: vdir.appendingPathComponent("001_home.png"))
+
+        let runDir = tempDir.appendingPathComponent("run-embed", isDirectory: true)
+        let testDir = runDir.appendingPathComponent("flow", isDirectory: true)
+        try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true)
+        try native.write(to: testDir.appendingPathComponent("step-001.png"))
+        try writeRunJSON(at: runDir, tests: [["id": "flow", "passed": true, "duration": 1.0]],
+                         summary: ["total": 1, "passed": 1, "failed": 0])
+        let result: [String: Any] = [
+            "id": "flow", "passed": true, "duration": 1.0,
+            "steps": [["passed": true, "action": "tap Go", "screenshot": "step-001.png",
+                       "duration": 1.0]]
+        ]
+        try Data(JSONSerialization.data(withJSONObject: result))
+            .write(to: testDir.appendingPathComponent("result.json"))
+
+        let reports = [
+            ("verify", try ReportGenerator.verifyReportHTML(verifyDir: verifyDir.path)),
+            ("test run", try ReportGenerator.testReportHTML(runDir: runDir.path))
+        ]
+        for (name, html) in reports {
+            let embedded = try XCTUnwrap(firstEmbeddedPNG(in: html),
+                                         "\(name) report should embed a PNG data URI")
+            XCTAssertLessThan(embedded.count, native.count,
+                              "\(name) report embedded the original capture, not the downscale")
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(embedded as CFData, nil))
+            let props = try XCTUnwrap(
+                CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+            let width = try XCTUnwrap(props[kCGImagePropertyPixelWidth] as? Int)
+            let height = try XCTUnwrap(props[kCGImagePropertyPixelHeight] as? Int)
+            XCTAssertLessThanOrEqual(max(width, height), ReportGenerator.thumbnailMaxPixel,
+                                     "\(name) report embedded an image above the ceiling")
+        }
     }
 
     func testThumbnailCeilingCoversTheGridAtRetinaDensity() {
@@ -444,20 +536,60 @@ final class ReportGeneratorTests: XCTestCase {
             .write(to: runDir.appendingPathComponent("run.json"))
     }
 
-    /// A deterministic noisy PNG. Noise matters: a flat colour compresses to
-    /// almost nothing, and then a downscale cannot come out smaller.
-    private func noisyPNGData(width: Int, height: Int) throws -> Data {
+    /// The bytes behind the first `data:image/png;base64,` URI in a report.
+    private func firstEmbeddedPNG(in html: String) -> Data? {
+        guard let start = html.range(of: "data:image/png;base64,") else { return nil }
+        let rest = html[start.upperBound...]
+        let encoded = rest.prefix { ch in
+            ch.isLetter || ch.isNumber || ch == "+" || ch == "/" || ch == "="
+        }
+        return Data(base64Encoded: String(encoded))
+    }
+
+    /// A deterministic stand-in for a UI capture: a vertical gradient, a status
+    /// bar, and a few cards with text-like rules.
+    ///
+    /// The shape of the fixture decides the outcome here. An earlier version drew
+    /// `(x * 7 + y * 13) % 256`, which looks like noise but is linear, so PNG's
+    /// Sub/Paeth filters predict it almost exactly and 700x1500 compressed to
+    /// 289KB. Downscaling breaks that structure, the re-encode came out LARGER,
+    /// and `downscaledPNG` correctly refused it — the test failed while the
+    /// implementation was right. Real captures have large flat regions that
+    /// compress at any size, which is what this draws.
+    private func syntheticCapturePNG(width: Int, height: Int) throws -> Data {
         let bytesPerRow = width * 4
-        var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
-        for y in 0..<height {
-            for x in 0..<width {
-                let i = y * bytesPerRow + x * 4
-                pixels[i] = UInt8((x * 7 + y * 13) % 256)
-                pixels[i + 1] = UInt8((x * 31 + y * 17) % 256)
-                pixels[i + 2] = UInt8((x ^ y) % 256)
-                pixels[i + 3] = 255
+        var pixels = [UInt8](repeating: 255, count: bytesPerRow * height)
+
+        func fill(_ rect: (x: Int, y: Int, w: Int, h: Int), _ rgb: (UInt8, UInt8, UInt8)) {
+            for y in max(0, rect.y)..<min(rect.y + rect.h, height) {
+                for x in max(0, rect.x)..<min(rect.x + rect.w, width) {
+                    let i = y * bytesPerRow + x * 4
+                    pixels[i] = rgb.0; pixels[i + 1] = rgb.1; pixels[i + 2] = rgb.2
+                    pixels[i + 3] = 255
+                }
             }
         }
+
+        // Background gradient.
+        for y in 0..<height {
+            let shade = UInt8(240 - (y * 40 / max(1, height - 1)))
+            fill((0, y, width, 1), (shade, shade, UInt8(min(255, Int(shade) + 8))))
+        }
+        // Status bar.
+        fill((0, 0, width, max(1, height / 24)), (28, 28, 34))
+        // Cards with text-like rules.
+        let cardHeight = max(4, height / 7)
+        var top = height / 12
+        while top + cardHeight < height {
+            fill((width / 12, top, width * 5 / 6, cardHeight), (252, 252, 255))
+            for line in 0..<3 {
+                let ly = top + cardHeight / 5 + line * max(1, cardHeight / 4)
+                fill((width / 8, ly, width * 2 / 3 - line * width / 10, max(1, height / 150)),
+                     (70, 70, 82))
+            }
+            top += cardHeight + height / 24
+        }
+
         let provider = try XCTUnwrap(CGDataProvider(data: Data(pixels) as CFData))
         let image = try XCTUnwrap(CGImage(
             width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
