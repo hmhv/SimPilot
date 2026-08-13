@@ -38,19 +38,21 @@ The remaining accessibility facets have no simctl equivalent and go through
 
 ```bash
 sipi appearance "$UDID" --json                     # capture the baseline FIRST
+sipi voiceover "$UDID" --json                      # and the VoiceOver baseline, BEFORE --enable
 sipi appearance "$UDID" --reduce-motion on
 sipi appearance "$UDID" --reduce-transparency on
 sipi appearance "$UDID" --larger-accessibility-sizes on --text-size accessibility-extra-large
 sipi appearance "$UDID" --color-filter on --color-filter-type deuteranopia --color-filter-intensity 0.8
 sipi appearance "$UDID" --liquid-glass-opacity 1.0  # opaque; 0.0 is fully translucent
-sipi voiceover "$UDID" --enable
+sipi voiceover "$UDID" --enable                    # LAST: putting it back depends on the baseline
 ```
 
 These are ad-hoc commands with no automatic restore, unlike the saved-test
 `display-state` action — read the baseline first and write it back when done.
 
-**VoiceOver writes back differently depending on the baseline**, so read it before
-the pass (`sipi voiceover "$UDID" --json`) and put `--enable` last in the pass.
+**VoiceOver writes back differently depending on the baseline**, which is why the
+block above reads it before `--enable`: once the pass has turned VoiceOver on,
+reading it back only says `enabled: true`.
 
 - **Baseline off** — the usual case. Two steps, in order: `--disable`, then a
   device restart. On iOS 27, turning VoiceOver off is what leaves the device
@@ -66,6 +68,9 @@ the pass (`sipi voiceover "$UDID" --json`) and put `--enable` last in the pass.
 - **Baseline on** — leave it on and do nothing. The tree reads fine while
   VoiceOver is enabled; it is the off-after-on transition that breaks it, so
   there is nothing to undo and no reason to restart.
+- **Baseline unreadable** — `--json` can answer `{"enabled": null}` (plain form:
+  `unknown`) when the runtime does not report the state. Treat it as off and take
+  the two-step path; leaving VoiceOver on affects everything that follows.
 
 See `../../sipi-common/docs/troubleshooting.md` → "`describe-ui` returns a single
 empty root".

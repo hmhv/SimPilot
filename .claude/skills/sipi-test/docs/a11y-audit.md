@@ -84,6 +84,11 @@ on for everything that follows.
 **Baseline on** — leave it on. The tree reads fine with VoiceOver enabled, so
 there is nothing to undo and no reason to restart.
 
+**Baseline unreadable** — `voiceover --json` can answer `{"enabled": null}` (and
+the plain form `unknown`) when the runtime does not report the state. Treat that
+as off and take the two-step path: leaving VoiceOver on affects every test that
+follows, while `--disable` plus a restart ends on a readable tree.
+
 See `../../sipi-common/docs/troubleshooting.md` → "`describe-ui` returns a single
 empty root".
 

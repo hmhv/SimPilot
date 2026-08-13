@@ -58,6 +58,8 @@ read BEFORE enabling it (`sipi voiceover "$UDID" --json`):
 
 - **Baseline was on** — leave VoiceOver on. Nothing to undo, no restart: the tree
   reads fine while it is enabled, and turning it off is the thing that breaks it.
+- **Baseline unreadable** (`{"enabled": null}`, or `unknown` without `--json`) —
+  treat it as off and use the two-step path below.
 - **Baseline was off** — both of these, in order:
 
   ```bash

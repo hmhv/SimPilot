@@ -85,26 +85,32 @@ xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -quiet clean build
 
 # 2. Get the .app path and bundle id (pass the same -destination as the build)
+# The `||` handler, not a bare assignment: under `set -e` bash aborts on a failing
+# command substitution before any check below could name the cause.
 SETTINGS=$(xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -destination 'generic/platform=iOS Simulator' \
-  -showBuildSettings -json 2>/dev/null)
-# Empty means xcodebuild itself failed (its stderr went to /dev/null). Say so,
-# rather than letting the loop below report "no application target".
-[ -n "$SETTINGS" ] || { echo "xcodebuild -showBuildSettings failed for scheme MyApp" >&2; exit 1; }
+  -showBuildSettings -json 2>/dev/null) \
+  || { echo "xcodebuild -showBuildSettings failed for scheme MyApp" >&2; exit 1; }
+[ -n "$SETTINGS" ] || { echo "xcodebuild -showBuildSettings returned nothing" >&2; exit 1; }
 
 # One entry per build target in the scheme, ordered by target name — NOT app
-# first. Take the entry whose PRODUCT_TYPE is an application, and stop if there
-# is none: continuing with an unset index resolves APP_PATH to "/".
+# first. Loop on the ENTRY existing, not on PRODUCT_TYPE reading: a target
+# without that key (an aggregate, say) would otherwise end the scan and hide an
+# application sitting behind it. Stop if there is no application at all —
+# continuing with an unset index resolves APP_PATH to "/".
 IDX=""
 N=0
-while TYPE=$(printf '%s' "$SETTINGS" | plutil -extract "$N.buildSettings.PRODUCT_TYPE" raw - 2>/dev/null); do
+while printf '%s' "$SETTINGS" | plutil -extract "$N" raw - >/dev/null 2>&1; do
+  TYPE=$(printf '%s' "$SETTINGS" | plutil -extract "$N.buildSettings.PRODUCT_TYPE" raw - 2>/dev/null) || TYPE=""
   if [ "$TYPE" = "com.apple.product-type.application" ]; then IDX="$N"; break; fi
   N=$((N + 1))
 done
-[ -n "$IDX" ] || { echo "no application target in scheme MyApp" >&2; exit 1; }
+[ -n "$IDX" ] || { echo "no application target in scheme MyApp, or its build settings could not be read" >&2; exit 1; }
 
 APP_PATH="$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.BUILT_PRODUCTS_DIR" raw -)/$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.FULL_PRODUCT_NAME" raw -)"
 BUNDLE_ID=$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.PRODUCT_BUNDLE_IDENTIFIER" raw -)
+# A missing BUILT_PRODUCTS_DIR would silently leave "/MyApp.app" here.
+[ -d "$APP_PATH" ] || { echo "resolved .app does not exist: $APP_PATH" >&2; exit 1; }
 ```
 
 - Passing the same `-destination` matters: omit it and the returned path is `Debug-iphoneos`
