@@ -230,10 +230,13 @@ final class TextInputEffectTests: XCTestCase {
         ) { error in
             let message = (error as? TextInputError)?.description ?? "\(error)"
             XCTAssertTrue(message.contains("could not verify"), message)
-            // Points at the known recovery rather than blaming the app...
-            XCTAssertTrue(message.contains("voiceover"), message)
-            // ...and warns that the text WAS sent, so a blind retry double-types.
+            // Points at reading the field rather than blaming the app...
+            XCTAssertTrue(message.contains("describe-ui"), message)
+            // ...warns that the text WAS sent, so a blind retry double-types...
             XCTAssertTrue(message.contains("twice"), message)
+            // ...and does NOT send the reader to the VoiceOver toggle it used to
+            // recommend: on iOS 27 that is what empties the tree.
+            XCTAssertFalse(message.contains("--enable"), message)
         }
     }
 

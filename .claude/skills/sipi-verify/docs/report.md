@@ -62,9 +62,16 @@ instead of rendering a column of N/A.
 Clicking a screenshot opens it with a caption naming the check, device, and
 appearance. The arrow keys walk the rest of that row. Thumbnails are ~200px — the
 grid is for scanning, the lightbox is for looking — and screenshots are
-downscaled to 600px on the long side before embedding, which covers that at
-Retina density. The report follows the reader's light/dark colour scheme, with a
-toggle in the header that overrides it and is remembered across reports.
+downscaled to 600px on the long side before embedding. That bounds the long side,
+so a portrait phone capture lands at 276x600, a little short of 2x for a 200px
+cell, in exchange for a 28-capture report of 2.4MB rather than 17MB. A capture
+whose re-encode would come out no smaller is embedded unchanged, so 600px is a
+target rather than a guarantee.
+
+The report follows the reader's light/dark colour scheme, with a toggle in the
+header that overrides it. The choice goes to `localStorage`, whose scope for a
+`file:` document is browser-dependent, so whether it carries to the next report is
+too; the toggle itself always works on the page in front of you.
 
 - Empty findings render as "No findings recorded."
 - Non-empty findings render each issue with check, variant, and issue text.

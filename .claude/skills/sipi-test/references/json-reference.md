@@ -133,7 +133,7 @@ Full JSON shapes and constraints: `actions.md`.
 | `crown` | `delta` | Apple Watch only |
 | `wait` | — | `duration`, default 1s |
 | `open-url`, `privacy`, `push`, `location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`, `launch`, `terminate`, `network-condition` | varies | Simulator controls |
-| `biometrics`, `display-state`, `voiceover` | varies | Device state, Xcode 27+ |
+| `biometrics`, `display-state` | varies | Device state, Xcode 27+ |
 
 ## Selector
 
@@ -334,7 +334,9 @@ run-level gate.
 
 1. `passed && skipped` → **SKIP**
 2. `!passed` → **FAIL**
-3. `review` → **REVIEW**
+3. `review` → **REVIEW** — reserved. The harness reads `review` off a step result
+   but never sets it, so nothing `sipi run-test` / `run-suite` produces reaches
+   this row today
 4. else → **PASS**
 
 **Run-level `summary.json` `status`**, in order (a failed step is `fail` even

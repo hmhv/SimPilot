@@ -211,9 +211,10 @@ enum TextInput {
             throw TextInputError(description:
                 """
                 text entry not attempted: the accessibility tree could not be read, so there is no way \
-                to tell whether the text lands. Nothing was typed, so this is safe to retry. The bridge \
-                usually stalls rather than dies — `sipi voiceover <udid> --enable` then `--disable` \
-                re-primes it. Pass --no-verify to type without the check.
+                to tell whether the text lands. Nothing was typed, so this is safe to retry — right after \
+                a launch the tree can take a second or two to appear. Do NOT toggle VoiceOver to "re-prime" \
+                it: on iOS 27, off-after-on is what leaves the tree empty until the device restarts. \
+                Pass --no-verify to type without the check.
                 """)
         }
     }
@@ -299,9 +300,9 @@ enum TextInput {
                 description: """
                     could not verify text entry (\(method.rawValue)): the accessibility tree could not be \
                     read back, so whether the text arrived is unknown — the text WAS sent, so re-running \
-                    may enter it twice. This usually means the accessibility bridge stalled — \
-                    `sipi voiceover <udid> --enable` then `--disable` re-primes it. Check the field before \
-                    retrying, or pass --no-verify to skip the check.
+                    may enter it twice. Wait and read the field with `sipi describe-ui` before deciding; do \
+                    NOT toggle VoiceOver to "re-prime" the tree, which is what empties it on iOS 27. \
+                    Pass --no-verify to skip the check.
                     """,
                 // The text is already in flight. A harness retry would re-execute
                 // the whole action and could double-insert, so this failure ends

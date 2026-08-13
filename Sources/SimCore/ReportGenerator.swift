@@ -42,10 +42,21 @@ public enum ReportGenerator {
     private typealias JSON = [String: Any]
 
     /// Long-side ceiling for an embedded screenshot. Both reports show captures
-    /// as ~200px thumbnails, so 600px covers that at Retina density with room to
-    /// spare, and the lightbox shows these bytes at their own size rather than
-    /// stretching them. Measured on a 28-capture verify directory: the report is
-    /// 17MB at native size, 11MB at 1800px, 6.8MB at 1200px, ~2MB here.
+    /// as ~200px thumbnails, and the lightbox shows these bytes at their own size
+    /// rather than stretching them.
+    ///
+    /// It bounds the LONG side, which is not the same as covering a 200px
+    /// thumbnail at 2x: measured on real captures, a portrait phone lands at
+    /// 276x600 — short of the 400px a 200px cell wants — while an iPad lands at
+    /// 450x600 and clears it. That is the deliberate trade. On a 28-capture verify
+    /// directory the report is 17MB at native size, 11MB at 1800px, 6.8MB at
+    /// 1200px, and 2.4MB here; the grid is for scanning and the lightbox is where
+    /// a capture gets looked at.
+    ///
+    /// It is a target, not a guarantee: `downscaledPNG` refuses a re-encode that
+    /// comes out no smaller than the original, and that capture is embedded at its
+    /// own size. Real screenshots compress well enough that this does not happen;
+    /// a synthetic image whose structure PNG predicts almost exactly does hit it.
     static let thumbnailMaxPixel = 600
 
     // MARK: - Shared helpers
