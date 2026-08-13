@@ -88,12 +88,27 @@ xcodebuild -project MyApp.xcodeproj -scheme MyApp \
 SETTINGS=$(xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -destination 'generic/platform=iOS Simulator' \
   -showBuildSettings -json 2>/dev/null)
-APP_PATH="$(printf '%s' "$SETTINGS" | plutil -extract 0.buildSettings.BUILT_PRODUCTS_DIR raw -)/$(printf '%s' "$SETTINGS" | plutil -extract 0.buildSettings.FULL_PRODUCT_NAME raw -)"
-BUNDLE_ID=$(printf '%s' "$SETTINGS" | plutil -extract 0.buildSettings.PRODUCT_BUNDLE_IDENTIFIER raw -)
+
+# One entry per build target in the scheme, ordered by target name — NOT app
+# first. Take the entry whose PRODUCT_TYPE is an application.
+IDX=0
+while true; do
+  TYPE=$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.PRODUCT_TYPE" raw - 2>/dev/null) \
+    || { echo "no application target in scheme MyApp" >&2; IDX=""; break; }
+  [ "$TYPE" = "com.apple.product-type.application" ] && break
+  IDX=$((IDX + 1))
+done
+
+APP_PATH="$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.BUILT_PRODUCTS_DIR" raw -)/$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.FULL_PRODUCT_NAME" raw -)"
+BUNDLE_ID=$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.PRODUCT_BUNDLE_IDENTIFIER" raw -)
 ```
 
 - Passing the same `-destination` matters: omit it and the returned path is `Debug-iphoneos`
-- Entry `0` is the scheme's main target. Embedded app extensions do not add entries
+- Do not hardcode entry `0`. A scheme that also builds a framework returns an
+  entry for it, and the entries come back in target-name order: a project with
+  `AAAKit.framework` and `MyApp.app` puts the framework at `0`, so `APP_PATH`
+  would be a `.framework` and `simctl install` would fail. Embedded app
+  extensions do not add entries
 - Takes under a second, so run it after every build rather than caching the path
 - For `-workspace`, replace `-project` with `-workspace MyApp.xcworkspace`
 - For SPM, omit `-project`/`-workspace` and specify only `-scheme`
