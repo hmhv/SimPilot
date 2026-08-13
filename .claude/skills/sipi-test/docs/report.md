@@ -20,11 +20,13 @@ There is no manual/by-hand path — do not assemble the HTML or summary yourself
 
 - **Run header** — suite name (or "Ad-hoc Run"), start time, device name + runtime + commit, total duration, and a summary bar of pass/fail/review counts.
 - **Failure highlights** — failed steps first, before the full results table, with failure type, missing verify text, and attempted methods.
-- **Results table** — one row per test: status badge, test ID, duration, and notes (coordinate fallback, retries, etc.).
-- **Step gallery** — for tests with screenshots or failures, a horizontal row of step thumbnails, each marked with its step number and pass/fail/review state.
+- **Results table** — one row per test in run order: status badge, test ID linking to that test's detail section, duration, and notes (coordinate fallback, retries, etc.).
+- **Step gallery** — for tests with screenshots or failures, a horizontal row of step thumbnails. Each card carries its step number, duration, the action it captured, and a verify tally (`✓2/2`) when the step asserted anything. Detail sections are ordered failures first, then review, then passes — the table keeps run order, the details lead with what went wrong.
 - **Step detail** — for failed or review steps: the action, each verify check (found / not-found), `failure-type`, and `attempted-methods`.
 - **describe-ui snapshot** — a collapsible block with the first 50 lines of the `describe-ui-snapshot` field (the after-step describe-ui JSON) captured at the point of failure.
-- **Lightbox** — clicking any screenshot opens it full-size; Esc or click closes it.
+- **Lightbox** — clicking a screenshot opens it large with a caption naming the test, step, and action. The arrow keys walk the rest of that test's steps; Esc or a click closes it.
+
+Screenshots are downscaled to 600px on the long side before embedding, which covers the ~200px thumbnails at Retina density. The report follows the reader's light/dark colour scheme, with a toggle in the header that overrides it and is remembered across reports.
 
 ## summary.json
 

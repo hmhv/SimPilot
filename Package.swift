@@ -60,7 +60,8 @@ let package = Package(
             dependencies: ["simskillsgen"],
             path: "Plugins/EmbedSkillsPlugin"
         ),
-        // Pure Foundation library. No SimBridge import, no Process(), no private
+        // Foundation library (plus ImageIO, for downscaling the screenshots the
+        // HTML reports embed). No SimBridge import, no Process(), no private
         // frameworks. Holds the framework-agnostic SimDriver seam and value
         // types so SimCore stays unit-testable with a mock driver and a future
         // FB backend can be added behind the same protocol. Depends on SimSkills

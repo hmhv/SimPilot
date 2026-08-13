@@ -53,8 +53,18 @@ directory and the status from `findings.json`, then writes one self-contained
 HTML file with images embedded as Base64 data URIs, so the report is portable on
 its own.
 
-Layout: findings first, then the screenshot grid — variants as columns, checks as
-rows, one caption per row.
+Layout: findings first, then the screenshot grid — one row per check, with the
+appearance columns grouped under their device (`iPhone: Light | Dark`,
+`iPad: Light | Dark`), so light and dark sit adjacent for the comparison a reader
+actually makes. A device with no captures anywhere in the session drops out
+instead of rendering a column of N/A.
+
+Clicking a screenshot opens it with a caption naming the check, device, and
+appearance. The arrow keys walk the rest of that row. Thumbnails are ~200px — the
+grid is for scanning, the lightbox is for looking — and screenshots are
+downscaled to 600px on the long side before embedding, which covers that at
+Retina density. The report follows the reader's light/dark colour scheme, with a
+toggle in the header that overrides it and is remembered across reports.
 
 - Empty findings render as "No findings recorded."
 - Non-empty findings render each issue with check, variant, and issue text.
