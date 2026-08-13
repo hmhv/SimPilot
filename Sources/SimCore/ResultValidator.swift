@@ -86,7 +86,19 @@ public enum ResultValidator {
         "pinch", "multitouch",
         "open-url", "privacy", "push", "location", "appearance", "content-size", "increase-contrast",
         "status-bar", "launch", "terminate", "network-condition",
-        "display-state", "voiceover", "biometrics"
+        "display-state", "biometrics"
+    ]
+
+    /// Actions that used to validate and no longer do. Kept separate from the
+    /// allowed set so a spec written against an older sipi is told what happened
+    /// and what to do instead, rather than being handed the list of every type
+    /// that is still legal.
+    private static let retiredActions: [String: String] = [
+        "voiceover":
+            "On iOS 27, turning VoiceOver off after it has been on leaves every app's "
+            + "accessibility tree empty until the device restarts, and turning it on changes "
+            + "nothing describe-ui can see (measured: byte-identical tree). Drop the step — run "
+            + "the accessibility pass with `sipi a11y-audit` plus the appearance facets"
     ]
 
     private static let suiteRequired: Set<String> = ["name", "tests"]
@@ -548,6 +560,10 @@ public enum ResultValidator {
             if a["type"] != nil { diag.errors.append("\(path): \(ordinal).type must be a string") }
             return
         }
+        if let reason = retiredActions[type] {
+            diag.errors.append("\(path): \(ordinal) (\(type)) is retired. \(reason)")
+            return
+        }
         if !testActionTypes.contains(type) {
             diag.errors.append("\(path): \(ordinal).type must be one of \(testActionTypes.sorted())")
             return
@@ -679,10 +695,6 @@ public enum ResultValidator {
                 diag.errors.append(
                     "\(path): \(ordinal).settings sets \(filterDetailKeys.sorted()) without color-filter; "
                     + "set color-filter too, or the original filter state cannot be restored")
-            }
-        case "voiceover":
-            if !(a["enabled"] is Bool) {
-                diag.errors.append("\(path): \(ordinal) (voiceover) requires an enabled boolean")
             }
         case "biometrics":
             if let operation = a["operation"] as? String {

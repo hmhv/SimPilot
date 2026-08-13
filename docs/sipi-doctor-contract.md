@@ -99,7 +99,7 @@ terminated by a newline:
   "notes" : [
     "binary: /Users/you/.local/bin/sipi (modified 2026-07-18T14:38:00+09:00)",
     "warning: this binary predates the SimPilot checkout at /Users/you/SimPilot (HEAD 3c32911, committed 2026-07-18T20:45:08+09:00). Rebuild and reinstall before trusting a source change: swift build -c release && cp .build/release/sipi \"$(command -v sipi)\"",
-    "devicectl can target simulators: `sipi biometrics`, `sipi appearance`, `sipi voiceover`, face-up/face-down orientation, and the biometrics / display-state / voiceover test actions are available.",
+    "devicectl can target simulators: `sipi biometrics`, `sipi appearance`, `sipi voiceover` (read), face-up/face-down orientation, and the biometrics / display-state test actions are available.",
     "sipi drives simulators headlessly (no window needed); open Device Hub with `sipi open-ui` to look at a device."
   ],
   "allCorePresent" : true
@@ -137,7 +137,7 @@ sipi doctor
   [ok] AccessibilityPlatformTranslation: AXPTranslator ready (sharedInstance ✓, tokenDelegate proto ✓, macElement ✓, SimDevice transport ✓)
   booted devices: iPhone 16 Pro (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
   binary: /Users/you/.local/bin/sipi (modified 2026-07-18T14:38:00+09:00)
-  devicectl can target simulators: `sipi biometrics`, `sipi appearance`, `sipi voiceover`, face-up/face-down orientation, and the biometrics / display-state / voiceover test actions are available.
+  devicectl can target simulators: `sipi biometrics`, `sipi appearance`, `sipi voiceover` (read), face-up/face-down orientation, and the biometrics / display-state test actions are available.
   sipi drives simulators headlessly (no window needed); open Device Hub with `sipi open-ui` to look at a device.
   result: all core capabilities present
 ```

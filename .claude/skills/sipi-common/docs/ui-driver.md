@@ -109,12 +109,15 @@ themselves are under test. The rule and its exceptions live in
 | Mechanical accessibility pass | `"$SIPI" a11y-audit "$UDID"` | — |
 | Face ID / Touch ID | `"$SIPI" biometrics "$UDID" <status\|enroll\|unenroll\|match\|no-match>` | Yes |
 | Accessibility appearance facets | `"$SIPI" appearance "$UDID" [--reduce-motion on …]` | Yes |
-| VoiceOver | `"$SIPI" voiceover "$UDID" [--enable\|--disable]` | Yes |
+| VoiceOver (read only) | `"$SIPI" voiceover "$UDID"` | — |
 
-`appearance` and `voiceover` read the current state when given no flag and write
-when given one. `biometrics` is different: the operation is a **required
-positional**, and reading is the explicit `status` operation. All three say so
-explicitly when the toolchain is too old (see
+`appearance` reads the current state when given no flag and writes when given
+one. `voiceover` only reads: setting it is retired, because on iOS 27 turning it
+off after it has been on empties every app's accessibility tree until the device
+restarts, and turning it on changes nothing `describe-ui` can see. `biometrics`
+is different again: the operation is a **required positional**, and reading is the
+explicit `status` operation. They all say so explicitly when the toolchain is too
+old (see
 `troubleshooting.md`). Matching a biometric does nothing while the device is
 unenrolled.
 

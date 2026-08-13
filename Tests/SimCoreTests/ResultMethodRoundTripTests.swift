@@ -23,7 +23,7 @@ final class ResultMethodRoundTripTests: XCTestCase {
     ///   multitouch                       pinch and raw multitouch
     ///   simctl                           the simctl-backed state actions
     ///   network-condition                the external provider
-    ///   devicectl                        biometrics / display-state / voiceover
+    ///   devicectl                        biometrics / display-state
     private static let harnessMethods = [
         "tap-label", "tap-id", "tap-value", "touch-coordinate", "input",
         "multitouch", "simctl", "network-condition", "devicectl"

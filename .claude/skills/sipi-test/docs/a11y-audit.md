@@ -58,38 +58,24 @@ defects appear nowhere else (Xcode 27+):
 
 ```bash
 sipi appearance "$UDID" --json                 # capture the baseline FIRST
-sipi voiceover "$UDID" --json                  # and the VoiceOver baseline, BEFORE --enable
 sipi appearance "$UDID" --reduce-motion on --reduce-transparency on --show-borders on
 sipi appearance "$UDID" --larger-accessibility-sizes on --text-size accessibility-extra-large
-sipi voiceover "$UDID" --enable                # LAST: how you put this back depends on the baseline
 ```
 
-Restore what you changed when the pass is done. VoiceOver has to be read before
-`--enable`, not at restore time — once the pass has turned it on, reading it back
-just says `enabled: true` and tells you nothing about where the device started.
+Restore what you changed when the pass is done.
 
-**Baseline off** — two steps, and neither is optional:
+**Do not turn VoiceOver on for this.** Setting it is retired, and so is the
+`voiceover` test action: on iOS 27, turning VoiceOver off after it has been on
+empties the accessibility tree for every app foregrounded afterwards until the
+device restarts, and turning it on buys nothing here — `describe-ui` returns a
+byte-identical tree either way (measured on iOS 27.0: same node count, same
+labels). The spoken string and the VoiceOver cursor need XCUITest's
+`XCUIVoiceOverService` from inside a UI test target, which this pass cannot reach
+at all.
 
-```bash
-sipi voiceover "$UDID" --disable
-xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
-```
-
-On iOS 27, turning VoiceOver off is what leaves the device unable to report an
-accessibility tree for any app foregrounded afterwards, and only the restart
-clears that — so skipping the restart hands the next test a broken device. And the
-VoiceOver setting survives shutdown/boot, so skipping `--disable` leaves VoiceOver
-on for everything that follows.
-
-**Baseline on** — leave it on. The tree reads fine with VoiceOver enabled, so
-there is nothing to undo and no reason to restart.
-
-**Baseline unreadable** — `voiceover --json` can answer `{"enabled": null}` (and
-the plain form `unknown`) when the runtime does not report the state. Treat that
-as off and take the two-step path: leaving VoiceOver on affects every test that
-follows, while `--disable` plus a restart ends on a readable tree.
-
-See `../../sipi-common/docs/troubleshooting.md` → "`describe-ui` returns a single
+`sipi voiceover "$UDID"` still reads the state, which is worth doing when a
+device's tree looks wrong: someone may have left VoiceOver on by hand. See
+`../../sipi-common/docs/troubleshooting.md` → "`describe-ui` returns a single
 empty root".
 
 ## Fix Priority

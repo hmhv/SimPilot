@@ -8,7 +8,7 @@ Solo se traduce el README de nivel superior. Los skill docs y el código siguen 
 
 ## Qué hace
 
-- **`/sipi-test`**: automatización de pruebas de UI y de estados adversos en iOS Simulator. El skill convierte la intención en lenguaje natural en especificaciones JSON v2 explícitas y luego `sipi run-test` / `sipi run-suite` las ejecuta con un harness determinista. Las pruebas guardadas pueden controlar permisos, deep links, notificaciones push, ubicación, apariencia, Dynamic Type, Increase Contrast, Face ID / Touch ID, VoiceOver, el resto de ajustes de apariencia de accesibilidad, el entorno de lanzamiento y un proveedor de condiciones de red configurado explícitamente.
+- **`/sipi-test`**: automatización de pruebas de UI y de estados adversos en iOS Simulator. El skill convierte la intención en lenguaje natural en especificaciones JSON v2 explícitas y luego `sipi run-test` / `sipi run-suite` las ejecuta con un harness determinista. Las pruebas guardadas pueden controlar permisos, deep links, notificaciones push, ubicación, apariencia, Dynamic Type, Increase Contrast, Face ID / Touch ID, el resto de ajustes de apariencia de accesibilidad, el entorno de lanzamiento y un proveedor de condiciones de red configurado explícitamente.
 - **`/sipi-verify`**: verificación posterior a la implementación. Confirma que una función o un arreglo funciona correctamente después de cambios en el código.
 
 Los resultados se guardan en `.simpilot/` con informes HTML que se pueden abrir en el navegador.
@@ -16,7 +16,7 @@ Los resultados se guardan en `.simpilot/` con informes HTML que se pueden abrir 
 ## Requisitos previos
 
 - macOS 15 o posterior
-- Xcode 26 o posterior: necesario en **tiempo de ejecución** para controlar el Simulator (SimPilot carga los private Simulator frameworks de Xcode). No hace falta para instalar. Xcode 27 o posterior habilita además Face ID / Touch ID, VoiceOver y los ajustes de apariencia de accesibilidad, que pasan por `xcrun devicectl`.
+- Xcode 26 o posterior: necesario en **tiempo de ejecución** para controlar el Simulator (SimPilot carga los private Simulator frameworks de Xcode). No hace falta para instalar. Xcode 27 o posterior habilita además Face ID / Touch ID y los ajustes de apariencia de accesibilidad, que pasan por `xcrun devicectl`.
 - [Claude Code](https://claude.com/claude-code) o Codex
 
 ## Instalación
@@ -74,7 +74,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 
 Las pruebas guardadas controlan toda la superficie de interacción —toques, toques dobles, interruptores, deslizadores, gestos, arrastres, pulsación larga, pellizco y multitáctil en bruto, combinaciones de teclas y rotación— como pasos deterministas, no solo toques y deslizamientos.
 
-También pueden crear condiciones previas de error reales controladas por el Simulator, como permisos denegados, deep links, entrega de push, coordenadas simuladas, coincidencia y no coincidencia de Face ID / Touch ID, VoiceOver, toda la superficie de apariencia de accesibilidad (reducir movimiento, reducir transparencia, filtros de color, opacidad de Liquid Glass) y perfiles de offline/latencia respaldados por un proveedor. SimPilot no incluye ni imita ningún acondicionador de red propietario: comprueba `sipi network-condition status` antes de usar un perfil de red.
+También pueden crear condiciones previas de error reales controladas por el Simulator, como permisos denegados, deep links, entrega de push, coordenadas simuladas, coincidencia y no coincidencia de Face ID / Touch ID, toda la superficie de apariencia de accesibilidad (reducir movimiento, reducir transparencia, filtros de color, opacidad de Liquid Glass) y perfiles de offline/latencia respaldados por un proveedor. SimPilot no incluye ni imita ningún acondicionador de red propietario: comprueba `sipi network-condition status` antes de usar un perfil de red.
 
 La verificación va más allá de la coincidencia de texto: además de `contains` / `absent` y las expresiones regulares, un paso puede afirmar cosas sobre los propios elementos —que un control está deshabilitado, que una lista tiene exactamente cinco filas, que un valor coincide con un patrón o que un área táctil cumple los 44pt.
 
@@ -162,7 +162,7 @@ Se recomienda añadir `.simpilot/` completa, o al menos `runs/` y `verify/`, al 
 
 - La entrada de texto escribe por defecto el valor de accesibilidad del campo (`set-text`), que no necesita teclado y admite cualquier sistema de escritura. La entrada tecla a tecla (`type`) pega por el portapapeles de forma predeterminada; la escritura HID directa tecla por tecla solo cubre la distribución de teclado de EE. UU.
 - **Un simulador con mucho uso puede dejar de entregar HID de teclado** (medido en Xcode 27.0 beta 4): pegar, escribir tecla por tecla y seleccionar todo + borrar se ignoran, mientras la entrada táctil sigue funcionando. Depende de la antigüedad del dispositivo, no de la versión de iOS, y ni `simctl erase` ni un reinicio lo recuperan: cree un dispositivo nuevo. `type` detecta esta condición y falla en lugar de informar éxito; `set-text` no se ve afectado
-- Face ID / Touch ID, VoiceOver y las facetas de apariencia de accesibilidad más allá de light/dark necesitan Xcode 27: pasan por `xcrun devicectl`, que solo apunta a simuladores de esa versión en adelante
+- Face ID / Touch ID y las facetas de apariencia de accesibilidad más allá de light/dark necesitan Xcode 27: pasan por `xcrun devicectl`, que solo apunta a simuladores de esa versión en adelante
 - Las relaciones de contraste y el texto recortado quedan fuera del alcance de `sipi a11y-audit`; ambos requieren un análisis de píxeles del fotograma renderizado
 - Solo simulador: los dispositivos físicos no son compatibles
 

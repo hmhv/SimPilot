@@ -2,7 +2,7 @@
 //
 // Validation coverage for the action types and verify forms added to close the
 // gap with Xcode 27's native device-interaction surface: double-tap, pinch,
-// multitouch, display-state, voiceover, biometrics, and the structured
+// multitouch, display-state, voiceover (since retired), biometrics, and the structured
 // `verify.elements` / regex conditions.
 //
 // The point of validating these up front is that `sipi validate` must never
@@ -281,14 +281,24 @@ final class NewActionValidationTests: XCTestCase {
         }
     }
 
-    // MARK: - voiceover / biometrics
+    // MARK: - voiceover (retired) / biometrics
 
-    func testVoiceOverValidates() throws {
-        XCTAssertTrue(try validate(id: "vo-ok", steps: action(["type": "voiceover", "enabled": true])).isValid)
-    }
-
-    func testVoiceOverRequiresEnabled() throws {
-        XCTAssertFalse(try validate(id: "vo-none", steps: action(["type": "voiceover"])).isValid)
+    /// `voiceover` used to validate. It is retired because on iOS 27 turning
+    /// VoiceOver off after it has been on empties the accessibility tree for
+    /// every app foregrounded afterwards, and turning it on changes nothing
+    /// describe-ui can see. A spec written against an older sipi has to be told
+    /// that — not handed the list of types that are still legal.
+    func testVoiceOverIsRejectedWithAReason() throws {
+        for step in [["type": "voiceover", "enabled": true] as [String: Any],
+                     ["type": "voiceover"] as [String: Any]] {
+            let outcome = try validate(id: "vo-retired", steps: action(step))
+            XCTAssertFalse(outcome.isValid, "voiceover must not validate")
+            let text = outcome.errors.joined(separator: " ")
+            XCTAssertTrue(text.contains("retired"), text)
+            XCTAssertTrue(text.contains("a11y-audit"), "should name what to use instead: \(text)")
+            XCTAssertFalse(text.contains("must be one of"),
+                           "a retired action should not be reported as an unknown type: \(text)")
+        }
     }
 
     func testBiometricsOperationsValidate() throws {

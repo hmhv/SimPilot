@@ -8,7 +8,7 @@ SimPilot은 Claude Code 또는 Codex에서 자연어 요청으로 구동되는 i
 
 ## 기능
 
-- **`/sipi-test`**: iOS Simulator에서 UI 테스트와 이상 상태 테스트를 자동화합니다. skill이 자연어 의도를 명시적인 v2 JSON 명세로 바꾸고, `sipi run-test` / `sipi run-suite`가 결정적 harness로 실행합니다. 저장된 테스트는 권한, deep link, 푸시 알림, 위치, 화면 모드, Dynamic Type, Increase Contrast, Face ID / Touch ID, VoiceOver, 더 넓은 범위의 접근성 화면 설정, 실행 환경, 명시적으로 구성한 network-condition provider를 제어할 수 있습니다.
+- **`/sipi-test`**: iOS Simulator에서 UI 테스트와 이상 상태 테스트를 자동화합니다. skill이 자연어 의도를 명시적인 v2 JSON 명세로 바꾸고, `sipi run-test` / `sipi run-suite`가 결정적 harness로 실행합니다. 저장된 테스트는 권한, deep link, 푸시 알림, 위치, 화면 모드, Dynamic Type, Increase Contrast, Face ID / Touch ID, 더 넓은 범위의 접근성 화면 설정, 실행 환경, 명시적으로 구성한 network-condition provider를 제어할 수 있습니다.
 - **`/sipi-verify`**: 구현 후 검증입니다. 기능 추가나 버그 수정 후 변경 사항이 올바르게 동작하고 화면도 문제가 없는지 확인합니다.
 
 결과는 `.simpilot/`에 저장되며, 브라우저에서 열 수 있는 HTML 리포트가 생성됩니다.
@@ -16,7 +16,7 @@ SimPilot은 Claude Code 또는 Codex에서 자연어 요청으로 구동되는 i
 ## 사전 요구 사항
 
 - macOS 15 이상
-- Xcode 26 이상: Simulator를 구동하기 위해 **런타임**에 필요합니다(SimPilot이 Xcode의 private Simulator frameworks를 로드합니다). 설치할 때는 필요하지 않습니다. Xcode 27 이상에서는 Face ID / Touch ID, VoiceOver, 접근성 화면 설정도 추가로 사용할 수 있으며, 이들은 `xcrun devicectl`을 거칩니다.
+- Xcode 26 이상: Simulator를 구동하기 위해 **런타임**에 필요합니다(SimPilot이 Xcode의 private Simulator frameworks를 로드합니다). 설치할 때는 필요하지 않습니다. Xcode 27 이상에서는 Face ID / Touch ID, 접근성 화면 설정도 추가로 사용할 수 있으며, 이들은 `xcrun devicectl`을 거칩니다.
 - [Claude Code](https://claude.com/claude-code) 또는 Codex
 
 ## 설치
@@ -74,7 +74,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 
 저장된 테스트는 탭과 스와이프뿐 아니라 탭·더블 탭·토글·슬라이더·제스처·드래그·길게 누르기·핀치와 원시 멀티터치·키 조합·회전까지 결정적 단계로 실행합니다.
 
-또한 권한 거부, deep link, 푸시 전달, 좌표 시뮬레이션, Face ID / Touch ID 일치와 불일치, VoiceOver, 접근성 화면 설정 전체(동작 줄이기, 투명도 줄이기, 색상 필터, Liquid Glass 불투명도), provider 기반 오프라인/지연 프로파일처럼 Simulator가 실제로 제어하는 오류 전제 조건도 만들 수 있습니다. SimPilot은 독자적인 네트워크 컨디셔너를 포함하지도 흉내 내지도 않습니다. 네트워크 프로파일을 쓰기 전에 `sipi network-condition status`를 확인하세요.
+또한 권한 거부, deep link, 푸시 전달, 좌표 시뮬레이션, Face ID / Touch ID 일치와 불일치, 접근성 화면 설정 전체(동작 줄이기, 투명도 줄이기, 색상 필터, Liquid Glass 불투명도), provider 기반 오프라인/지연 프로파일처럼 Simulator가 실제로 제어하는 오류 전제 조건도 만들 수 있습니다. SimPilot은 독자적인 네트워크 컨디셔너를 포함하지도 흉내 내지도 않습니다. 네트워크 프로파일을 쓰기 전에 `sipi network-condition status`를 확인하세요.
 
 검증은 텍스트 일치에서 그치지 않습니다. `contains` / `absent`와 정규 표현식에 더해, 각 단계는 요소 자체에 대해서도 단언할 수 있습니다. 컨트롤이 비활성 상태인지, 목록이 정확히 다섯 행인지, 값이 패턴과 일치하는지, 터치 영역이 44pt를 충족하는지 같은 것들입니다.
 
@@ -162,7 +162,7 @@ SimPilot은 `.simpilot/` 아래에 다음 구조를 사용합니다.
 
 - 텍스트 입력은 기본적으로 필드의 접근성 값을 쓰는 방식(`set-text`)이며, 키보드가 필요 없고 어떤 문자 체계든 처리합니다. 키 단위 입력(`type`)은 기본적으로 클립보드(붙여넣기)를 거치며, 키 단위 직접 HID 입력은 미국식 키보드 레이아웃만 지원합니다
 - **오래 사용한 simulator는 키보드 HID를 전달하지 않게 될 수 있습니다**(Xcode 27.0 beta 4에서 측정). 붙여넣기, 키 단위 입력, 전체 선택+삭제가 모두 무시되지만 터치 입력은 동작합니다. 이는 iOS 버전이 아니라 기기의 사용 기간에 따르며 `simctl erase`나 재부팅으로도 복구되지 않으므로 기기를 새로 만들어야 합니다. `type`은 이 상태를 감지해 성공으로 보고하지 않고 실패합니다. `set-text`는 영향을 받지 않습니다
-- Face ID / Touch ID, VoiceOver, light/dark를 넘어서는 접근성 화면 설정 항목에는 Xcode 27이 필요합니다. 이들은 `xcrun devicectl`을 거치는데, devicectl은 해당 릴리스 이후의 simulator만 대상으로 할 수 있습니다
+- Face ID / Touch ID, light/dark를 넘어서는 접근성 화면 설정 항목에는 Xcode 27이 필요합니다. 이들은 `xcrun devicectl`을 거치는데, devicectl은 해당 릴리스 이후의 simulator만 대상으로 할 수 있습니다
 - 명암비와 잘린 텍스트는 `sipi a11y-audit`의 범위 밖입니다. 둘 다 렌더링된 프레임의 픽셀 분석이 필요합니다
 - simulator만 지원하며 실제 기기는 지원하지 않습니다
 

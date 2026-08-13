@@ -51,8 +51,8 @@ between-test failure is traced and the run continues, then retried by the strict
 end-of-run cleanup.
 
 Cleanup is not uniform. Appearance, content size, Increase Contrast,
-`display-state`, VoiceOver, and biometric enrollment are **restored** to the
-value captured before the first write. Location, status-bar overrides, and active
+`display-state`, and biometric enrollment are **restored** to the value captured
+before the first write. Location, status-bar overrides, and active
 network conditions are only **cleared**, so a pre-existing value is not put back.
 `privacy`, `open-url`, `push`, `launch`, and `terminate` get **no cleanup at
 all**. The full tier table, with the `display-state` caveat, is in

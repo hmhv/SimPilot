@@ -49,28 +49,31 @@ Turning VoiceOver back ON also reads fine — it is specifically the OFF state a
 an ON that is broken. Measured with a control on iOS 27.0 (24A5408d) / Xcode 27
 beta 5: no-VoiceOver 15 nodes, ON 16, ON→OFF 1, ON again 16, OFF again 1, reboot 15.
 
-**Do not use `sipi voiceover --enable`/`--disable` as a "re-prime the bridge"
-trick.** Earlier revisions of this document recommended exactly that; on iOS 27 it
-is the cause of case 2, not a cure.
+**sipi cannot put the device in that state any more, and that is deliberate.**
+Setting VoiceOver is retired, along with the `voiceover` test action, precisely
+because of case 2 — earlier revisions of this document even recommended toggling it
+to "re-prime the bridge", which is what breaks the tree. Turning VoiceOver ON also
+buys nothing: `describe-ui` returns a byte-identical tree either way (measured on
+iOS 27.0 — same node count, same labels).
 
-Run VoiceOver steps last in a session, and restore according to the baseline you
-read BEFORE enabling it (`sipi voiceover "$UDID" --json`):
+So case 2 now only happens when VoiceOver was switched by hand, in Settings or on
+another tool's behalf. `sipi voiceover "$UDID"` reads the state, which is how you
+confirm that is what you are looking at:
 
-- **Baseline was on** — leave VoiceOver on. Nothing to undo, no restart: the tree
-  reads fine while it is enabled, and turning it off is the thing that breaks it.
-- **Baseline unreadable** (`{"enabled": null}`, or `unknown` without `--json`) —
-  treat it as off and use the two-step path below.
-- **Baseline was off** — both of these, in order:
+- reads `enabled: true` — leave it on and read the tree; it works while enabled
+- reads `enabled: false` on a device whose apps all report an empty root — it was
+  turned off after being on. Restart:
 
   ```bash
-  sipi voiceover "$UDID" --disable
   xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
   ```
 
-  The restart alone does not turn VoiceOver off — the setting survives
-  shutdown/boot (measured: `--enable`, shutdown, boot, and `voiceover --json`
-  still reports `enabled: true`). `--disable` alone leaves the tree broken. Both,
-  in that order, end with a readable tree and VoiceOver off.
+Note the setting itself survives shutdown/boot (measured: enable, shutdown, boot,
+and the state still reads `enabled: true`), so a restart recovers the tree without
+changing whether VoiceOver is on.
+
+Revisit when Xcode 27 ships: if OFF-after-ON no longer empties the tree, the
+setter and the test action can come back.
 
 ### Taps return `ok` but nothing happens, on EVERY device
 
@@ -97,10 +100,11 @@ The three messages mean different things, and the right response differs:
 
 For *not attempted*: tap the field first; a game or custom canvas that exposes no
 text element needs `--no-verify` / `"verify-effect": false`. If the tree itself
-was unreadable, re-prime it (see above).
+was unreadable, treat it as the empty-root case above — wait and re-read, or
+restart the device if VoiceOver was toggled off. There is no "re-prime" step.
 
-For *could not verify*: re-prime the bridge, read the field's actual value with
-`describe-ui`, and only then decide.
+For *could not verify*: read the field's actual value with `describe-ui` (waiting
+first if the tree is still empty) and only then decide.
 
 For *had no effect* — three measured causes, all on Xcode 27.0 beta 4:
 
@@ -131,8 +135,8 @@ composition is pending — see cause 3 above.
 
 ### A device-state command fails with *needs a devicectl that can target simulators*
 
-`sipi biometrics` / `appearance` / `voiceover`, and the `biometrics` /
-`display-state` / `voiceover` test actions, go through `xcrun devicectl`, which
+`sipi biometrics` / `appearance` / `voiceover` (read), and the `biometrics` /
+`display-state` test actions, go through `xcrun devicectl`, which
 only speaks to simulators from Xcode 27 on. Check with
 `xcrun devicectl list plugins` — it must list `SimulatorCoreDevicePlugin`. Select
 Xcode 27 or later with `xcode-select`, or use the simctl-backed actions

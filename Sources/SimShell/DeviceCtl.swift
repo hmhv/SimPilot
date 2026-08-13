@@ -419,9 +419,14 @@ public enum DeviceCtl {
         return result["enabled"] as? Bool
     }
 
-    /// Turn VoiceOver on or off. Driving VoiceOver navigation itself needs
-    /// XCUITest's `XCUIVoiceOverService`; this controls the state an
-    /// accessibility pass runs under.
+    /// Turn VoiceOver on or off.
+    ///
+    /// Nothing calls this today. `sipi voiceover` reads only and the `voiceover`
+    /// test action is retired, because on iOS 27 turning VoiceOver off after it
+    /// has been on empties the accessibility tree for every app foregrounded
+    /// afterwards until the device restarts — and turning it on changes nothing
+    /// `describe-ui` reports. Kept so the capability can come back if Xcode 27's
+    /// release build fixes that; delete it if it does not.
     public static func setVoiceOver(udid: String, enabled: Bool) throws {
         try runChecked(
             ["device", "settings", "voiceover", "--device", udid, enabled ? "--enable" : "--disable"],

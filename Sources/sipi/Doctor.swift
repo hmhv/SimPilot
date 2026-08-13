@@ -226,14 +226,14 @@ private struct DoctorReport {
         if DeviceCtl.isSimulatorCapable() {
             notes.append(
                 "devicectl can target simulators: `sipi biometrics`, `sipi appearance`, "
-                + "`sipi voiceover`, face-up/face-down orientation, and the biometrics / "
-                + "display-state / voiceover test actions are available."
+                + "`sipi voiceover` (read), face-up/face-down orientation, and the biometrics / "
+                + "display-state test actions are available."
             )
         } else {
             notes.append(
                 "devicectl cannot target simulators on this toolchain (no SimulatorCoreDevicePlugin): "
                 + "`sipi biometrics`, `sipi appearance`, `sipi voiceover`, face-up/face-down orientation, "
-                + "and the biometrics / display-state / voiceover test actions are unavailable. "
+                + "and the biometrics / display-state test actions are unavailable. "
                 + "Everything else works; select Xcode 27 or later to enable them."
             )
         }

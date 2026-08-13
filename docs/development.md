@@ -27,7 +27,7 @@ headless: no GUI, no Node runtime, and no spawned helper process.
   wrappers over `xcrun simctl` — no private APIs (see `SimShell`). `DeviceCtl`
   wraps `xcrun devicectl` the same way for the facets simctl never exposed:
   face-up / face-down orientation, biometric enrollment and match events,
-  VoiceOver, and the full accessibility appearance surface. devicectl only
+  reading VoiceOver, and the full accessibility appearance surface. devicectl only
   targets simulators from Xcode 27 on, so every call site checks
   `DeviceCtl.isSimulatorCapable()` and degrades with an explicit message.
 
@@ -128,7 +128,7 @@ sipi orientation <udid> [--set name] # native READ; SET (PurpleEvent → devicec
 sipi a11y-audit <udid>               # mechanical audit: touch targets, labels, truncation (--fast, --rules, --min-touch-target, --fail-on)
 sipi biometrics <udid> <op>          # status | enroll | unenroll | match | no-match      (devicectl, Xcode 27+)
 sipi appearance <udid> [facets]      # read/write reduce-motion, color filters, Liquid Glass, … (devicectl, Xcode 27+)
-sipi voiceover <udid> [--enable|--disable]  # read/write VoiceOver                        (devicectl, Xcode 27+)
+sipi voiceover <udid>                # READ VoiceOver state; setting it is retired        (devicectl, Xcode 27+)
 ```
 
 ### Capture
@@ -171,13 +171,14 @@ the matching CLI command.
 Beyond input, the harness owns simulator state: `open-url`, `privacy`, `push`,
 `location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`,
 `launch`, `terminate`, `network-condition` (simctl / provider), plus
-`display-state`, `voiceover`, and `biometrics` (devicectl, Xcode 27+).
+`display-state` and `biometrics` (devicectl, Xcode 27+). The `voiceover` action is
+retired — see `.claude/skills/sipi-common/docs/troubleshooting.md`.
 
 Cleanup runs between tests and at end of run, but it is **not** uniform across
 that list, and specs have to plan around the difference:
 
 - **Restored to a captured baseline** — `appearance`, `content-size`,
-  `increase-contrast`, `display-state`, `voiceover`, `biometrics` enrollment.
+  `increase-contrast`, `display-state`, `biometrics` enrollment.
   The baseline is captured before the first write and a step fails when it
   cannot be read, or when a facet it wants to change could not be put back.
 - **Cleared only** — `location`, `status-bar`, `network-condition`. Reset to "no

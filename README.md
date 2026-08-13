@@ -8,7 +8,7 @@ The top-level README is translated. Skill docs and code remain in English.
 
 ## What it does
 
-- **`/sipi-test`** — UI and adverse-state test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness. Saved tests can control permissions, deep links, push notifications, location, appearance, Dynamic Type, Increase Contrast, Face ID / Touch ID, VoiceOver, the wider accessibility appearance settings, launch environment, and an explicitly configured network-condition provider.
+- **`/sipi-test`** — UI and adverse-state test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness. Saved tests can control permissions, deep links, push notifications, location, appearance, Dynamic Type, Increase Contrast, Face ID / Touch ID, the wider accessibility appearance settings, launch environment, and an explicitly configured network-condition provider.
 - **`/sipi-verify`** — Post-implementation verification on the iOS Simulator. `sipi verify-session` owns screenshots, findings, and report generation.
 
 Results are saved in `.simpilot/` with HTML reports for browser viewing.
@@ -16,7 +16,7 @@ Results are saved in `.simpilot/` with HTML reports for browser viewing.
 ## Prerequisites
 
 - macOS 15 or later
-- Xcode 26 or later — needed at **runtime** to drive the Simulator (SimPilot loads Xcode's private Simulator frameworks). Not needed to install. Xcode 27 or later additionally enables Face ID / Touch ID, VoiceOver, and the accessibility appearance settings, which go through `xcrun devicectl`.
+- Xcode 26 or later — needed at **runtime** to drive the Simulator (SimPilot loads Xcode's private Simulator frameworks). Not needed to install. Xcode 27 or later additionally enables Face ID / Touch ID and the accessibility appearance settings, which go through `xcrun devicectl`.
 - [Claude Code](https://claude.com/claude-code) or Codex
 
 ## Installation
@@ -73,7 +73,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 
 Saved tests drive the full interaction surface — taps, double-taps, toggles, sliders, gestures, drags, long-press, pinch and raw multi-touch, key combos, and rotation — as deterministic steps, not just taps and swipes.
 
-They can also create real Simulator-controlled error preconditions such as denied permissions, deep links, push delivery, simulated coordinates, Face ID / Touch ID match and no-match, VoiceOver, the full accessibility appearance surface (reduce motion, reduce transparency, color filters, Liquid Glass opacity), and provider-backed offline/latency profiles. SimPilot does not bundle or imitate a proprietary network conditioner: check `sipi network-condition status` before using a network profile.
+They can also create real Simulator-controlled error preconditions such as denied permissions, deep links, push delivery, simulated coordinates, Face ID / Touch ID match and no-match, the full accessibility appearance surface (reduce motion, reduce transparency, color filters, Liquid Glass opacity), and provider-backed offline/latency profiles. SimPilot does not bundle or imitate a proprietary network conditioner: check `sipi network-condition status` before using a network profile.
 
 Verification goes past text matching: alongside `contains` / `absent` and regular expressions, a step can assert about elements themselves — that a control is disabled, that a list holds exactly five rows, that a value matches a pattern, or that a touch target meets 44pt.
 
@@ -165,7 +165,7 @@ Recommend adding `.simpilot/` (or at least `runs/` and `verify/`) to the project
 
 - Text entry defaults to writing the field's accessibility value (`set-text`), which needs no keyboard and takes any script. Keystroke-level entry (`type`) pastes through the clipboard by default; direct per-key HID typing covers the US keyboard layout only
 - **A long-lived simulator can stop delivering keyboard HID** (measured on Xcode 27.0 beta 4): paste, per-key typing, and select-all+delete are all ignored while touch still works. This follows device age rather than the iOS version, and neither `simctl erase` nor a reboot revives it — create a replacement device. `type` detects the condition and fails rather than reporting success; `set-text` is unaffected
-- Face ID / Touch ID, VoiceOver, and the accessibility appearance facets beyond light/dark need Xcode 27 — they go through `xcrun devicectl`, which only targets simulators from that release on
+- Face ID / Touch ID and the accessibility appearance facets beyond light/dark need Xcode 27 — they go through `xcrun devicectl`, which only targets simulators from that release on
 - Contrast ratios and clipped text are out of scope for `sipi a11y-audit`; both need pixel analysis of the rendered frame
 - Simulator only — physical devices are not supported
 

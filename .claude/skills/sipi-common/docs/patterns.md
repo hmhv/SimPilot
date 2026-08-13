@@ -174,7 +174,9 @@ Light/dark and Dynamic Type go through `xcrun simctl ui $UDID appearance
 light|dark` and `content_size`; no native driver needed. The accessibility facets
 simctl cannot reach — reduce motion, reduce transparency, show borders, color
 filters, Liquid Glass opacity, Larger Accessibility Sizes — go through
-`sipi appearance`, and VoiceOver through `sipi voiceover` (both Xcode 27+).
+`sipi appearance` (Xcode 27+). VoiceOver cannot be switched on: that is retired,
+since on iOS 27 turning it back off empties every app's accessibility tree until
+the device restarts. `sipi voiceover "$UDID"` still reads the state.
 
 For rotation, `sipi orientation $UDID --set <portrait|portrait-upside-down|landscape-left|landscape-right|face-up|face-down>`.
 Wait ~3s for it to settle, then confirm. The plain read

@@ -27,7 +27,6 @@ covers what each one actually changes and how to test with it.
 | `network-condition` | Applies an app-scoped profile through an explicitly installed provider |
 | `biometrics` | Enrolls/unenrolls Face ID / Touch ID and delivers match / no-match to a live prompt (Xcode 27+) |
 | `display-state` | Sets the accessibility appearance facets simctl cannot reach (Xcode 27+) |
-| `voiceover` | Turns VoiceOver on or off for an accessibility pass (Xcode 27+) |
 
 ## What cleanup actually covers
 
@@ -36,7 +35,7 @@ Cleanup runs at the end of the run, and between tests in a suite with
 
 | Tier | Controls | Behavior |
 |---|---|---|
-| Restored to the captured prior value | `appearance`, `content-size`, `increase-contrast`, `display-state`*, `voiceover`, `biometrics` enrollment | Baseline captured before the first write, written back afterward |
+| Restored to the captured prior value | `appearance`, `content-size`, `increase-contrast`, `display-state`*, `biometrics` enrollment | Baseline captured before the first write, written back afterward |
 | **Cleared, not restored** | `location`, `status-bar`, `network-condition` | Reset to "no override". A value the device already had before the run is NOT put back |
 | **Not touched at all** | `privacy`, `open-url`, `push`, `launch`, `terminate` | No cleanup whatsoever |
 

@@ -11,7 +11,8 @@
 //               opacity, Larger Accessibility Sizes — read and write. simctl
 //               only ever offered light/dark, content size, and increase
 //               contrast.
-//   voiceover   VoiceOver on/off, the state an accessibility pass runs under.
+//   voiceover   Whether VoiceOver is on — read only. Setting it is retired; see
+//               the command's own discussion for the measurement behind that.
 //
 // All three degrade with a clear message on a toolchain whose devicectl cannot
 // target simulators (Xcode 26 and earlier), rather than surfacing a raw
@@ -297,47 +298,34 @@ extension Sipi {
     struct VoiceOver: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "voiceover",
-            abstract: "Read or set VoiceOver on the simulator.",
+            abstract: "Read whether VoiceOver is on.",
             discussion: """
-            With no flag this reports the current state. VoiceOver changes how the
-            accessibility tree is presented and how gestures are interpreted, so turn it
-            on for an accessibility pass and back off afterward.
+            Read-only. Setting VoiceOver is retired for now, and so is the `voiceover`
+            test action, because on iOS 27 turning it OFF after it has been ON leaves the
+            accessibility tree empty for every app that comes to the foreground
+            afterwards — only a device restart clears it — and turning it ON buys nothing:
+            describe-ui returns a byte-identical tree either way (measured on iOS 27.0,
+            same node count, same labels). Reading the spoken string or driving the
+            VoiceOver cursor needs XCUITest's XCUIVoiceOverService from inside a UI test
+            target, which this tool cannot reach at all.
 
-            Driving VoiceOver navigation itself (move forward / read the spoken string)
-            needs XCUITest's XCUIVoiceOverService from inside a UI test target; this
-            command controls the state, not the cursor.
+            Reading it is still useful: it tells you whether a device someone left with
+            VoiceOver on is the reason its accessibility tree looks wrong.
+
+            Revisit when Xcode 27 ships: if the OFF-after-ON breakage is gone, the setter
+            and the test action can come back.
             """
         )
 
         @Argument(help: "Simulator UDID.")
         var udid: String
 
-        @Flag(name: .long, help: "Turn VoiceOver on.")
-        var enable = false
-
-        @Flag(name: .long, help: "Turn VoiceOver off.")
-        var disable = false
-
-        @Flag(name: .long, help: "Emit the state as JSON (read mode only).")
+        @Flag(name: .long, help: "Emit the state as JSON.")
         var json = false
-
-        func validate() throws {
-            if enable && disable {
-                throw ValidationError("Pass only one of --enable or --disable.")
-            }
-            if json && (enable || disable) {
-                throw ValidationError("--json applies to reading only.")
-            }
-        }
 
         func run() throws {
             try requireDeviceCtl("sipi voiceover")
             do {
-                if enable || disable {
-                    try DeviceCtl.setVoiceOver(udid: udid, enabled: enable)
-                    print("ok")
-                    return
-                }
                 let enabled = try DeviceCtl.voiceOver(udid: udid)
                 if json {
                     try emitJSON(["enabled": enabled ?? NSNull()])

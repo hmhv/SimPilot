@@ -363,7 +363,6 @@ private final class HarnessRunner {
     private var initialContentSize: String?
     private var initialIncreaseContrast: String?
     private var initialDisplayState: AppearanceState?
-    private var initialVoiceOver: Bool?
     private var initialBiometricsEnrolled: Bool?
     private var locationWasModified = false
     private var statusBarWasModified = false
@@ -517,10 +516,6 @@ private final class HarnessRunner {
             } catch {
                 failures.append("display state: \(error)")
             }
-        }
-        if let initialVoiceOver {
-            do { try DeviceCtl.setVoiceOver(udid: udid, enabled: initialVoiceOver); self.initialVoiceOver = nil }
-            catch { failures.append("voiceover: \(error)") }
         }
         if let initialBiometricsEnrolled {
             do {
@@ -1257,24 +1252,6 @@ private final class HarnessRunner {
             try DeviceCtl.setAppearance(udid: udid, settings: facets)
             return ["method": "devicectl", "value": "display-state:\(action.settings?.summary ?? "")"]
 
-        case "voiceover":
-            guard let enabled = action.enabled else {
-                throw HarnessError("voiceover action requires enabled.")
-            }
-            try requireSimulatorDeviceCtl("voiceover")
-            if initialVoiceOver == nil {
-                initialVoiceOver = try captureBaseline("voiceover") {
-                    // A runtime that reports no VoiceOver state gives nothing to
-                    // restore, which is as bad as a failed read.
-                    guard let enabled = try DeviceCtl.voiceOver(udid: udid) else {
-                        throw HarnessError("this runtime does not report VoiceOver state")
-                    }
-                    return enabled
-                }
-            }
-            try DeviceCtl.setVoiceOver(udid: udid, enabled: enabled)
-            return ["method": "devicectl", "value": "voiceover:\(enabled)"]
-
         case "biometrics":
             guard let operation = action.operation,
                   ["enroll", "unenroll", "match", "no-match"].contains(operation) else {
@@ -1794,8 +1771,6 @@ private final class HarnessRunner {
             return "multitouch phase \(action.phase ?? 0)"
         case "display-state":
             return "display-state \(action.settings?.summary ?? "")"
-        case "voiceover":
-            return "voiceover \(action.enabled.map { String($0) } ?? "")"
         case "biometrics":
             return "biometrics \(action.operation ?? "")"
         case "type":
