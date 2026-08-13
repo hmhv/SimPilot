@@ -63,7 +63,18 @@ sipi appearance "$UDID" --larger-accessibility-sizes on --text-size accessibilit
 sipi voiceover "$UDID" --enable
 ```
 
-Restore what you changed when the pass is done.
+Restore what you changed when the pass is done — **except VoiceOver.** On iOS 27
+turning it back off leaves the device unable to report an accessibility tree for
+any app that comes to the foreground afterwards, and only a restart clears it. So
+enable VoiceOver LAST, and end the session with a device restart rather than
+`--disable`:
+
+```bash
+xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
+```
+
+See `../../sipi-common/docs/troubleshooting.md` → "`describe-ui` returns a single
+empty root".
 
 ## Fix Priority
 

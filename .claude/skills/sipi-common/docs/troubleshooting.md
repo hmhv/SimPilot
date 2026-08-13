@@ -30,10 +30,29 @@ link here rather than restating them.
 
 ### `describe-ui` returns a single empty root
 
-Very common right after an app launch, on both iOS 26 and 27. Re-prime the
-accessibility bridge: `sipi voiceover $UDID --enable`, then `--disable`, wait
-~2s, and re-read. This can leave a "VoiceOver gestures" system alert on screen —
-dismiss it (`sipi tap $UDID --label OK`) before continuing.
+Two different causes. Tell them apart by waiting.
+
+**1. Right after an app launch** — the app has not published its tree yet. Wait and
+re-read; measured on iOS 27.0 (24A5408d), three launches in a row read 1 node at
+1s and the full tree at 3s. Waiting is the whole fix.
+
+**2. VoiceOver was turned on and then off on this device** — every app that comes
+to the foreground afterwards reports an empty root, and it does NOT clear with
+time or an app relaunch. SpringBoard keeps reading fine, which makes this look
+like an app problem when it is device-wide. **Only a device restart recovers it:**
+
+```bash
+xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
+```
+
+Turning VoiceOver back ON also reads fine — it is specifically the OFF state after
+an ON that is broken. Measured with a control on iOS 27.0 (24A5408d) / Xcode 27
+beta 5: no-VoiceOver 15 nodes, ON 16, ON→OFF 1, ON again 16, OFF again 1, reboot 15.
+
+**Do not use `sipi voiceover --enable`/`--disable` as a "re-prime the bridge"
+trick.** Earlier revisions of this document recommended exactly that; on iOS 27 it
+is the cause of case 2, not a cure. Run VoiceOver steps last in a session, or
+restart the device after them.
 
 ### Taps return `ok` but nothing happens, on EVERY device
 
