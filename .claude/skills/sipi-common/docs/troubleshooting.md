@@ -124,7 +124,7 @@ Xcode 27 or later with `xcode-select`, or use the simctl-backed actions
 
 | Problem | Solution |
 |---------|----------|
-| Build error | `grep -E "error:" /tmp/simpilot-build.log` |
+| Build error is unclear | Re-run the same build without `-quiet` for the full log |
 | Signing error | Add `CODE_SIGN_IDENTITY="" CODE_SIGNING_ALLOWED=NO` |
 | Unknown scheme | `xcodebuild -list -project MyApp.xcodeproj` |
 | SPM dependency resolution failed | `swift package resolve` |

@@ -6,7 +6,7 @@ A prerequisite step that builds the app from source and installs it on the iOS S
 
 - If `config.json` has a `build` section, build once at the start of a test execution session
 - If there is no `build` key, the app is assumed to be already installed and the build step is skipped
-- Build artifacts are stored in `.simpilot/build/` (recreated with a clean build each time)
+- Build artifacts go to Xcode's default DerivedData, shared with builds made from Xcode itself
 - For suites and multi-device runs, the built `.app` is shared across all tests and all devices
 
 ## The build section in config.json
@@ -51,36 +51,50 @@ xcodebuild -list -project MyApp.xcodeproj 2>/dev/null | grep -A 50 "Schemes:" | 
 
 ## Build
 
-Specify `-destination 'generic/platform=iOS Simulator'` for the build.
+Specify `-destination 'generic/platform=iOS Simulator'` for the build. A generic destination has no active architecture, so `ONLY_ACTIVE_ARCH` is forced to NO and both arm64 and x86_64 are built. Pass `'ARCHS=$(NATIVE_ARCH)'` to build a single slice — clean build time and DerivedData size both drop by nearly half.
+
+Single quotes are required. `"ARCHS=$(NATIVE_ARCH)"` is command-substituted by the shell into an empty value, and the build fails with `error: Build input file cannot be found`.
 
 Builds may fail due to macro or SPM plugin validation, so always include the following flags:
 
 - `-skipMacroValidation` — skip Swift Macro validation
 - `-skipPackagePluginValidation` — skip SPM plugin validation
 
+`-derivedDataPath` is intentionally not passed: the default DerivedData is shared with Xcode's own builds, so work done here is reused when the project is opened in Xcode.
+
+`-quiet` prints nothing on success and keeps every diagnostic on failure — file, line, source excerpt, linker symbols, warnings. Judge the result by the exit code. If those diagnostics are not enough to fix the build, re-run the same command without `-quiet` for the full log.
+
+### clean or not
+
+| Caller | Action | Why |
+|---|---|---|
+| test / suite run | `clean build` | A regression verdict has to come from a reproducible artifact |
+| verify | `build` | A one-off check right after a change; `clean` only adds wait time |
+
+Also use `clean build` after changing build settings, or when a stale-cache
+problem is suspected.
+
 ### Build Flow
 
 ```bash
-# 1. Clean build
+# 1. Build (test/suite run: `clean build`, verify: `build`)
 xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath .simpilot/build/DerivedData \
+  'ARCHS=$(NATIVE_ARCH)' \
   -skipMacroValidation -skipPackagePluginValidation \
-  clean build 2>&1 | tee /tmp/simpilot-build.log | tail -5
+  -quiet clean build
 
-# Check build result
-# zsh uses $pipestatus (lowercase, 1-indexed); bash uses $PIPESTATUS (uppercase, 0-indexed)
-if [ ${pipestatus[1]:-${PIPESTATUS[0]:-0}} -ne 0 ]; then
-  echo "=== Build Error ==="
-  grep -E "error:|Build FAILED|fatal error" /tmp/simpilot-build.log | head -20
-  echo "=== Full log: /tmp/simpilot-build.log ==="
-fi
-
-# 2. Get the .app path
-APP_PATH=$(find .simpilot/build/DerivedData/Build/Products -name "*.app" -type d | head -1)
-BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP_PATH/Info.plist")
+# 2. Get the .app path and bundle id (pass the same -destination as the build)
+SETTINGS=$(xcodebuild -project MyApp.xcodeproj -scheme MyApp \
+  -destination 'generic/platform=iOS Simulator' \
+  -showBuildSettings -json 2>/dev/null)
+APP_PATH="$(printf '%s' "$SETTINGS" | plutil -extract 0.buildSettings.BUILT_PRODUCTS_DIR raw -)/$(printf '%s' "$SETTINGS" | plutil -extract 0.buildSettings.FULL_PRODUCT_NAME raw -)"
+BUNDLE_ID=$(printf '%s' "$SETTINGS" | plutil -extract 0.buildSettings.PRODUCT_BUNDLE_IDENTIFIER raw -)
 ```
 
+- Passing the same `-destination` matters: omit it and the returned path is `Debug-iphoneos`
+- Entry `0` is the scheme's main target. Embedded app extensions do not add entries
+- Takes under a second, so run it after every build rather than caching the path
 - For `-workspace`, replace `-project` with `-workspace MyApp.xcworkspace`
 - For SPM, omit `-project`/`-workspace` and specify only `-scheme`
 - If `configuration` is specified, add `-configuration Release` (defaults to Debug if omitted)
@@ -88,11 +102,12 @@ BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP_PATH/Inf
 ### Build Artifact Layout
 
 ```
-.simpilot/build/
-  DerivedData/       ← xcodebuild DerivedData
-    Build/Products/Debug-iphonesimulator/
-      MyApp.app      ← build artifact
+~/Library/Developer/Xcode/DerivedData/MyApp-<hash>/
+  Build/Products/Debug-iphonesimulator/
+    MyApp.app        ← build artifact
 ```
+
+The `<hash>` is not predictable. Always resolve the path with `-showBuildSettings -json` as above; never guess it or hunt for it with `find`.
 
 ## Install
 
@@ -114,6 +129,8 @@ xcrun simctl install $UDID "$APP_PATH"
 ```
 
 ## Automatic Bundle ID Retrieval
+
+After a build, take `PRODUCT_BUNDLE_IDENTIFIER` from `-showBuildSettings -json` (see Build Flow). For a `.app` with no project at hand:
 
 ```bash
 /usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" <path-to-.app>/Info.plist
