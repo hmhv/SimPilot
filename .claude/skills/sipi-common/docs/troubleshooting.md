@@ -51,8 +51,19 @@ beta 5: no-VoiceOver 15 nodes, ON 16, ON→OFF 1, ON again 16, OFF again 1, rebo
 
 **Do not use `sipi voiceover --enable`/`--disable` as a "re-prime the bridge"
 trick.** Earlier revisions of this document recommended exactly that; on iOS 27 it
-is the cause of case 2, not a cure. Run VoiceOver steps last in a session, or
-restart the device after them.
+is the cause of case 2, not a cure.
+
+Run VoiceOver steps last in a session and end with both of these, in order:
+
+```bash
+sipi voiceover "$UDID" --disable
+xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
+```
+
+The restart alone does not turn VoiceOver off — the setting survives
+shutdown/boot (measured: `--enable`, shutdown, boot, and `voiceover --json` still
+reports `enabled: true`). `--disable` alone leaves the tree broken. Both, in that
+order, end with a readable tree and VoiceOver off.
 
 ### Taps return `ok` but nothing happens, on EVERY device
 
