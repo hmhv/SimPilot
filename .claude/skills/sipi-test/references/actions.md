@@ -256,7 +256,7 @@ and does not actually change.
 { "type": "increase-contrast", "enabled": true }
 { "type": "status-bar", "operation": "override", "arguments": ["--time", "9:41", "--batteryLevel", "100"] }
 { "type": "status-bar", "operation": "clear" }
-{ "type": "launch", "arguments": ["--fixture"], "environment": { "API_MODE": "fixture" } }
+{ "type": "launch", "arguments": ["--test-mode"], "environment": { "API_MODE": "stub" } }
 { "type": "terminate" }
 { "type": "network-condition", "operation": "apply", "profile": "packet-loss-100" }
 { "type": "network-condition", "operation": "clear" }

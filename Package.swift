@@ -125,6 +125,7 @@ let package = Package(
         // for app/file/lifecycle facets that never touch private frameworks.
         .target(
             name: "SimShell",
+            dependencies: ["SimCore"],
             path: "Sources/SimShell"
         ),
         .testTarget(

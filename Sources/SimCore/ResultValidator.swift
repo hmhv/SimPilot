@@ -40,12 +40,15 @@ public enum ResultValidator {
     private static let configRequired: Set<String> = ["app"]
     private static let configOptional: Set<String> = [
         "step-delay", "max-retries", "keep-runs", "record-video", "build",
-        "network-condition-provider"
+        "network-condition-provider", "capture-logs", "log-predicate", "capture-container-diff"
     ]
     private static let buildOptional: Set<String> = ["project", "scheme", "configuration"]
 
     private static let testRequired: Set<String> = ["id", "title", "steps"]
-    private static let testOptional: Set<String> = ["app", "tags", "created", "updated"]
+    private static let testOptional: Set<String> = ["app", "tags", "created", "updated", "fixtures"]
+    private static let testFixtureOptional: Set<String> = [
+        "source", "destination", "group-id", "files-app", "storage"
+    ]
     private static let testStepOptional: Set<String> = ["id", "action", "verify", "optional", "wait", "note"]
     private static let testActionOptional: Set<String> = [
         "type", "selector", "point", "text", "usage", "button", "start", "end", "duration",
@@ -56,7 +59,12 @@ public enum ResultValidator {
     ]
     private static let testSelectorOptional: Set<String> = ["id", "label", "value", "element-type"]
     private static let testPointOptional: Set<String> = ["x", "y", "unit"]
-    private static let testVerifyOptional: Set<String> = ["contains", "absent", "matches", "not-matches", "elements"]
+    private static let testVerifyOptional: Set<String> = [
+        "contains", "absent", "matches", "not-matches", "elements", "container-files"
+    ]
+    private static let testContainerFileOptional: Set<String> = [
+        "path", "exists", "group-id", "format", "key-path", "query", "equals", "sha256", "size"
+    ]
     private static let testElementConditionOptional: Set<String> = [
         "id", "label", "value", "element-type",
         "exists", "enabled", "value-equals", "value-matches",
@@ -110,14 +118,19 @@ public enum ResultValidator {
     private static let profileDeviceOptional: Set<String> = ["model", "runtime", "udid"]
 
     private static let runRequired: Set<String> = ["started", "device", "tests", "summary"]
-    private static let runOptional: Set<String> = ["finished", "device-name", "device-runtime", "suite", "profile", "commit", "session", "build-error"]
+    private static let runOptional: Set<String> = [
+        "finished", "device-name", "device-runtime", "suite", "profile", "commit", "session",
+        "build-error", "artifacts", "evidence-warnings"
+    ]
     private static let runTestRequired: Set<String> = ["id", "passed", "duration"]
     private static let runTestOptional: Set<String> = ["review", "skipped"]
     private static let runSummaryRequired: Set<String> = ["total", "passed", "failed"]
     private static let runSummaryOptional: Set<String> = ["review"]
 
     private static let resultRequired: Set<String> = ["id", "passed", "duration", "steps"]
-    private static let resultOptional: Set<String> = ["review", "skipped", "video"]
+    private static let resultOptional: Set<String> = [
+        "review", "skipped", "video", "artifacts", "cleanup-error"
+    ]
     private static let resultStepRequired: Set<String> = ["passed"]
     private static let resultStepOptional: Set<String> = [
         "action", "verify", "note", "review", "skipped", "duration",
@@ -263,6 +276,9 @@ public enum ResultValidator {
         checkInteger(path, data, "keep-runs", diag)
         checkBool(path, data, "record-video", diag)
         checkString(path, data, "network-condition-provider", diag)
+        checkBool(path, data, "capture-logs", diag)
+        checkString(path, data, "log-predicate", diag)
+        checkBool(path, data, "capture-container-diff", diag)
         if let provider = data["network-condition-provider"] as? String,
            !provider.hasPrefix("/") {
             diag.errors.append("\(path): network-condition-provider must be an absolute path")
@@ -298,6 +314,40 @@ public enum ResultValidator {
                 diag.errors.append("\(path): filename must match id (\(expected))")
             }
             if !isKebab(id) { diag.errors.append("\(path): id must be kebab-case (got '\(id)')") }
+        }
+
+        if let fixtures = data["fixtures"] {
+            guard let array = fixtures as? [Any] else {
+                diag.errors.append("\(path): fixtures must be an array")
+                return
+            }
+            for (i, raw) in array.enumerated() {
+                let ordinal = "fixtures[\(i)]"
+                guard let fixture = raw as? JSON else {
+                    diag.errors.append("\(path): \(ordinal) must be an object")
+                    continue
+                }
+                let unknown = Set(fixture.keys).subtracting(testFixtureOptional).sorted()
+                if !unknown.isEmpty { diag.errors.append("\(path): \(ordinal) unknown keys \(unknown)") }
+                for required in ["source", "destination"] {
+                    guard let value = fixture[required] as? String, !value.isEmpty else {
+                        diag.errors.append("\(path): \(ordinal).\(required) must be a non-empty string")
+                        continue
+                    }
+                    if (try? SafeRelativePath.normalize(value)) == nil {
+                        diag.errors.append("\(path): \(ordinal).\(required) must be a safe relative path")
+                    }
+                }
+                checkString(path, fixture, "group-id", prefix: ordinal + ".", diag)
+                checkBool(path, fixture, "files-app", prefix: ordinal + ".", diag)
+                checkString(path, fixture, "storage", prefix: ordinal + ".", diag)
+                if fixture["files-app"] as? Bool == true, fixture["group-id"] != nil {
+                    diag.errors.append("\(path): \(ordinal) cannot combine files-app with group-id")
+                }
+                if fixture["storage"] != nil, fixture["files-app"] as? Bool != true {
+                    diag.errors.append("\(path): \(ordinal).storage is valid only with files-app=true")
+                }
+            }
         }
 
         if let steps = data["steps"] {
@@ -368,6 +418,23 @@ public enum ResultValidator {
                                 path, condition, ordinal: "steps[\(i)].verify.elements[\(e)]", diag)
                         }
                     }
+                    var containerFilesArr: [Any] = []
+                    if let containerFiles = v["container-files"] {
+                        guard let arr = containerFiles as? [Any] else {
+                            diag.errors.append("\(path): steps[\(i)].verify.container-files must be an array of objects")
+                            continue
+                        }
+                        containerFilesArr = arr
+                        for (c, raw) in arr.enumerated() {
+                            guard let condition = raw as? JSON else {
+                                diag.errors.append("\(path): steps[\(i)].verify.container-files[\(c)] must be an object")
+                                continue
+                            }
+                            validateContainerFileCondition(
+                                path, condition,
+                                ordinal: "steps[\(i)].verify.container-files[\(c)]", diag)
+                        }
+                    }
                     // A verify with no conditions would pass vacuously in the harness
                     // (empty allSatisfy is true), so a verify-only step would PASS
                     // without checking anything. Require at least one condition.
@@ -376,12 +443,75 @@ public enum ResultValidator {
                     let matchesArr = (v["matches"] as? [Any]) ?? []
                     let notMatchesArr = (v["not-matches"] as? [Any]) ?? []
                     if containsArr.isEmpty && absentArr.isEmpty && matchesArr.isEmpty
-                        && notMatchesArr.isEmpty && elementsArr.isEmpty {
+                        && notMatchesArr.isEmpty && elementsArr.isEmpty && containerFilesArr.isEmpty {
                         diag.errors.append(
-                            "\(path): steps[\(i)].verify must have at least one contains, absent, matches, not-matches, or elements condition")
+                            "\(path): steps[\(i)].verify must have at least one contains, absent, matches, not-matches, elements, or container-files condition")
                     }
                 }
             }
+        }
+    }
+
+    private static func validateContainerFileCondition(
+        _ path: String, _ condition: JSON, ordinal: String, _ diag: Diagnostics
+    ) {
+        let unknown = Set(condition.keys).subtracting(testContainerFileOptional).sorted()
+        if !unknown.isEmpty { diag.errors.append("\(path): \(ordinal) unknown keys \(unknown)") }
+        guard let filePath = condition["path"] as? String,
+              (try? SafeRelativePath.normalize(filePath)) != nil else {
+            diag.errors.append("\(path): \(ordinal).path must be a safe relative path")
+            return
+        }
+        checkBool(path, condition, "exists", prefix: ordinal + ".", diag)
+        checkString(path, condition, "group-id", prefix: ordinal + ".", diag)
+        checkString(path, condition, "format", prefix: ordinal + ".", diag)
+        checkString(path, condition, "key-path", prefix: ordinal + ".", diag)
+        checkString(path, condition, "query", prefix: ordinal + ".", diag)
+        checkString(path, condition, "sha256", prefix: ordinal + ".", diag)
+        checkInteger(path, condition, "size", prefix: ordinal + ".", diag)
+        if let format = condition["format"] as? String,
+           !["metadata", "text", "json", "plist", "sqlite"].contains(format) {
+            diag.errors.append("\(path): \(ordinal).format must be metadata, text, json, plist, or sqlite")
+        }
+        if condition["query"] != nil, condition["format"] as? String != "sqlite" {
+            diag.errors.append("\(path): \(ordinal).query requires format=sqlite")
+        }
+        if condition["format"] as? String == "sqlite",
+           (condition["query"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            diag.errors.append("\(path): \(ordinal).format=sqlite requires a non-empty query")
+        }
+        if condition["key-path"] != nil,
+           !["json", "plist"].contains(condition["format"] as? String ?? "") {
+            diag.errors.append("\(path): \(ordinal).key-path requires format=json or plist")
+        }
+        if condition["equals"] != nil, condition["format"] as? String == "metadata" {
+            diag.errors.append("\(path): \(ordinal).equals cannot be used with format=metadata")
+        }
+        // format=text compares against the file's own text, so a non-string
+        // expectation could never match. json/plist/sqlite go through a
+        // canonical encoding, so any JSON value is meaningful there.
+        if let equals = condition["equals"],
+           ["text", ""].contains(condition["format"] as? String ?? ""),
+           !(equals is String) {
+            diag.errors.append("\(path): \(ordinal).equals must be a string when format is text or omitted")
+        }
+        if let hash = condition["sha256"] as? String,
+           hash.range(of: "^[0-9a-fA-F]{64}$", options: .regularExpression) == nil {
+            diag.errors.append("\(path): \(ordinal).sha256 must be 64 hexadecimal characters")
+        }
+        if let size = numberValue(condition["size"]), size < 0 {
+            diag.errors.append("\(path): \(ordinal).size must be non-negative")
+        }
+        if condition["exists"] as? Bool == false,
+           condition.keys.contains(where: { ["equals", "sha256", "size"].contains($0) }) {
+            diag.errors.append(
+                "\(path): \(ordinal) cannot combine exists=false with equals, sha256, or size")
+        }
+        let hasAssertion = condition.keys.contains(where: {
+            ["exists", "equals", "sha256", "size"].contains($0)
+        })
+        if !hasAssertion {
+            diag.errors.append("\(path): \(ordinal) must assert exists, equals, sha256, or size")
         }
     }
 
@@ -1161,7 +1291,8 @@ public enum ResultValidator {
                     guard let step = item as? JSON else { return false }
                     return step["skipped"] as? Bool != true
                 }
-                if !topPassed && !hasFailedStep && hasNonSkippedStep {
+                if !topPassed && !hasFailedStep && hasNonSkippedStep
+                    && data["cleanup-error"] == nil {
                     diag.errors.append("\(path): passed is false but no steps failed")
                 }
             }

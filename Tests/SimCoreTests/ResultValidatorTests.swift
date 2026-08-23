@@ -91,6 +91,53 @@ final class ResultValidatorTests: XCTestCase {
                       "expected a run/result passed mismatch error, got \(outcome.errors)")
     }
 
+    func testFixtureSetupFailureResultRemainsValid() throws {
+        let ws = try makeFailureResultWorkspace(result: [
+            "id": "fixture-test",
+            "passed": false,
+            "duration": 0.1,
+            "steps": [[
+                "passed": false,
+                "action": "fixtures",
+                "failure-type": "action",
+                "note": "fixture setup failed: missing source"
+            ]]
+        ])
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testFixtureCleanupFailureResultRemainsValid() throws {
+        let ws = try makeFailureResultWorkspace(result: [
+            "id": "fixture-test",
+            "passed": false,
+            "duration": 0.1,
+            "cleanup-error": "backup unavailable",
+            "steps": [["passed": true, "action": "tap Save"]]
+        ])
+        let outcome = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    private func makeFailureResultWorkspace(result: [String: Any]) throws -> URL {
+        let ws = tempDir.appendingPathComponent("failure-results-\(UUID().uuidString)")
+        try write(["app": "com.example.App"], to: ws.appendingPathComponent("config.json"))
+        try write([
+            "id": "fixture-test",
+            "title": "Fixture",
+            "steps": [["action": ["type": "tap", "selector": ["label": "Save"]]]]
+        ], to: ws.appendingPathComponent("tests/fixture-test.json"))
+        let runDir = ws.appendingPathComponent("runs/2026-06-19_100000")
+        try write([
+            "started": "2026-06-19T10:00:00+09:00",
+            "device": "udid",
+            "tests": [["id": "fixture-test", "passed": false, "duration": 0.1]],
+            "summary": ["total": 1, "passed": 0, "failed": 1]
+        ], to: runDir.appendingPathComponent("run.json"))
+        try write(result, to: runDir.appendingPathComponent("fixture-test/result.json"))
+        return ws
+    }
+
     // MARK: - Timestamp (ISO 8601 with timezone offset) validation
     //
     // AGENTS.md: "Run/result timestamps must be ISO 8601 with timezone offset."
@@ -297,6 +344,94 @@ final class ResultValidatorTests: XCTestCase {
         let file = dir.appendingPathComponent("\(id).json")
         try Data(JSONSerialization.data(withJSONObject: ["id": id, "title": "T", "steps": steps])).write(to: file)
         return ResultValidator.validateTestFile(file.path)
+    }
+
+    func testFixturesAndContainerFileAssertionsValidate() throws {
+        let dir = tempDir.appendingPathComponent("spec-data-artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("persisted-state.json")
+        try write([
+            "id": "persisted-state",
+            "title": "Persisted state",
+            "fixtures": [[
+                "source": "fixtures/account.json",
+                "destination": "Documents/Inbox/account.json"
+            ]],
+            "steps": [[
+                "verify": ["container-files": [[
+                    "path": "Library/Application Support/state.json",
+                    "format": "json",
+                    "key-path": "$.loggedIn",
+                    "equals": true
+                ]]]
+            ]]
+        ], to: file)
+        let outcome = ResultValidator.validateTestFile(file.path)
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testUnsafeFixtureAndInvalidContainerAssertionAreRejected() throws {
+        let dir = tempDir.appendingPathComponent("spec-bad-artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("bad-artifacts.json")
+        try write([
+            "id": "bad-artifacts",
+            "title": "Bad artifacts",
+            "fixtures": [["source": "../secret", "destination": "/outside"]],
+            "steps": [["verify": ["container-files": [[
+                "path": "db.sqlite", "format": "text", "query": "select 1"
+            ]]]]]
+        ], to: file)
+        let outcome = ResultValidator.validateTestFile(file.path)
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("safe relative path") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("query requires format=sqlite") }, "\(outcome.errors)")
+    }
+
+    func testImpossibleContainerAssertionsAreRejected() throws {
+        let outcome = try validateSpec(id: "bad-container-assertions", steps: [[
+            "verify": ["container-files": [
+                ["path": "state.json", "format": "metadata", "equals": "value"],
+                ["path": "db.sqlite", "format": "sqlite", "exists": true],
+                ["path": "missing", "exists": false, "size": 0]
+            ]]
+        ]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("equals cannot be used with format=metadata") })
+        XCTAssertTrue(outcome.errors.contains { $0.contains("format=sqlite requires a non-empty query") })
+        XCTAssertTrue(outcome.errors.contains { $0.contains("cannot combine exists=false") })
+    }
+
+    func testTextEqualsMustBeAString() throws {
+        let outcome = try validateSpec(id: "non-string-text-equals", steps: [[
+            "verify": ["container-files": [
+                ["path": "state.json", "format": "text", "equals": true],
+                ["path": "count.txt", "equals": 3]
+            ]]
+        ]])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertEqual(
+            outcome.errors.filter { $0.contains("equals must be a string") }.count, 2,
+            "\(outcome.errors)")
+
+        // json/plist/sqlite compare against a canonical encoding, so a
+        // non-string expectation is meaningful there.
+        let typed = try validateSpec(id: "typed-json-equals", steps: [[
+            "verify": ["container-files": [
+                ["path": "state.json", "format": "json", "key-path": "$.loggedIn", "equals": true]
+            ]]
+        ]])
+        XCTAssertTrue(typed.isValid, "\(typed.errors)")
+    }
+
+    func testEvidenceConfigKeysValidate() throws {
+        let outcome = try configOutcome([
+            "app": "com.x",
+            "capture-logs": true,
+            "log-predicate": "subsystem == 'com.x'",
+            "capture-container-diff": false
+        ], "evidence")
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
     }
 
     func testValidTapSpecValidates() throws {

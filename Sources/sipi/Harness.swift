@@ -21,19 +21,27 @@ private struct HarnessConfig: Decodable {
     var stepDelay: Double?
     var maxRetries: Int?
     var networkConditionProvider: String?
+    var captureLogs: Bool?
+    var logPredicate: String?
+    var captureContainerDiff: Bool?
 
     enum CodingKeys: String, CodingKey {
         case app
         case stepDelay = "step-delay"
         case maxRetries = "max-retries"
         case networkConditionProvider = "network-condition-provider"
+        case captureLogs = "capture-logs"
+        case logPredicate = "log-predicate"
+        case captureContainerDiff = "capture-container-diff"
     }
 }
 
-private enum HarnessJSONValue: Codable {
+enum HarnessJSONValue: Codable {
     case object([String: HarnessJSONValue])
     case array([HarnessJSONValue])
     case string(String)
+    case integer(Int64)
+    case unsignedInteger(UInt64)
     case number(Double)
     case bool(Bool)
     case null
@@ -42,6 +50,8 @@ private enum HarnessJSONValue: Codable {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() { self = .null }
         else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Int64.self) { self = .integer(value) }
+        else if let value = try? container.decode(UInt64.self) { self = .unsignedInteger(value) }
         else if let value = try? container.decode(Double.self) { self = .number(value) }
         else if let value = try? container.decode(String.self) { self = .string(value) }
         else if let value = try? container.decode([HarnessJSONValue].self) { self = .array(value) }
@@ -54,10 +64,104 @@ private enum HarnessJSONValue: Codable {
         case .object(let value): try container.encode(value)
         case .array(let value): try container.encode(value)
         case .string(let value): try container.encode(value)
+        case .integer(let value): try container.encode(value)
+        case .unsignedInteger(let value): try container.encode(value)
         case .number(let value): try container.encode(value)
         case .bool(let value): try container.encode(value)
         case .null: try container.encodeNil()
         }
+    }
+
+    var foundationValue: Any {
+        switch self {
+        case .object(let value): return value.mapValues(\.foundationValue)
+        case .array(let value): return value.map(\.foundationValue)
+        case .string(let value): return value
+        case .integer(let value): return value
+        case .unsignedInteger(let value): return value
+        case .number(let value): return value
+        case .bool(let value): return value
+        case .null: return NSNull()
+        }
+    }
+}
+
+enum ContainerFileAssertion {
+    static func matches(
+        _ inspection: FileInspection,
+        exists: Bool,
+        size: UInt64?,
+        sha256: String?,
+        value: Any?
+    ) -> Bool {
+        guard inspection.exists == exists else { return false }
+        if let size, inspection.size != size { return false }
+        if let sha256,
+           inspection.sha256?.lowercased() != sha256.lowercased() { return false }
+        if let value {
+            // A file written by an app usually ends in a newline, so a raw
+            // comparison would fail on whitespace the test never cared about.
+            guard let actual = inspection.value,
+                  trimmed(actual) == trimmed(ContainerOperations.canonicalString(value))
+            else { return false }
+        }
+        return true
+    }
+
+    static func trimmed(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum LogNDJSONSanitizer {
+    struct Result {
+        var data: Data
+        var recordCount: Int
+        var unexpectedLines: [String]
+    }
+
+    static func sanitize(_ data: Data) -> Result {
+        let text = String(decoding: data, as: UTF8.self)
+        var records: [String] = []
+        var unexpected: [String] = []
+        for rawLine in text.split(whereSeparator: \.isNewline).map(String.init) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            guard let lineData = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                if !line.hasPrefix("Filtering the log data using ") { unexpected.append(line) }
+                continue
+            }
+            if object["finished"] != nil, object["count"] != nil { continue }
+            records.append(line)
+        }
+        let normalized = records.isEmpty ? Data() : Data((records.joined(separator: "\n") + "\n").utf8)
+        return Result(data: normalized, recordCount: records.count, unexpectedLines: unexpected)
+    }
+}
+
+enum HarnessEvidence {
+    static func bundleIDs(primary: String, testOverrides: [String]) -> [String] {
+        Array(Set(([primary] + testOverrides).filter { !$0.isEmpty })).sorted()
+    }
+
+    static func logPredicate(
+        bundleIDs: [String],
+        executableForBundleID: (String) -> String?
+    ) -> String {
+        var clauses = Set<String>()
+        for bundleID in bundleIDs {
+            clauses.insert("subsystem == \"\(predicateString(bundleID))\"")
+            if let executable = executableForBundleID(bundleID), !executable.isEmpty {
+                clauses.insert("process == \"\(predicateString(executable))\"")
+            }
+        }
+        return clauses.sorted().map { "(\($0))" }.joined(separator: " OR ")
+    }
+
+    private static func predicateString(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
 
@@ -66,7 +170,22 @@ private struct HarnessTest: Decodable {
     var title: String?
     var app: String?
     var tags: [String]?
+    var fixtures: [HarnessFixture]?
     var steps: [HarnessStep]
+}
+
+private struct HarnessFixture: Decodable {
+    var source: String
+    var destination: String
+    var groupID: String?
+    var filesApp: Bool?
+    var storage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case source, destination, storage
+        case groupID = "group-id"
+        case filesApp = "files-app"
+    }
 }
 
 private struct HarnessStep: Decodable {
@@ -220,10 +339,30 @@ private struct HarnessVerify: Decodable {
     var matches: [String]?
     var notMatches: [String]?
     var elements: [HarnessElementCondition]?
+    var containerFiles: [HarnessContainerFileCondition]?
 
     enum CodingKeys: String, CodingKey {
         case contains, absent, matches, elements
         case notMatches = "not-matches"
+        case containerFiles = "container-files"
+    }
+}
+
+private struct HarnessContainerFileCondition: Decodable {
+    var path: String
+    var exists: Bool?
+    var groupID: String?
+    var format: String?
+    var keyPath: String?
+    var query: String?
+    var equals: HarnessJSONValue?
+    var sha256: String?
+    var size: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case path, exists, format, query, equals, sha256, size
+        case groupID = "group-id"
+        case keyPath = "key-path"
     }
 }
 
@@ -301,6 +440,7 @@ private struct HarnessRunOptions {
     var suiteName: String?
     var stopOnFailure: Bool
     var resetBetweenTests: Bool
+    var evidenceBundleIDs: [String]
 }
 
 private enum HarnessTime {
@@ -356,6 +496,7 @@ private final class HarnessRunner {
     private let udid: String
     private let device: Device?
     private let bundleID: String
+    private let evidenceBundleIDs: [String]
     private let runTrace: TraceWriter
     private let started = Date()
     private var runEntries: [[String: Any]] = []
@@ -368,6 +509,11 @@ private final class HarnessRunner {
     private var statusBarWasModified = false
     private var activeNetworkConditionBundleID: String?
     private var environmentWasCleaned = false
+    private var logProcess: SimShell.BackgroundProcess?
+    private var evidenceArtifacts: [String: String] = [:]
+    private var evidenceWarnings: [String] = []
+    private var testArtifacts: [String: [String: String]] = [:]
+    private var testCleanupErrors: [String: String] = [:]
 
     init(options: HarnessRunOptions) throws {
         self.options = options
@@ -378,14 +524,46 @@ private final class HarnessRunner {
         if !SimShell.isBooted(resolvedUDID) {
             try SimShell.boot(udid: resolvedUDID)
         }
-        self.bundleID = options.bundleID ?? config.app ?? ""
-        guard !self.bundleID.isEmpty else {
+        let resolvedBundleID = options.bundleID ?? config.app ?? ""
+        self.bundleID = resolvedBundleID
+        guard !resolvedBundleID.isEmpty else {
             throw HarnessError("Bundle ID is required. Pass --bundle-id or set .simpilot/config.json app.")
         }
+        self.evidenceBundleIDs = HarnessEvidence.bundleIDs(
+            primary: resolvedBundleID, testOverrides: options.evidenceBundleIDs)
         self.runDir = options.runDir ?? Self.defaultRunDir(workspace: options.workspace, device: device)
         try fm.createDirectory(atPath: self.runDir, withIntermediateDirectories: true)
         self.runTrace = try TraceWriter(path: self.runDir + "/trace.jsonl")
         runTrace.event("run-start", fields: ["device": udid, "bundle-id": bundleID])
+        if config.captureLogs != false {
+            do {
+                let path = self.runDir + "/logs.ndjson"
+                let predicate = config.logPredicate
+                    ?? Self.defaultLogPredicate(
+                        udid: resolvedUDID, bundleIDs: evidenceBundleIDs)
+                self.logProcess = try SimShell.logStream(
+                    udid: resolvedUDID,
+                    outputPath: path,
+                    predicate: predicate,
+                    stderrPath: self.runDir + "/logs.stderr.txt")
+                self.evidenceArtifacts["logs"] = "logs.ndjson"
+                runTrace.event("log-capture-start", fields: ["predicate": predicate])
+            } catch {
+                self.evidenceWarnings.append("log capture could not start: \(error)")
+                runTrace.event("log-capture-error", fields: ["error": String(describing: error)])
+            }
+        }
+    }
+
+    private static func defaultLogPredicate(udid: String, bundleIDs: [String]) -> String {
+        HarnessEvidence.logPredicate(bundleIDs: bundleIDs) { bundleID in
+            guard let appPath = SimShell.appBundlePath(udid: udid, bundleID: bundleID),
+                  !appPath.isEmpty,
+                  let info = NSDictionary(contentsOfFile: appPath + "/Info.plist") else {
+                return nil
+            }
+            return info["CFBundleExecutable"] as? String
+        }
     }
 
     /// Validate every spec and reject duplicate ids, returning the loaded tests.
@@ -393,7 +571,7 @@ private final class HarnessRunner {
     /// tests sharing an id, which would map to the same <runDir>/<id> output and
     /// silently overwrite each other) fails fast — without booting a simulator or
     /// leaving an empty run directory behind.
-    static func preflight(testPaths: [String]) throws -> [HarnessTest] {
+    static func preflight(testPaths: [String], workspace: String) throws -> [HarnessTest] {
         var loaded: [HarnessTest] = []
         var seenIDs = Set<String>()
         var errors: [String] = []
@@ -408,6 +586,18 @@ private final class HarnessRunner {
                 errors.append("duplicate test id '\(test.id)' in this run; ids must be unique")
                 continue
             }
+            let workspaceRoot = URL(fileURLWithPath: workspace, isDirectory: true)
+            for fixture in test.fixtures ?? [] {
+                do {
+                    let source = try SafeRelativePath.resolve(
+                        root: workspaceRoot, relative: fixture.source)
+                    guard FileManager.default.fileExists(atPath: source.path) else {
+                        throw CocoaError(.fileNoSuchFile)
+                    }
+                } catch {
+                    errors.append("\(path): fixture source \(fixture.source) is unavailable: \(error)")
+                }
+            }
             loaded.append(test)
         }
         if !errors.isEmpty {
@@ -418,6 +608,7 @@ private final class HarnessRunner {
 
     func run(tests: [HarnessTest]) throws -> String {
         defer {
+            stopEvidenceCapture()
             if !environmentWasCleaned {
                 try? cleanupEnvironment()
             }
@@ -446,6 +637,9 @@ private final class HarnessRunner {
             }
         }
 
+        stopEvidenceCapture()
+        collectCrashEvidence()
+
         // Finalize the run report before cleanup so a cleanup failure (which is
         // intentionally surfaced as a throw) can never discard run.json,
         // summary.json, or report.html.
@@ -455,6 +649,77 @@ private final class HarnessRunner {
         try cleanupEnvironment()
         environmentWasCleaned = true
         return runDir
+    }
+
+    private func stopEvidenceCapture() {
+        guard let process = logProcess else { return }
+        let status = process.stop()
+        logProcess = nil
+        runTrace.event("log-capture-stop", fields: ["status": status])
+        if status != 0 && status != SIGINT {
+            evidenceWarnings.append("log capture exited with status \(status)")
+        }
+        let logPath = runDir + "/logs.ndjson"
+        let sanitized = LogNDJSONSanitizer.sanitize(fm.contents(atPath: logPath) ?? Data())
+        do {
+            try sanitized.data.write(to: URL(fileURLWithPath: logPath), options: .atomic)
+        } catch {
+            evidenceWarnings.append("could not normalize log artifact: \(error)")
+        }
+        if sanitized.recordCount == 0 {
+            evidenceWarnings.append(
+                "log capture produced no records; set log-predicate if the app uses a custom logging identity")
+        }
+        if !sanitized.unexpectedLines.isEmpty {
+            let preview = sanitized.unexpectedLines.prefix(3).joined(separator: "; ")
+            evidenceWarnings.append("log capture discarded non-JSON stdout: \(preview)")
+        }
+        if let stderrPath = process.stderrPath,
+           let data = fm.contents(atPath: stderrPath),
+           !data.isEmpty {
+            evidenceArtifacts["log-errors"] = URL(fileURLWithPath: stderrPath).lastPathComponent
+            let message = String(decoding: data.prefix(2_048), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            evidenceWarnings.append("log capture stderr: \(message)")
+        } else if let stderrPath = process.stderrPath {
+            try? fm.removeItem(atPath: stderrPath)
+        }
+    }
+
+    private func collectCrashEvidence() {
+        do {
+            let output = URL(fileURLWithPath: runDir).appendingPathComponent("crash-reports", isDirectory: true)
+            var records: [CrashEvidenceRecord] = []
+            for evidenceBundleID in evidenceBundleIDs {
+                do {
+                    let collected = try CrashEvidence.collect(
+                        udid: udid, bundleID: evidenceBundleID, since: started,
+                        outputDirectory: output)
+                    records.append(contentsOf: collected)
+                    runTrace.event("crash-evidence", fields: [
+                        "bundle-id": evidenceBundleID, "count": collected.count
+                    ])
+                } catch {
+                    evidenceWarnings.append(
+                        "crash evidence collection for \(evidenceBundleID) failed: \(error)")
+                    runTrace.event("crash-evidence-error", fields: [
+                        "bundle-id": evidenceBundleID, "error": String(describing: error)
+                    ])
+                }
+            }
+            records.sort { $0.modified < $1.modified }
+            if !records.isEmpty {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+                try encoder.encode(records).write(
+                    to: URL(fileURLWithPath: runDir).appendingPathComponent("crash-reports.json"),
+                    options: .atomic)
+                evidenceArtifacts["crash-reports"] = "crash-reports.json"
+            }
+        } catch {
+            evidenceWarnings.append("crash evidence index could not be written: \(error)")
+            runTrace.event("crash-evidence-index-error", fields: ["error": String(describing: error)])
+        }
     }
 
     /// Restore simulator-wide state that the harness owns back to the values it
@@ -682,7 +947,71 @@ private final class HarnessRunner {
         let testTrace = try TraceWriter(path: testDir + "/trace.jsonl")
         testTrace.event("test-start", fields: ["test": test.id])
 
-        if options.launch {
+        var stepResults: [[String: Any]] = []
+        var failed = false
+        var review = false
+        var fixtureSetupError: String?
+
+        var fixtureManifest = FileMutationManifest()
+        var fixtureRoots: [URL] = []
+        var fixturesCleaned = false
+        defer {
+            if !fixturesCleaned && !fixtureManifest.entries.isEmpty {
+                let failures = ContainerArtifacts.cleanup(
+                    fixtureManifest,
+                    allowedRoots: fixtureRoots,
+                    allowedBackupRoot: URL(fileURLWithPath: testDir)
+                        .appendingPathComponent("fixture-backups", isDirectory: true)
+                )
+                if !failures.isEmpty {
+                    let message = failures.joined(separator: "; ")
+                    testCleanupErrors[test.id] = message
+                    evidenceWarnings.append("fixture cleanup for \(test.id) failed: \(message)")
+                    testTrace.event("fixture-cleanup-failed", fields: ["failures": failures])
+                }
+            }
+        }
+
+        if !(test.fixtures ?? []).isEmpty {
+            try? SimShell.terminate(udid: udid, bundleID: test.app ?? bundleID)
+            do {
+                try applyFixtures(
+                    test.fixtures ?? [], bundleID: test.app ?? bundleID,
+                    testDir: testDir, manifest: &fixtureManifest,
+                    roots: &fixtureRoots, trace: testTrace)
+                try writeCodable(fixtureManifest, to: testDir + "/fixture-manifest.json")
+                testArtifacts[test.id, default: [:]]["fixture-manifest"] = "fixture-manifest.json"
+            } catch {
+                failed = true
+                let message = "fixture setup failed: \(error)"
+                fixtureSetupError = message
+                if fm.fileExists(atPath: testDir + "/fixture-manifest.json") {
+                    testArtifacts[test.id, default: [:]]["fixture-manifest"] = "fixture-manifest.json"
+                }
+                testTrace.event("fixture-setup-failed", fields: ["error": message])
+            }
+        }
+
+        var beforeContainerSnapshot: ContainerSnapshot?
+        if !failed && config.captureContainerDiff != false {
+            do {
+                let root = try ContainerOperations.root(
+                    udid: udid, bundleID: test.app ?? bundleID, kind: .data)
+                let snapshot = try ContainerArtifacts.snapshot(root: root)
+                recordSnapshotErrors(snapshot, testID: test.id, phase: "before")
+                beforeContainerSnapshot = snapshot
+                try writeCodable(snapshot, to: testDir + "/container-before.json")
+                testArtifacts[test.id, default: [:]]["container-before"] = "container-before.json"
+            } catch {
+                evidenceWarnings.append(
+                    "container before snapshot for \(test.id) failed: \(error)")
+                testTrace.event("container-snapshot-error", fields: [
+                    "phase": "before", "error": String(describing: error)
+                ])
+            }
+        }
+
+        if !failed && options.launch {
             if options.resetBetweenTests {
                 try? SimShell.terminate(udid: udid, bundleID: test.app ?? bundleID)
             }
@@ -700,18 +1029,24 @@ private final class HarnessRunner {
             }
         }
 
-        var stepResults: [[String: Any]] = []
-        var failed = false
-        var review = false
         let retries = min(Self.maxRetries, max(0, options.retries ?? config.maxRetries ?? 1))
 
         for (index, step) in test.steps.enumerated() {
             if failed {
-                stepResults.append([
-                    "passed": true,
-                    "skipped": true,
-                    "note": "skipped after prior failure"
-                ])
+                if index == 0, let fixtureSetupError {
+                    stepResults.append([
+                        "passed": false,
+                        "action": "fixtures",
+                        "failure-type": "action",
+                        "note": fixtureSetupError
+                    ])
+                } else {
+                    stepResults.append([
+                        "passed": true,
+                        "skipped": true,
+                        "note": "skipped after prior failure"
+                    ])
+                }
                 continue
             }
 
@@ -731,10 +1066,102 @@ private final class HarnessRunner {
             try writeResultJSON(test: test, testDir: testDir, passed: !failed, review: review, steps: stepResults, started: testStarted)
         }
 
+        if let beforeContainerSnapshot {
+            do {
+                let root = try ContainerOperations.root(
+                    udid: udid, bundleID: test.app ?? bundleID, kind: .data)
+                let after = try ContainerArtifacts.snapshot(root: root)
+                recordSnapshotErrors(after, testID: test.id, phase: "after")
+                let diff = try ContainerArtifacts.diff(before: beforeContainerSnapshot, after: after)
+                try writeCodable(after, to: testDir + "/container-after.json")
+                try writeCodable(diff, to: testDir + "/container-diff.json")
+                testArtifacts[test.id, default: [:]]["container-after"] = "container-after.json"
+                testArtifacts[test.id, default: [:]]["container-diff"] = "container-diff.json"
+            } catch {
+                evidenceWarnings.append(
+                    "container after snapshot for \(test.id) failed: \(error)")
+                testTrace.event("container-snapshot-error", fields: [
+                    "phase": "after", "error": String(describing: error)
+                ])
+            }
+        }
+
+        if !fixtureManifest.entries.isEmpty {
+            try? SimShell.terminate(udid: udid, bundleID: test.app ?? bundleID)
+        }
+        var cleanupFailures = ContainerArtifacts.cleanup(
+            fixtureManifest,
+            allowedRoots: fixtureRoots,
+            allowedBackupRoot: URL(fileURLWithPath: testDir)
+                .appendingPathComponent("fixture-backups", isDirectory: true)
+        )
+        fixturesCleaned = true
+        if cleanupFailures.isEmpty, !fixtureManifest.entries.isEmpty {
+            do {
+                try writeCodable(
+                    FileMutationManifest(created: fixtureManifest.created),
+                    to: testDir + "/fixture-manifest.json")
+                try? fm.removeItem(atPath: testDir + "/fixture-backups")
+                // The emptied manifest stays on disk so a completed run cannot be
+                // replayed, but an empty file is not worth a report link.
+                testArtifacts[test.id]?.removeValue(forKey: "fixture-manifest")
+            } catch {
+                cleanupFailures.append("could not finalize fixture manifest: \(error)")
+            }
+        }
+        if !cleanupFailures.isEmpty {
+            failed = true
+            testCleanupErrors[test.id] = cleanupFailures.joined(separator: "; ")
+            testTrace.event("fixture-cleanup-failed", fields: ["failures": cleanupFailures])
+        } else if !fixtureManifest.entries.isEmpty {
+            testTrace.event("fixture-cleanup", fields: ["succeeded": true])
+        }
+
         let duration = Date().timeIntervalSince(testStarted)
         try writeResultJSON(test: test, testDir: testDir, passed: !failed, review: review, steps: stepResults, started: testStarted)
         testTrace.event("test-finish", fields: ["test": test.id, "passed": !failed, "duration": duration])
         return TestResult(passed: !failed, review: review, skipped: false, duration: duration)
+    }
+
+    private func applyFixtures(
+        _ fixtures: [HarnessFixture],
+        bundleID: String,
+        testDir: String,
+        manifest: inout FileMutationManifest,
+        roots: inout [URL],
+        trace: TraceWriter
+    ) throws {
+        let workspaceRoot = URL(fileURLWithPath: options.workspace, isDirectory: true)
+        let backups = URL(fileURLWithPath: testDir).appendingPathComponent("fixture-backups", isDirectory: true)
+        for fixture in fixtures {
+            let sourceRelative = try SafeRelativePath.normalize(fixture.source)
+            let source = try SafeRelativePath.resolve(root: workspaceRoot, relative: sourceRelative)
+            let root: URL
+            if fixture.filesApp == true {
+                root = try FileProviderStorage.select(udid: udid, explicitPath: fixture.storage)
+            } else {
+                root = try ContainerOperations.root(
+                    udid: udid,
+                    bundleID: bundleID,
+                    kind: fixture.groupID.map(ContainerKind.group) ?? .data)
+            }
+            if !roots.contains(where: {
+                $0.standardizedFileURL.resolvingSymlinksInPath()
+                    == root.standardizedFileURL.resolvingSymlinksInPath()
+            }) {
+                roots.append(root)
+            }
+            let placed = try ContainerArtifacts.put(
+                source: source, root: root, destination: fixture.destination,
+                backupDirectory: backups, manifest: &manifest,
+                persistManifest: { try self.writeCodable($0, to: testDir + "/fixture-manifest.json") })
+            trace.event("fixture-put", fields: [
+                "source": fixture.source,
+                "destination": placed.path,
+                "files-app": fixture.filesApp == true,
+                "group-id": fixture.groupID ?? ""
+            ])
+        }
     }
 
     private func runStep(
@@ -800,7 +1227,11 @@ private final class HarnessRunner {
                     }
                     stage = "verify"
 
-                    verifyRows = try waitAndVerify(step.verify, timeout: step.wait ?? 3.0)
+                    verifyRows = try waitAndVerify(
+                        step.verify,
+                        timeout: step.wait ?? 3.0,
+                        bundleID: test.app ?? bundleID
+                    )
                     stepPassed = verifyRows.allSatisfy { $0["found"] as? Bool == true }
                     if stepPassed { break }
                     lastFailureType = "verify"
@@ -812,6 +1243,18 @@ private final class HarnessRunner {
                         "stage": "verify",
                         "error": StepNote.verifyMismatchSummary(verifyRows)
                     ])
+                    if let infrastructureFailure = verifyRows.first(where: {
+                        $0["retry-safe"] as? Bool == false
+                    }) {
+                        retryUnsafeNote = infrastructureFailure["grep-match"] as? String
+                            ?? "verification infrastructure failed; action retry suppressed"
+                        trace.event("step-retry-suppressed", fields: [
+                            "test": test.id,
+                            "step": stepNumber,
+                            "reason": retryUnsafeNote ?? "verification infrastructure failure"
+                        ])
+                        break
+                    }
                 } catch {
                     lastFailureType = stage
                     // Keep the message, not just the category. `failure-type:
@@ -881,10 +1324,13 @@ private final class HarnessRunner {
                 artifactErrors.append("after screenshot: \(error)")
             }
 
+            let publicVerifyRows = verifyRows.map { row in
+                row.filter { $0.key != "retry-safe" }
+            }
             var result: [String: Any] = [
                 "passed": stepPassed,
                 "duration": Date().timeIntervalSince(stepStarted),
-                "verify": verifyRows,
+                "verify": publicVerifyRows,
                 "attempted-methods": attempted
             ]
             // Reference only the artifacts that exist; a path to a file that was
@@ -1584,38 +2030,138 @@ private final class HarnessRunner {
         }
     }
 
-    private func waitAndVerify(_ verify: HarnessVerify?, timeout: Double) throws -> [[String: Any]] {
+    private func waitAndVerify(
+        _ verify: HarnessVerify?,
+        timeout: Double,
+        bundleID: String
+    ) throws -> [[String: Any]] {
         guard let verify else { return [] }
         let contains = verify.contains ?? []
         let absent = verify.absent ?? []
         let matches = verify.matches ?? []
         let notMatches = verify.notMatches ?? []
         let elements = (verify.elements ?? []).map(\.condition)
+        let containerFiles = verify.containerFiles ?? []
+        var containerRoots: [String: URL] = [:]
+        var containerRootErrors: [String: String] = [:]
+        for condition in containerFiles {
+            let key = condition.groupID ?? ""
+            if containerRoots[key] == nil, containerRootErrors[key] == nil {
+                let kind = condition.groupID.map(ContainerKind.group) ?? .data
+                do {
+                    containerRoots[key] = try ContainerOperations.root(
+                        udid: udid, bundleID: bundleID, kind: kind)
+                } catch {
+                    containerRootErrors[key] = String(describing: error)
+                }
+            }
+        }
         let deadline = Date().addingTimeInterval(max(0, timeout))
         var rows: [VerifyEvaluator.Row] = []
+        var containerRows: [[String: Any]] = []
         repeat {
             // Absence-shaped conditions are evaluated against the deep tree (see
             // VerifyEvaluator): a forbidden string only in System UI / the grid
             // pass must not be missed. Presence escalates to deep on demand.
-            let fastNodes = try driver.describe(udid, deep: false)
-            let fast = VerifyEvaluator.Capture(json: try AXNodeJSON.string(for: fastNodes), nodes: fastNodes)
-            rows = try VerifyEvaluator.evaluate(
-                contains: contains,
-                absent: absent,
-                matches: matches,
-                notMatches: notMatches,
-                elements: elements,
-                fast: fast
-            ) {
-                let deepNodes = try self.driver.describe(self.udid, deep: true)
-                return VerifyEvaluator.Capture(json: try AXNodeJSON.string(for: deepNodes), nodes: deepNodes)
+            if !contains.isEmpty || !absent.isEmpty || !matches.isEmpty
+                || !notMatches.isEmpty || !elements.isEmpty {
+                let fastNodes = try driver.describe(udid, deep: false)
+                let fast = VerifyEvaluator.Capture(json: try AXNodeJSON.string(for: fastNodes), nodes: fastNodes)
+                rows = try VerifyEvaluator.evaluate(
+                    contains: contains,
+                    absent: absent,
+                    matches: matches,
+                    notMatches: notMatches,
+                    elements: elements,
+                    fast: fast
+                ) {
+                    let deepNodes = try self.driver.describe(self.udid, deep: true)
+                    return VerifyEvaluator.Capture(json: try AXNodeJSON.string(for: deepNodes), nodes: deepNodes)
+                }
             }
-            if rows.allSatisfy({ $0.found }) {
-                return rows.map(Self.verifyRowDict)
+            containerRows = containerVerifyRows(
+                containerFiles, roots: containerRoots, rootErrors: containerRootErrors)
+            if rows.allSatisfy({ $0.found })
+                && containerRows.allSatisfy({ $0["found"] as? Bool == true }) {
+                return rows.map(Self.verifyRowDict) + containerRows
             }
             usleep(250 * 1000)
         } while Date() < deadline
-        return rows.map(Self.verifyRowDict)
+        return rows.map(Self.verifyRowDict) + containerRows
+    }
+
+    private func containerVerifyRows(
+        _ conditions: [HarnessContainerFileCondition],
+        roots: [String: URL],
+        rootErrors: [String: String]
+    ) -> [[String: Any]] {
+        conditions.map { condition in
+            do {
+                let key = condition.groupID ?? ""
+                guard let root = roots[key] else {
+                    throw HarnessError(rootErrors[key] ?? "container root was not resolved")
+                }
+                let expectedExists = condition.exists ?? true
+                let inspection = try ContainerOperations.inspect(
+                    root: root,
+                    relative: condition.path,
+                    format: condition.format ?? (condition.equals == nil ? "metadata" : "text"),
+                    keyPath: condition.keyPath,
+                    sqliteQuery: condition.query,
+                    includeHash: condition.sha256 != nil
+                )
+                let found = ContainerFileAssertion.matches(
+                    inspection,
+                    exists: expectedExists,
+                    size: condition.size,
+                    sha256: condition.sha256,
+                    value: condition.equals?.foundationValue
+                )
+                var expectations: [String] = ["exists=\(expectedExists)"]
+                if let size = condition.size {
+                    expectations.append("size=\(size)")
+                }
+                if let hash = condition.sha256 {
+                    expectations.append("sha256=\(hash)")
+                }
+                if let expected = condition.equals {
+                    let value = ContainerOperations.canonicalString(expected.foundationValue)
+                    expectations.append("equals=\(value)")
+                }
+                let match: Any
+                if let value = inspection.value { match = Self.evidencePreview(value) }
+                else if let hash = inspection.sha256 { match = hash }
+                else { match = NSNull() }
+                return [
+                    "check": "container-file \(condition.path) " + expectations.joined(separator: " "),
+                    "found": found,
+                    "grep-match": match
+                ]
+            } catch {
+                return [
+                    "check": "container-file \(condition.path)",
+                    "found": false,
+                    "grep-match": "inspection error: \(error)",
+                    "retry-safe": false
+                ]
+            }
+        }
+    }
+
+    private static func evidencePreview(_ value: String, limit: Int = 4_096) -> String {
+        guard value.count > limit else { return value }
+        return String(value.prefix(limit)) + "… [truncated, \(value.count) characters total]"
+    }
+
+    private func recordSnapshotErrors(
+        _ snapshot: ContainerSnapshot,
+        testID: String,
+        phase: String
+    ) {
+        guard let errors = snapshot.errors, !errors.isEmpty else { return }
+        let examples = errors.prefix(3).map { "\($0.path): \($0.error)" }.joined(separator: "; ")
+        evidenceWarnings.append(
+            "container \(phase) snapshot for \(testID) skipped \(errors.count) file(s): \(examples)")
     }
 
     private static func verifyRowDict(_ row: VerifyEvaluator.Row) -> [String: Any] {
@@ -1850,13 +2396,19 @@ private final class HarnessRunner {
         steps: [[String: Any]],
         started: Date
     ) throws {
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "id": test.id,
             "passed": passed,
             "review": review,
             "duration": Date().timeIntervalSince(started),
             "steps": steps
         ]
+        if let artifacts = testArtifacts[test.id], !artifacts.isEmpty {
+            object["artifacts"] = artifacts
+        }
+        if let error = testCleanupErrors[test.id] {
+            object["cleanup-error"] = error
+        }
         try writeJSON(object.filterJSON(), to: testDir + "/result.json")
     }
 
@@ -1881,7 +2433,15 @@ private final class HarnessRunner {
         if let suite = options.suiteName { object["suite"] = suite }
         if let finished { object["finished"] = HarnessTime.iso(finished) }
         if let commit = Self.gitCommit() { object["commit"] = commit }
+        if !evidenceArtifacts.isEmpty { object["artifacts"] = evidenceArtifacts }
+        if !evidenceWarnings.isEmpty { object["evidence-warnings"] = evidenceWarnings }
         try writeJSON(object.filterJSON(), to: runDir + "/run.json")
+    }
+
+    private func writeCodable<T: Encodable>(_ value: T, to path: String) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(value).write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
     private func writeJSON(_ object: [String: Any], to path: String) throws {
@@ -2005,7 +2565,10 @@ extension Sipi {
         func run() throws {
             do {
                 // Validate the spec before touching the simulator.
-                let tests = try HarnessRunner.preflight(testPaths: [testPath])
+                let tests = try HarnessRunner.preflight(testPaths: [testPath], workspace: workspace)
+                if noLaunch, tests.contains(where: { !($0.fixtures ?? []).isEmpty }) {
+                    throw HarnessError("--no-launch cannot be combined with fixtures")
+                }
                 let runner = try HarnessRunner(options: HarnessRunOptions(
                     workspace: workspace,
                     udid: device,
@@ -2015,7 +2578,8 @@ extension Sipi {
                     launch: !noLaunch,
                     suiteName: nil,
                     stopOnFailure: false,
-                    resetBetweenTests: true
+                    resetBetweenTests: true,
+                    evidenceBundleIDs: tests.compactMap(\.app)
                 ))
                 let path = try runner.run(tests: tests)
                 print("Run results: \(URL(fileURLWithPath: path).path)")
@@ -2064,7 +2628,10 @@ extension Sipi {
                 }
                 let paths = suite.tests.map { workspace + "/tests/" + $0 + ".json" }
                 // Validate every spec before touching the simulator.
-                let tests = try HarnessRunner.preflight(testPaths: paths)
+                let tests = try HarnessRunner.preflight(testPaths: paths, workspace: workspace)
+                if noLaunch, tests.contains(where: { !($0.fixtures ?? []).isEmpty }) {
+                    throw HarnessError("--no-launch cannot be combined with fixtures")
+                }
                 let runner = try HarnessRunner(options: HarnessRunOptions(
                     workspace: workspace,
                     udid: device,
@@ -2074,7 +2641,8 @@ extension Sipi {
                     launch: !noLaunch,
                     suiteName: suite.name,
                     stopOnFailure: suite.settings?.stopOnFailure ?? false,
-                    resetBetweenTests: suite.settings?.resetBetweenTests ?? true
+                    resetBetweenTests: suite.settings?.resetBetweenTests ?? true,
+                    evidenceBundleIDs: tests.compactMap(\.app)
                 ))
                 let path = try runner.run(tests: tests)
                 print("Run results: \(URL(fileURLWithPath: path).path)")

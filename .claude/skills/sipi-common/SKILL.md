@@ -1,14 +1,13 @@
 ---
 name: sipi-common
-description: Prepares and repairs an iOS Simulator session for SimPilot's native `sipi` driver and drives it ad-hoc — "tap this on the simulator", "describe the current screen", "take a screenshot", or "the simulator/driver is broken". Use for one-off driving, setup, and recovery; use sipi-test for repeatable saved JSON tests and audits, and sipi-verify for a one-off post-change feature check.
+description: Prepares and repairs an iOS Simulator session for SimPilot's native `sipi` driver, drives it ad-hoc, and selects one-off sipi data/evidence commands. Use for requests such as "tap this on the simulator", "put this file in the app Inbox", "inspect what the app saved", "collect this app's crash reports", or "the simulator/driver is broken". Use sipi-test for repeatable saved JSON tests and sipi-verify for a one-off post-change feature check.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 # Shared SimPilot Setup
 
-Session setup, driver readiness, config, build/install, and recovery — the
-foundation `sipi-test` and `sipi-verify` both build on, and the skill to use
-directly for ad-hoc driving.
+Session setup, driver readiness, config, build/install, recovery, and ad-hoc
+commands — the foundation `sipi-test` and `sipi-verify` both build on.
 
 ## Who owns what
 
@@ -24,6 +23,7 @@ counts as the right screen, and when the observed state contradicts the request.
 - Checking whether the native driver and the simulator are ready
 - Creating or fixing `.simpilot/config.json`
 - Building and installing the app
+- One-off app/App Group, Files.app, xcappdata, or crash-evidence operations
 - Recovering from a simulator, driver, build, or interaction failure
 
 ## Workflow
@@ -37,7 +37,12 @@ Every session runs this sequence, ad-hoc or otherwise:
 3. If the config has a `build` section, build and install per `docs/build.md`.
 4. Drive with the commands in `docs/ui-driver.md`; `docs/patterns.md` has the
    fallback chain and per-control quirks.
-5. On failure, apply the smallest fix in `docs/troubleshooting.md` that restores
+5. For one-off data or evidence work, inspect the installed CLI instead of
+   memorizing syntax: start with `sipi --help`, then run
+   `sipi help container`, `sipi help files-app`, `sipi help xcappdata`, or
+   `sipi help crash-evidence` and the selected nested command's help. Keep
+   operations already supplied by simctl as direct `xcrun simctl` commands.
+6. On failure, apply the smallest fix in `docs/troubleshooting.md` that restores
    a reliable session.
 
 Prefer observed UI over source: `describe-ui` and screenshots are the source of

@@ -242,6 +242,8 @@ public enum ReportGenerator {
         let started = esc(run["started"] as? String ?? "")
         let summary = run["summary"] as? JSON ?? [:]
         let tests = run["tests"] as? [JSON] ?? []
+        let runArtifacts = run["artifacts"] as? [String: String] ?? [:]
+        let evidenceWarnings = run["evidence-warnings"] as? [String] ?? []
 
         // Load results
         var results: [String: JSON] = [:]
@@ -269,6 +271,8 @@ public enum ReportGenerator {
             let b = badge(entry)
             let result = results[tid] ?? [:]
             let steps = result["steps"] as? [JSON] ?? []
+            let artifactHTML = renderArtifactLinks(result["artifacts"] as? [String: String] ?? [:], prefix: tid + "/")
+            let cleanupError = esc(result["cleanup-error"] as? String ?? "")
 
             var stepsHTML = ""
             var failedHTML = ""
@@ -316,7 +320,7 @@ public enum ReportGenerator {
                     failedHTML += "<details><summary>describe-ui snapshot</summary><pre>\(snapshot)</pre></details></div>\n"
                 }
             }
-            if stepsHTML.isEmpty && failedHTML.isEmpty { continue }
+            if stepsHTML.isEmpty && failedHTML.isEmpty && artifactHTML.isEmpty && cleanupError.isEmpty { continue }
             anchored.insert(tid)
 
             details += "<div class=\"detail\" id=\"test-\(esc(slug(tid)))\">"
@@ -326,6 +330,12 @@ public enum ReportGenerator {
             }
             if !failedHTML.isEmpty {
                 details += failedHTML
+            }
+            if !cleanupError.isEmpty {
+                details += "<div class=\"step-info\"><h4>Fixture cleanup failed</h4><p>\(cleanupError)</p></div>"
+            }
+            if !artifactHTML.isEmpty {
+                details += "<div class=\"artifacts\"><strong>Artifacts</strong> \(artifactHTML)</div>"
             }
             details += "</div>\n"
         }
@@ -341,7 +351,9 @@ public enum ReportGenerator {
             let dur = entry["duration"] as? Double ?? 0
             let result = results[tid] ?? [:]
             let steps = result["steps"] as? [JSON] ?? []
-            let notes = steps.compactMap { $0["note"] as? String }.joined(separator: "; ")
+            var noteParts = steps.compactMap { $0["note"] as? String }
+            if let cleanup = result["cleanup-error"] as? String { noteParts.append("cleanup: " + cleanup) }
+            let notes = noteParts.joined(separator: "; ")
             let name = anchored.contains(tid)
                 ? "<a href=\"#test-\(esc(slug(tid)))\">\(esc(tid))</a>"
                 : esc(tid)
@@ -364,6 +376,10 @@ public enum ReportGenerator {
         let failureSection = failureHighlights.isEmpty
             ? ""
             : "<section class=\"failures\"><h2>Failure Highlights</h2>\(failureHighlights)</section>"
+        let runArtifactHTML = renderArtifactLinks(runArtifacts, prefix: "")
+        let evidenceHTML = evidenceWarnings.isEmpty ? "" :
+            "<section class=\"warnings\"><h2>Evidence warnings</h2><ul>" +
+            evidenceWarnings.map { "<li>\(esc($0))</li>" }.joined() + "</ul></section>"
 
         let css = paletteCSS + """
         h1{font-size:24px;font-weight:600;margin-bottom:4px}
@@ -378,6 +394,9 @@ public enum ReportGenerator {
         .failures{background:var(--card);border-left:4px solid var(--fail-edge);border-radius:8px;padding:16px;margin-bottom:24px;box-shadow:var(--shadow)}
         .failure-card{border-top:1px solid var(--line-soft);padding:12px 0;font-size:13px;line-height:1.5}
         .failure-card:first-of-type{border-top:0;padding-top:0}.failure-card p{margin-top:6px}
+        .warnings{background:var(--card);border-left:4px solid var(--review-edge);border-radius:8px;padding:16px;margin-bottom:24px}
+        .warnings ul{margin:8px 0 0 20px}.artifacts{margin-top:12px;font-size:13px}
+        .artifacts a,.run-artifacts a{margin-right:10px}
         .failure-card dl{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;margin-top:6px}
         .failure-card dt{color:var(--muted);font-weight:600}.failure-card dd{margin:0}
         table{width:100%;border-collapse:collapse;background:var(--card);border-radius:12px;overflow:hidden;box-shadow:var(--shadow);margin-bottom:24px}
@@ -424,6 +443,8 @@ public enum ReportGenerator {
         <header class="page-head"><h1>\(suiteName)</h1>\(themeToggleHTML)</header>
         <p class="meta">\(deviceName) &middot; \(deviceRuntime) &middot; \(commit) &middot; \(started)</p>
         <div class="summary">\(summaryHTML)</div>
+        \(evidenceHTML)
+        \(runArtifactHTML.isEmpty ? "" : "<div class=\"run-artifacts\"><strong>Run artifacts</strong> \(runArtifactHTML)</div>")
         \(failureSection)
         <table><thead><tr><th>Status</th><th>Test</th><th>Duration</th><th>Notes</th></tr></thead>
         <tbody>\(tableRows)</tbody></table>
@@ -617,6 +638,15 @@ public enum ReportGenerator {
             let value = esc(m["value"] as? String ?? "")
             return "\(method)(\(value))"
         }.joined(separator: ", ")
+    }
+
+    private static func renderArtifactLinks(_ artifacts: [String: String], prefix: String) -> String {
+        artifacts.keys.sorted().compactMap { key in
+            guard let value = artifacts[key],
+                  !value.hasPrefix("/"), !value.contains(".."), !value.contains("/") else { return nil }
+            let href = prefix + value
+            return "<a href=\"\(esc(href))\">\(esc(key))</a>"
+        }.joined(separator: " ")
     }
 
     // MARK: - Verify report (formerly generate_verify_report.swift)

@@ -49,6 +49,25 @@ final class EmbeddedSkillsTests: XCTestCase {
         XCTAssertNotNil(text, "sipi-common/SKILL.md must decode as UTF-8 text")
     }
 
+    func testEmbeddedSkillsDescribeDataAndEvidenceWorkflow() throws {
+        let common = try text(at: "sipi-common/SKILL.md")
+        XCTAssertTrue(common.contains("sipi --help"))
+        XCTAssertTrue(common.contains("sipi help container"))
+
+        let testSkill = try text(at: "sipi-test/SKILL.md")
+        XCTAssertTrue(testSkill.contains("reversible file fixtures"))
+        XCTAssertTrue(testSkill.contains("primary app data-container snapshots/diffs"))
+
+        let jsonReference = try text(at: "sipi-test/references/json-reference.md")
+        XCTAssertTrue(jsonReference.contains("`container-files`"))
+        XCTAssertTrue(jsonReference.contains("`evidence-warnings`"))
+        XCTAssertTrue(jsonReference.contains("There is no Files.app target"))
+        XCTAssertTrue(jsonReference.contains("including `describe-ui` and\n`container-files`"))
+
+        let actions = try text(at: "sipi-test/references/actions.md")
+        XCTAssertFalse(actions.contains(#""arguments": ["--fixture"]"#))
+    }
+
     func testRelativePathsUsePosixSeparators() {
         for (path, _) in EmbeddedSkills.all {
             XCTAssertFalse(path.hasPrefix("/"), "\(path) must be relative")
@@ -68,5 +87,10 @@ final class EmbeddedSkillsTests: XCTestCase {
                        "generate_verify_report.swift must no longer be embedded (folded into `sipi verify-report`)")
         XCTAssertFalse(paths.contains("sipi-test/scripts/validate_simpilot_results.swift"),
                        "validate_simpilot_results.swift must no longer be embedded (folded into `sipi validate`)")
+    }
+
+    private func text(at path: String) throws -> String {
+        let entry = try XCTUnwrap(EmbeddedSkills.all.first { $0.path == path })
+        return try XCTUnwrap(String(data: entry.data, encoding: .utf8))
     }
 }

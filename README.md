@@ -77,6 +77,14 @@ They can also create real Simulator-controlled error preconditions such as denie
 
 Verification goes past text matching: alongside `contains` / `absent` and regular expressions, a step can assert about elements themselves — that a control is disabled, that a list holds exactly five rows, that a value matches a pattern, or that a touch target meets 44pt.
 
+Tests can also install reversible file fixtures into an app data container
+(including `Documents/Inbox`), an App Group, or experimental Files.app storage.
+App data and App Group files can be asserted as text, JSON, plist, SQLite, size,
+or SHA-256 state; Files.app fixtures are verified through the app UI. Each run
+records filtered unified logs, primary app data-container snapshots/diffs, and
+app-specific crash reports as linked evidence.
+See [Test data and evidence artifacts](docs/data-artifacts.md).
+
 **Run tests:**
 ```text
 /sipi-test Run the settings-navigation test

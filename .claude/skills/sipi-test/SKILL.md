@@ -1,6 +1,6 @@
 ---
 name: sipi-test
-description: Regression testing and quality audits on the iOS Simulator. Creates and runs saved JSON tests for UI flows, error messages, offline/timeouts, permissions, deep links, push notifications, location, accessibility, appearance, and localization. Use for requests such as "run the regression suite", "test the network error UI", "deny Photos access", "open this deep link", "send a push", "audit accessibility", "check dark mode", or "verify the Japanese localization". Use sipi-verify instead for a one-off post-change visual check.
+description: Regression testing and quality audits on the iOS Simulator. Creates and runs saved JSON tests for UI flows, reversible file fixtures, persisted app/App Group state, logs and crash evidence, error states, permissions, deep links, push notifications, location, accessibility, appearance, and localization. Use for requests such as "seed the Inbox and test the import", "verify what the app saved", "run the regression suite", "test the network error UI", "deny Photos access", "audit accessibility", "check dark mode", or "verify the Japanese localization". Use sipi-common for one-off data/container operations and sipi-verify for a one-off post-change visual check.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
@@ -13,11 +13,15 @@ Write explicit v2 JSON specs, then hand execution to `sipi run-test` /
 
 **The harness owns** the step loop, target resolution, retry policy, conditional
 waits, screenshot and describe-ui capture, verify evaluation, `result.json`,
-`trace.jsonl`, `summary.json`, and `report.html`. Do not reconstruct any of it
-with Bash.
+`trace.jsonl`, `summary.json`, `report.html`, reversible file fixtures,
+primary app data-container snapshots/diffs, unified logs, and crash evidence.
+Do not reconstruct any of it with Bash. If fixture restoration fails, use only
+the explicit `sipi` recovery commands in `docs/run.md`; that is recovery from a
+recorded manifest, not a replacement harness.
 
 **You own** intent, the spec, the choice of targets, verify semantics and their
-negative controls, failure diagnosis, and source-fix proposals.
+negative controls, fixture selection, evidence interpretation, failure
+diagnosis, and source-fix proposals.
 
 ## Core Principles
 
@@ -63,7 +67,8 @@ sipi run-suite .simpilot/suites/<name>.json --workspace .simpilot
 ```
 
 4. Read `"$RUN_DIR/summary.json"` for the compact result; open
-   `"$RUN_DIR/report.html"` for the screenshots and failure detail.
+   `"$RUN_DIR/report.html"` for screenshots, failure detail, evidence warnings,
+   and links to logs/container/crash artifacts. Gate on the CLI exit code too.
 
 If asked to "create and run", proceed without waiting for confirmation.
 

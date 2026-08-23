@@ -1,4 +1,4 @@
 interface:
   display_name: "SimPilot Common"
-  short_description: "Prepare/repair a simulator session and drive it ad-hoc — tap, describe, screenshot; fix SimPilot setup and driver issues"
-  default_prompt: "Use $sipi-common to prepare the simulator session and fix setup issues."
+  short_description: "Prepare, repair, drive, and select ad-hoc sipi commands"
+  default_prompt: "Use $sipi-common to prepare the simulator and select the right sipi command from its help."

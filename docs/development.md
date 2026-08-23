@@ -138,6 +138,19 @@ sipi screenshot <udid> <path>        # zero-copy IOSurface PNG
 sipi record-video <udid> <path>      # simctl io recordVideo --codec h264 (background + SIGINT)
 ```
 
+### Test data and evidence
+
+```sh
+sipi container ...                   # safe app data/App Group copy, inspect, snapshot, diff, cleanup
+sipi files-app ...                   # experimental File Provider Storage discovery/copy/cleanup
+sipi xcappdata ...                   # create/validate; install with simctl directly
+sipi crash-evidence ...              # collect app-specific crash reports in a time range
+```
+
+These are not aliases for existing simctl commands. See
+[`data-artifacts.md`](data-artifacts.md) for the path-safety contract, fixture
+JSON, persistent-state assertions, and automatic run evidence.
+
 ### Devices
 
 ```sh

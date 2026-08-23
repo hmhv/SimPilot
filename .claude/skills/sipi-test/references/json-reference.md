@@ -21,9 +21,17 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
     summary.json
     trace.jsonl
     report.html
+    logs.ndjson
+    logs.stderr.txt              # only when stderr is non-empty
+    crash-reports.json           # only when matching reports exist
+    crash-reports/               # copied .ips/.crash files
     <test-id>/
       result.json
       trace.jsonl
+      fixture-manifest.json      # when fixtures are used
+      container-before.json      # primary app data container; when capture succeeds
+      container-after.json       # primary app data container; when capture succeeds
+      container-diff.json        # primary app data container; when both succeed
       step-NNN.png
       step-NNN.describe-before.json
       step-NNN.describe-after.json
@@ -53,13 +61,17 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
 | `keep-runs` | int | No |
 | `record-video` | bool | No |
 | `network-condition-provider` | absolute path string | No |
+| `capture-logs` | bool | No (default true) |
+| `log-predicate` | string | No |
+| `capture-container-diff` | bool | No (default true) |
 | `build` | object (`project` / `scheme` / `configuration`) | No |
 
-The harness consumes `app`, `step-delay`, `max-retries`, and
-`network-condition-provider`. `build` drives the build step (see
+The harness consumes `app`, `step-delay`, `max-retries`,
+`network-condition-provider`, `capture-logs`, `log-predicate`, and
+`capture-container-diff`. `build` drives the build step (see
 `../../sipi-common/docs/build.md`; all sub-keys optional, `"build": {}` enables
 auto-detection). `keep-runs` and `record-video` pass validation but the runner
-does not act on them.
+does not act on them. Log and container-diff capture default to true.
 
 ## tests/&lt;id&gt;.json
 
@@ -68,6 +80,9 @@ does not act on them.
   "id": "login-flow",
   "title": "Login Flow",
   "tags": ["smoke"],
+  "fixtures": [
+    { "source": "fixtures/account.json", "destination": "Documents/Inbox/account.json" }
+  ],
   "steps": [
     {
       "id": "tap-sign-in",
@@ -87,6 +102,7 @@ Top level:
 | `title` | string | Yes |
 | `app` | string | No |
 | `tags` | string[] | No |
+| `fixtures` | Fixture[] | No |
 | `steps` | Step[] | Yes |
 | `created` / `updated` | string | No |
 
@@ -103,10 +119,31 @@ Step:
 
 \* At least one of `action` or `verify` is required.
 
+Fixture:
+
+| Field | Type | Required | Description |
+|---|---|:---:|---|
+| `source` | relative path | Yes | Source beneath the `.simpilot` workspace |
+| `destination` | relative path | Yes | Destination beneath the selected storage root |
+| `group-id` | string | No | Target an App Group instead of the data container |
+| `files-app` | bool | No | Use experimental Files.app File Provider Storage |
+| `storage` | absolute candidate path | No | Disambiguates `files-app`; must come from `sipi files-app candidates` |
+
+Fixtures are applied before app launch and restored after the test, with the app
+terminated for both mutations. Recovery metadata is persisted before each copy,
+so an interrupted run leaves a usable manifest. `--no-launch` cannot be combined
+with fixtures. `group-id` and `files-app: true`
+are mutually exclusive. Absolute/traversing source or destination paths are
+validation errors.
+
+Files.app fixtures must be verified through the app UI. `container-files` and
+the automatic container diff cannot read File Provider Storage.
+
 `wait` is the **verify poll timeout** in seconds (default 3) — how long the
-harness re-polls `describe-ui` before failing the step. It applies only to steps
-that have a `verify` block, and it is not a pre-action sleep. For a deliberate
-pause, use a `wait` *action*.
+harness re-polls all verify inputs, including `describe-ui` and
+`container-files`, before failing the step. It applies only to steps that have a
+`verify` block, and it is not a pre-action sleep. For a deliberate pause, use a
+`wait` *action*.
 
 ## Action types
 
@@ -184,6 +221,48 @@ is rejected by `sipi validate`.
   string. An uncompilable pattern is a validation error, not a run-time surprise.
 - Use strings that prove the new state, not static chrome.
 
+### Container-file form
+
+`container-files` asserts persisted app data and can be combined with UI and
+element conditions:
+
+```json
+{
+  "container-files": [
+    {
+      "path": "Library/Application Support/state.json",
+      "format": "json",
+      "key-path": "$.loggedIn",
+      "equals": true
+    },
+    {
+      "path": "Documents/export.sqlite",
+      "format": "sqlite",
+      "query": "select count(*) as count from items",
+      "equals": "[{\"count\":3}]"
+    }
+  ]
+}
+```
+
+Fields: `path` (required), optional `group-id`, `format` (`metadata`, `text`,
+`json`, `plist`, `sqlite`), `key-path`, read-only `query`, and the assertions
+`exists`, `size`, `sha256`, `equals`. At least one assertion is required.
+Paths are relative and may not contain traversal or symlinks. SQLite queries run
+with sqlite3 safe mode as well as read-only mode. `equals` is invalid with
+`format: "metadata"`; `exists: false` cannot be combined with value, size, or
+hash assertions. If `format` is omitted, it defaults to `metadata` when no
+`equals` assertion is present and `text` when `equals` is present. With
+`format: "text"`, or with `format` omitted, `equals` must be a string. An
+`equals` comparison trims leading and trailing whitespace on both sides, so a
+file that ends in a newline still matches an expectation that does not. A
+`format: "text"` assertion requires the file to be valid UTF-8; use `sha256` or
+`format: "metadata"` for binary files.
+
+With no `group-id`, the path is in the app's primary data container. With
+`group-id`, it is in that App Group. There is no Files.app target: verify a
+Files.app fixture through UI state instead.
+
 ### Element form
 
 `elements` asserts about ELEMENTS rather than the serialized text, which is what
@@ -260,6 +339,8 @@ Written by the harness; never authored by hand.
 | `review` | bool |
 | `duration` | number |
 | `steps` | ResultStep[] |
+| `artifacts` | object mapping artifact labels to relative paths |
+| `cleanup-error` | string describing failed fixture restoration |
 
 Each result step may include `passed`, `duration`, `action`, `screenshot`,
 `screenshots.before`, `screenshots.after`, `verify`, `attempted-methods`,
@@ -284,6 +365,31 @@ failed attempt.
 Every one of these fields describes the **last** attempt, not an earlier one:
 a step that failed at the action stage on its retry carries no verify rows from
 the attempt before it, and vice versa.
+
+Artifact paths are constrained relative links within the run directory. A
+successful fixture restoration leaves an empty manifest and removes its backup
+directory. A non-empty manifest plus `cleanup-error` is recovery state; preserve
+both it and its sibling backup directory.
+
+## run.json evidence
+
+The harness may add these run-level fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `artifacts` | object | Relative links such as `logs.ndjson`, `logs.stderr.txt`, or `crash-reports.json` |
+| `evidence-warnings` | string[] | Best-effort capture problems that do not alter the test verdict |
+
+`logs.ndjson` contains JSON-object records only; the `log` command's filter
+banner and completion footer are removed. Unless `log-predicate` replaces it,
+the default predicate covers the run bundle ID and all test-level `app`
+overrides. Crash evidence is collected for those same exact bundle IDs and only
+from the run's start time onward. Automatic container snapshots cover only each
+test app's primary data container, not App Groups or Files.app storage. They
+contain metadata and hashes, not file contents; per-file read failures are
+recorded in each snapshot's `errors` array and surfaced as evidence warnings. A
+whole-snapshot failure also becomes an evidence warning and the corresponding
+artifact is omitted.
 
 ## summary.json
 
@@ -324,6 +430,12 @@ leaves the simulator dirty. The failure surfaces only as a **non-zero CLI exit
 code**. CI and agents must gate on the exit code as well as on `status`; treat a
 `pass` with a non-zero exit as "tests passed, device state unreliable" and reset
 before the next run.
+
+Fixture restoration is different because it happens inside a test: failure sets
+that test's `passed` to false, makes summary `status` `fail`, and writes
+`cleanup-error`, while the CLI may still exit 0. Such a failure can leave
+`top-failures` empty because no test step failed; inspect `report.html` and the
+test's `result.json` whenever summary status is not `pass`.
 
 ## Status Display
 

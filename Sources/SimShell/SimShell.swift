@@ -5,6 +5,7 @@
 // SimBridge, no private frameworks.
 
 import Foundation
+import SimCore
 
 public enum SimShellError: Error, CustomStringConvertible {
     case launchFailed(String)
@@ -228,13 +229,35 @@ public enum SimShell {
 
     /// Path to an installed app's `.app` bundle on `udid` via
     /// `simctl get_app_container <udid> <bundle-id> app`. Returns nil when the app
-    /// is not installed or simctl cannot resolve the container — callers use this
-    /// for advisory inspection, so absence must not be fatal.
+    /// is not installed, the device is not booted, or simctl cannot resolve the
+    /// container — callers use this for advisory inspection, so absence must not
+    /// be fatal.
     public static func appBundlePath(udid: String, bundleID: String) -> String? {
-        guard let result = try? run(["get_app_container", udid, bundleID, "app"]),
-              result.succeeded else { return nil }
+        try? appContainerPath(udid: udid, bundleID: bundleID, container: "app")
+    }
+
+    /// Resolve one installed app container through simctl. `container` is
+    /// `app`, `data`, `groups`, or a concrete App Group identifier. The device
+    /// must be booted.
+    public static func appContainerPath(
+        udid: String,
+        bundleID: String,
+        container: String
+    ) throws -> String {
+        try requireBooted(udid)
+        let result = try run(["get_app_container", udid, bundleID, container])
+        guard result.succeeded else {
+            throw SimShellError.nonZeroExit(
+                command: "xcrun simctl get_app_container \(udid) \(bundleID) \(container)",
+                code: result.exitCode,
+                stderr: result.stderr
+            )
+        }
         let path = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? nil : path
+        guard !path.isEmpty else {
+            throw SimShellError.launchFailed("simctl returned an empty container path")
+        }
+        return path
     }
 
     /// `UIBackgroundModes` declared by the installed app's `Info.plist`, or nil
@@ -454,11 +477,24 @@ public enum SimShell {
     /// from the parent so its output streams through unchanged.
     public final class BackgroundProcess {
         private let process: Process
+        /// Handles this object owns for a child that writes to a file rather than
+        /// inheriting our streams. The child holds its own descriptors, so these
+        /// are closed once it exits instead of waiting for ARC to release us.
+        private let ownedHandles: [FileHandle]
+        private var handlesClosed = false
         public let command: String
+        public let stderrPath: String?
 
-        fileprivate init(process: Process, command: String) {
+        fileprivate init(
+            process: Process,
+            command: String,
+            stderrPath: String? = nil,
+            ownedHandles: [FileHandle] = []
+        ) {
             self.process = process
             self.command = command
+            self.stderrPath = stderrPath
+            self.ownedHandles = ownedHandles
         }
 
         /// PID of the running child.
@@ -475,6 +511,10 @@ public enum SimShell {
             if process.isRunning {
                 kill(process.processIdentifier, SIGINT)
                 process.waitUntilExit()
+            }
+            if !handlesClosed {
+                handlesClosed = true
+                for handle in ownedHandles { try? handle.close() }
             }
             return process.terminationStatus
         }
@@ -605,5 +645,48 @@ public enum SimShell {
         }
 
         return BackgroundProcess(process: process, command: "xcrun " + args.joined(separator: " "))
+    }
+
+    /// Start a structured log stream and write it directly to an artifact file.
+    /// This is harness plumbing, not a public simctl-alias command.
+    public static func logStream(
+        udid: String,
+        outputPath: String,
+        predicate: String? = nil,
+        stderrPath: String? = nil
+    ) throws -> BackgroundProcess {
+        try requireBooted(udid)
+        let outputURL = URL(fileURLWithPath: outputPath)
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: outputURL)
+        let errorURL = URL(fileURLWithPath: stderrPath ?? outputPath + ".stderr.txt")
+        FileManager.default.createFile(atPath: errorURL.path, contents: nil)
+        let errorHandle = try FileHandle(forWritingTo: errorURL)
+        var args = ["simctl", "spawn", udid, "log", "stream", "--level", "debug", "--style", "ndjson"]
+        if let predicate, !predicate.isEmpty {
+            args += ["--predicate", predicate]
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = args
+        process.standardOutput = handle
+        process.standardError = errorHandle
+        do {
+            try process.run()
+        } catch {
+            try? handle.close()
+            try? errorHandle.close()
+            throw SimShellError.launchFailed(error.localizedDescription)
+        }
+        return BackgroundProcess(
+            process: process,
+            command: "xcrun " + args.joined(separator: " "),
+            stderrPath: errorURL.path,
+            ownedHandles: [handle, errorHandle]
+        )
     }
 }

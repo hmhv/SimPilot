@@ -116,6 +116,38 @@ final class ReportGeneratorTests: XCTestCase {
                       "summary.json should be written beside report.html")
     }
 
+    func testEvidenceArtifactsAndCleanupFailureAreRendered() throws {
+        let runDir = tempDir.appendingPathComponent("run-evidence", isDirectory: true)
+        let testDir = runDir.appendingPathComponent("persisted-state", isDirectory: true)
+        try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true)
+        let run: [String: Any] = [
+            "started": "2026-08-19T12:00:00+09:00",
+            "device": "udid",
+            "artifacts": ["logs": "logs.ndjson", "crash-reports": "crash-reports.json"],
+            "evidence-warnings": ["log stream ended early"],
+            "tests": [["id": "persisted-state", "passed": false, "duration": 1.0]],
+            "summary": ["total": 1, "passed": 0, "failed": 1]
+        ]
+        try Data(JSONSerialization.data(withJSONObject: run))
+            .write(to: runDir.appendingPathComponent("run.json"))
+        let result: [String: Any] = [
+            "id": "persisted-state",
+            "passed": false,
+            "duration": 1.0,
+            "cleanup-error": "could not restore state.json",
+            "artifacts": ["container-diff": "container-diff.json"],
+            "steps": []
+        ]
+        try Data(JSONSerialization.data(withJSONObject: result))
+            .write(to: testDir.appendingPathComponent("result.json"))
+
+        let html = try ReportGenerator.testReportHTML(runDir: runDir.path)
+        XCTAssertTrue(html.contains("Evidence warnings"))
+        XCTAssertTrue(html.contains("logs.ndjson"))
+        XCTAssertTrue(html.contains("container-diff.json"))
+        XCTAssertTrue(html.contains("could not restore state.json"))
+    }
+
     func testTestRunSummaryAndFailureHighlights() throws {
         let runDir = tempDir.appendingPathComponent("run-fail", isDirectory: true)
         let testDir = runDir.appendingPathComponent("login-flow", isDirectory: true)
