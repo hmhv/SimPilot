@@ -113,8 +113,8 @@ themselves are under test. The rule and its exceptions live in
 
 `appearance` reads the current state when given no flag and writes when given
 one. `voiceover` only reads: setting it is retired, because on iOS 27 turning it
-off after it has been on empties every app's accessibility tree until the device
-restarts, and turning it on changes nothing `describe-ui` can see. `biometrics`
+off after it has been on empties the accessibility tree of every app launched
+afterwards until the device restarts, and turning it on changes nothing `describe-ui` can see. `biometrics`
 is different again: the operation is a **required positional**, and reading is the
 explicit `status` operation. They all say so explicitly when the toolchain is too
 old (see

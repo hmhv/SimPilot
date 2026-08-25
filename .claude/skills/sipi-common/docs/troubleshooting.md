@@ -33,8 +33,12 @@ link here rather than restating them.
 Two different causes. Tell them apart by waiting.
 
 **1. Right after an app launch** — the app has not published its tree yet. Wait and
-re-read; measured on iOS 27.0 (24A5408d), three launches in a row read 1 node at
-1s and the full tree at 3s. Waiting is the whole fix.
+re-read; measured on iOS 27.0 (24A5423a), three launches in a row read a partial
+tree at 1s (5 of 11 nodes) and the full tree from 3s on. The earlier 24A5408d
+runtime read a single empty root at 1s instead, so how the early read looks
+varies by runtime build; the wait is the fix either way. Before any app is
+frontmost at all — right after a boot — `describe-ui` fails with
+`frontmostApplicationWithDisplayId returned nil` instead of returning a root.
 
 **2. VoiceOver was turned on and then off on this device** — every app that comes
 to the foreground afterwards reports an empty root, and it does NOT clear with
@@ -46,15 +50,30 @@ xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
 ```
 
 Turning VoiceOver back ON also reads fine — it is specifically the OFF state after
-an ON that is broken. Measured with a control on iOS 27.0 (24A5408d) / Xcode 27
-beta 5: no-VoiceOver 15 nodes, ON 16, ON→OFF 1, ON again 16, OFF again 1, reboot 15.
+an ON that is broken, and only for a process that starts after the OFF. Measured
+with a control on iOS 27.0 (24A5423a) / Xcode 27 beta 6, one app plus SpringBoard:
+
+| state | `describe-ui` |
+|---|---|
+| no VoiceOver (control) | 11 nodes |
+| VoiceOver ON, same process | 11 |
+| ON→OFF, same process | 11 — a running process keeps its tree |
+| ON→OFF, then relaunch the app | **1** |
+| ON→OFF, SpringBoard | 12 — unaffected |
+| `simctl shutdown` + `boot` | 11 |
+
+The first time VoiceOver is enabled on a device, iOS also puts a "VoiceOver
+gestures" alert on screen. That alert is then the frontmost app, so `describe-ui`
+reads its 4 nodes instead of yours — dismiss it (`sipi tap "$UDID" --label OK`)
+before reading anything else. It does not come back once dismissed.
 
 **sipi cannot put the device in that state any more, and that is deliberate.**
 Setting VoiceOver is retired, along with the `voiceover` test action, precisely
 because of case 2 — earlier revisions of this document even recommended toggling it
 to "re-prime the bridge", which is what breaks the tree. Turning VoiceOver ON also
-buys nothing: `describe-ui` returns a byte-identical tree either way (measured on
-iOS 27.0 — same node count, same labels).
+buys nothing: `describe-ui` returns a byte-identical tree either way (re-measured
+on iOS 27.0 24A5423a — the key-sorted JSON matches exactly with VoiceOver on and
+off).
 
 So case 2 now only happens when VoiceOver was switched by hand, in Settings or on
 another tool's behalf. `sipi voiceover "$UDID"` reads the state, which is how you
@@ -72,8 +91,9 @@ Note the setting itself survives shutdown/boot (measured: enable, shutdown, boot
 and the state still reads `enabled: true`), so a restart recovers the tree without
 changing whether VoiceOver is on.
 
-Revisit when Xcode 27 ships: if OFF-after-ON no longer empties the tree, the
-setter and the test action can come back.
+Still present in Xcode 27 beta 6 (27A5252f / iOS 27.0 24A5423a). Revisit at GM:
+if OFF-after-ON no longer empties the tree, the setter and the test action can
+come back.
 
 ### Taps return `ok` but nothing happens, on EVERY device
 

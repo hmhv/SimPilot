@@ -50,8 +50,8 @@ These are ad-hoc commands with no automatic restore, unlike the saved-test
 
 **VoiceOver is not part of this pass.** Setting it is retired (as is the
 `voiceover` test action): on iOS 27, turning it off after it has been on empties
-every app's accessibility tree until the device restarts, and turning it on does
-not change what `describe-ui` reports. `sipi voiceover "$UDID"` still reads the
+the accessibility tree of every app launched afterwards until the device restarts,
+and turning it on does not change what `describe-ui` reports. `sipi voiceover "$UDID"` still reads the
 state — useful when a device's tree looks wrong because someone left VoiceOver on.
 
 The colour filter is the exception you cannot generally undo. `--json` reports

@@ -353,8 +353,8 @@ that lands on whichever ran last, so `sipi validate` rejects them here and names
 the action to use instead.
 
 `voiceover` is **retired** — `sipi validate` rejects it. On iOS 27, turning
-VoiceOver off after it has been on empties the accessibility tree for every app
-foregrounded afterwards until the device restarts, and turning it on changes
-nothing `describe-ui` can see (measured: byte-identical tree). Run the
+VoiceOver off after it has been on empties the accessibility tree of every app
+launched afterwards until the device restarts, and turning it on changes nothing
+`describe-ui` can see (measured: byte-identical tree). Run the
 accessibility pass with `sipi a11y-audit` plus the appearance facets. Reading the
 state is still available as `sipi voiceover "$UDID"`.

@@ -66,10 +66,10 @@ Restore what you changed when the pass is done.
 
 **Do not turn VoiceOver on for this.** Setting it is retired, and so is the
 `voiceover` test action: on iOS 27, turning VoiceOver off after it has been on
-empties the accessibility tree for every app foregrounded afterwards until the
-device restarts, and turning it on buys nothing here — `describe-ui` returns a
-byte-identical tree either way (measured on iOS 27.0: same node count, same
-labels). The spoken string and the VoiceOver cursor need XCUITest's
+empties the accessibility tree of every app launched afterwards until the device
+restarts, and turning it on buys nothing here — `describe-ui` returns a
+byte-identical tree either way (measured on iOS 27.0 24A5423a: the key-sorted JSON
+matches exactly). The spoken string and the VoiceOver cursor need XCUITest's
 `XCUIVoiceOverService` from inside a UI test target, which this pass cannot reach
 at all.
 
