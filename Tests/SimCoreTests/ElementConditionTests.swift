@@ -75,6 +75,30 @@ final class ElementConditionTests: XCTestCase {
         XCTAssertNil(ElementCondition(label: "Ghost", enabled: true).failureReason(in: roots))
     }
 
+    // MARK: - value as a selector
+
+    /// `value` narrows which elements match; `valueEquals` asserts about the ones
+    /// that already did. The two are easy to conflate, and only the assertion
+    /// form was covered — so a broken `value` selector would have picked the
+    /// wrong element on every tap without a single test noticing.
+    func testValueSelectsRatherThanAsserts() {
+        XCTAssertNil(ElementCondition(value: "user@example.com", count: 1).failureReason(in: screen))
+        XCTAssertEqual(
+            ElementCondition(value: "nobody@example.com").failureReason(in: screen),
+            "no element matched"
+        )
+    }
+
+    /// The selector is ANDed with the others, so a value that belongs to a
+    /// different element must not match.
+    func testValueSelectorIsCombinedWithTheOthers() {
+        XCTAssertNil(ElementCondition(label: "Email", value: "user@example.com").failureReason(in: screen))
+        XCTAssertEqual(
+            ElementCondition(label: "Sign In", value: "user@example.com").failureReason(in: screen),
+            "no element matched"
+        )
+    }
+
     // MARK: - value
 
     func testValueEquals() {
