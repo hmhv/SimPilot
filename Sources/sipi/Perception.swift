@@ -217,10 +217,34 @@ enum ChildTree {
 
     /// The running `sipi` binary, resolved to an absolute path so the child can
     /// be spawned regardless of how the parent was invoked.
-    private static func executableURL() -> URL {
+    ///
+    /// `CommandLine.arguments[0]` is NOT enough: a PATH invocation (`sipi ...`,
+    /// the normal case for an installed binary) leaves arg0 as the bare name
+    /// `sipi`, which resolving against the current directory turns into a path
+    /// that does not exist — the child spawn then dies with "The file 'sipi'
+    /// doesn't exist" and the degenerate-tree fallback never runs. `Bundle.main
+    /// .executablePath` is the real path of the running image, so it is tried
+    /// first; arg0 only covers the case where that is somehow unavailable.
+    static func executableURL() -> URL {
+        if let path = Bundle.main.executablePath, path.hasPrefix("/") {
+            return URL(fileURLWithPath: path)
+        }
         let arg0 = CommandLine.arguments[0]
         if arg0.hasPrefix("/") {
             return URL(fileURLWithPath: arg0)
+        }
+        // A bare name (PATH invocation) is not a path: resolving it against the
+        // working directory would fabricate a file that is not there. Search
+        // PATH the way the shell did instead.
+        if !arg0.contains("/") {
+            let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+                .split(separator: ":", omittingEmptySubsequences: true)
+            for dir in paths {
+                let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent(arg0)
+                if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                    return candidate.standardizedFileURL
+                }
+            }
         }
         let resolved = URL(fileURLWithPath: arg0, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
         return resolved.standardizedFileURL
@@ -466,24 +490,41 @@ func resolveActivationPoint(
     elementType: String?,
     verb: String
 ) throws -> Point {
-    var roots = try driver.describe(udid, deep: false)
-    var resolution: TapResolution
-    do {
-        resolution = try AccessibilityTargetResolver.resolveTap(roots: roots, query: query, elementType: elementType)
-    } catch let error as ElementResolutionError where error.isNotFound {
-        roots = try ChildTree.nodes(udid: udid, deep: true)
+    var screen: AXNode.Frame?
+
+    // One resolution attempt against the current screen state. Re-reads the
+    // tree every call so a scroll in between is reflected in the coordinates.
+    func resolveOnce() throws -> (resolution: TapResolution, screen: AXNode.Frame?) {
+        var roots = try driver.describe(udid, deep: false)
+        var resolution: TapResolution
         do {
             resolution = try AccessibilityTargetResolver.resolveTap(roots: roots, query: query, elementType: elementType)
-        } catch let retry as ElementResolutionError {
-            emitError("Warning: \(retry.description) No \(verb) performed.")
-            throw ExitCode.failure
+        } catch let error as ElementResolutionError where error.isNotFound {
+            roots = try ChildTree.nodes(udid: udid, deep: true)
+            resolution = try AccessibilityTargetResolver.resolveTap(roots: roots, query: query, elementType: elementType)
         }
+        let frame = screenFrame(of: roots)
+        screen = frame
+        return (resolution, frame)
+    }
+
+    let resolution: TapResolution
+    do {
+        resolution = try ScrollIntoView.bring(driver: driver, udid: udid, resolve: resolveOnce)
     } catch let error as ElementResolutionError {
         emitError("Warning: \(error.description) No \(verb) performed.")
         throw ExitCode.failure
+    } catch let error as ScrollIntoView.Failure {
+        emitError("Error: cannot \(verb) the element matched by this selector: \(error.reason). No \(verb) performed.")
+        throw ExitCode.failure
     }
 
-    guard let frame = screenFrame(of: roots) else {
+    guard resolution.isOnScreen else {
+        emitError("Error: the element matched by this selector is not on screen, so a \(verb) at its coordinates would be silently discarded. No \(verb) performed.")
+        throw ExitCode.failure
+    }
+
+    guard let frame = screen else {
         emitError("Warning: could not determine the screen frame to normalize the \(verb) point. No \(verb) performed.")
         throw ExitCode.failure
     }
@@ -491,6 +532,29 @@ func resolveActivationPoint(
         emitError("Warning: screen frame has no positive extent; cannot normalize the \(verb) point. No \(verb) performed.")
         throw ExitCode.failure
     }
+
+    // Ask the guest what is actually at that coordinate before touching it. A
+    // frame says where an element claims to be; only a hit-test says what a
+    // touch there would reach. `element(at:)` takes the LOGICAL point (the
+    // describe-ui space the resolution is already in), not the normalized one.
+    //
+    // A hit-test that THROWS is a bridge failure, not an answer: it says nothing
+    // about what is at the point, so it must not be reported as "nothing there".
+    // Proceed with the touch and say the check was skipped — refusing to act on
+    // an infrastructure hiccup would make every command flaky.
+    do {
+        let hit = try driver.element(at: resolution.point, udid: udid)
+        let outcome = TapTargetCheck.evaluate(target: resolution, hit: hit, screen: frame)
+        guard outcome.isMatch else {
+            emitError("Error: \(TapTargetCheck.describe(outcome, selector: "This selector")) No \(verb) performed.")
+            throw ExitCode.failure
+        }
+    } catch let exit as ExitCode {
+        throw exit
+    } catch {
+        emitError("Warning: could not hit-test the resolved point before the \(verb) (\(error)). Proceeding unverified.")
+    }
+
     return normalizedPoint
 }
 

@@ -126,17 +126,51 @@ restart the device if VoiceOver was toggled off. There is no "re-prime" step.
 For *could not verify*: read the field's actual value with `describe-ui` (waiting
 first if the tree is still empty) and only then decide.
 
-For *had no effect* — three measured causes, all on Xcode 27.0 beta 4:
+For *had no effect* — three measured causes:
 
-1. **A worn-out simulator delivers nothing at all.** Paste (Cmd+V),
+1. **A worn-out simulator accepts nothing at all.** Paste (Cmd+V),
    `--keyboard`, `--clear`, and bare `sipi key` are all no-ops while taps still
    work. Measured 2026-08-01: this follows **device age, not the iOS version** —
    a freshly created device types fine on iOS 27.0, long-lived ones fail on both
    iOS 27.0 and 26.4. **`simctl erase` does not fix it, nor does a reboot.**
    Confirm by `simctl create`-ing a replacement; if that one types, retire the
-   old device. Meanwhile use `sipi set-text`, which needs no keyboard.
-   (`sipi type` detects this and FAILS; bare `sipi key` still returns `ok`.)
-2. **Non-Latin IME.** `--keyboard` text stays an uncommitted composition
+   old device. (`sipi type` detects this and FAILS; bare `sipi key` still
+   returns `ok`.)
+
+   It is not the device's keyboard that is dead. Measured on Xcode 27.0 beta 6:
+   sipi builds and sends byte-identical HID messages on a healthy and an
+   affected device — hardware-keyboard mode enabled, HID client resolved, every
+   message non-NULL — and the guest ignores them on one of them, while Xcode's
+   own service types into the same focused field. The events reach a path the
+   device has stopped honouring, and nothing on sipi's side of that path can
+   change it.
+
+   Two ways through it:
+   - `sipi set-text` writes the accessibility value directly and needs no
+     keyboard at all. Use this whenever the field just has to end up holding a
+     value.
+   - Xcode 27's device-interaction service types through a different path the
+     affected device still accepts. `sipi type` retries through it
+     automatically when available, and `--xcode-mcp` / `"input-method":
+     "xcode-mcp"` selects it up front. Enable it once with:
+
+     ```sh
+     sudo xcrun mcp-server enable
+     sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>
+     ```
+
+     The grant is tied to the exact binary, so `sipi update` or a rebuild needs
+     the approve step again; `sipi xcode-mcp` reports the current state. A
+     fallback that fires starts the service if it is not already running. While
+     Xcode's approval prompt is on screen the service answers nothing, so the
+     fallback is unavailable until it is accepted or dismissed. `--clear`
+     cannot use this path — select-all and delete are keystrokes too.
+2. **Non-Latin IME, or simply a different keyboard layout.** `--keyboard` maps
+   characters to US-keyboard scancodes, so the guest's active keyboard decides
+   what actually appears: under a Japanese keyboard, "hello" arrives as "へっぉ"
+   and the step still passes, because the field did change. Paste and
+   `--xcode-mcp` are both layout-independent. Beyond layout, `--keyboard` text
+   can stay an uncommitted composition
    (`abc` → `あbc`, discarded when the composition is dismissed). `describe-ui`
    reports composing text in AXValue, so a `verify` can pass on text the field
    never committed.

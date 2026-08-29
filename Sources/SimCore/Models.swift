@@ -102,6 +102,21 @@ public struct AXNode: Codable, Equatable, Sendable {
     public var AXUniqueId: String?
     public var enabled: Bool?
     public var frame: Frame?
+    /// The screen point to touch to reach this element, in the same logical
+    /// coordinate space as `frame`.
+    ///
+    /// `frame` alone is not a safe tap target. It is the element's own frame in
+    /// whatever space the element reports, which is NOT always the screen: it
+    /// can extend past the screen (a row scrolled out of view, an element taller
+    /// than the display), and elements inside a cross-process remote view report
+    /// frames local to that view. `hitPoint` is always a screen point — derived
+    /// from the hit-test that found the element when one is available, otherwise
+    /// the center of `frame` clipped to the screen.
+    public var hitPoint: Frame.Point?
+    /// Whether any part of the element is currently on screen. Off-screen
+    /// elements are still listed (they exist, they are just scrolled away), but
+    /// they cannot be touched until they are scrolled into view.
+    public var onscreen: Bool?
     public var children: [AXNode]?
 
     public struct Frame: Codable, Equatable, Sendable {
@@ -116,6 +131,27 @@ public struct AXNode: Codable, Equatable, Sendable {
             self.width = width
             self.height = height
         }
+
+        /// A logical screen point, in the same space as a `Frame`.
+        public struct Point: Codable, Equatable, Sendable {
+            public var x: Double
+            public var y: Double
+
+            public init(x: Double, y: Double) {
+                self.x = x
+                self.y = y
+            }
+        }
+
+        /// This frame clipped to `screen`, or nil when they do not overlap.
+        public func intersected(with screen: Frame) -> Frame? {
+            let minX = Swift.max(x, screen.x)
+            let minY = Swift.max(y, screen.y)
+            let maxX = Swift.min(x + width, screen.x + screen.width)
+            let maxY = Swift.min(y + height, screen.y + screen.height)
+            guard maxX > minX, maxY > minY else { return nil }
+            return Frame(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        }
     }
 
     public init(
@@ -128,6 +164,8 @@ public struct AXNode: Codable, Equatable, Sendable {
         AXUniqueId: String? = nil,
         enabled: Bool? = nil,
         frame: Frame? = nil,
+        hitPoint: Frame.Point? = nil,
+        onscreen: Bool? = nil,
         children: [AXNode]? = nil
     ) {
         self.AXLabel = AXLabel
@@ -139,6 +177,8 @@ public struct AXNode: Codable, Equatable, Sendable {
         self.AXUniqueId = AXUniqueId
         self.enabled = enabled
         self.frame = frame
+        self.hitPoint = hitPoint
+        self.onscreen = onscreen
         self.children = children
     }
 }

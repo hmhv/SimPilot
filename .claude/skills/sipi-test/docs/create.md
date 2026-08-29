@@ -76,8 +76,10 @@ and its constraints are in `../references/actions.md`. Two choices come up often
 enough to state here:
 
 - **Text entry**: `set-text` by default — it needs no focus, keyboard, or
-  pasteboard and works on a simulator whose keyboard HID has stopped being
-  delivered. Use `type` only when the keystrokes themselves are under test.
+  pasteboard and works on a simulator that has stopped accepting keyboard HID.
+  Use `type` only when the keystrokes themselves are under test; on such a
+  device it falls back to Xcode 27's service when that is set up, and fails
+  loudly otherwise.
 - **Deterministic controls over coordinates**: `slider`, `double-tap`,
   `long-press`, `gesture`, `drag`, and `pinch` exist so a toggle, menu, or
   gesture does not have to be a fragile coordinate drag.

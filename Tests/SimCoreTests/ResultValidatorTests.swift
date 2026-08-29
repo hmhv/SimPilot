@@ -827,7 +827,25 @@ final class ResultValidatorTests: XCTestCase {
             ["action": ["type": "type", "text": "hello", "input-method": "voice"]]
         ])
         XCTAssertFalse(outcome.isValid)
-        XCTAssertTrue(outcome.errors.contains { $0.contains("input-method must be paste or keyboard") }, "\(outcome.errors)")
+        XCTAssertTrue(outcome.errors.contains { $0.contains("input-method must be paste, keyboard or xcode-mcp") }, "\(outcome.errors)")
+    }
+
+    func testTypeXcodeMCPMethodIsAccepted() throws {
+        let outcome = try validateSpec(id: "type-xcode-mcp", steps: [
+            ["action": ["type": "type", "text": "こんにちは", "input-method": "xcode-mcp"]]
+        ])
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testTypeXcodeMCPMethodRejectsClear() throws {
+        // The service types but cannot empty a field, and select-all/delete are
+        // keystrokes — the combination would leave the old value in place with
+        // the new text appended, and every check would still pass.
+        let outcome = try validateSpec(id: "type-xcode-mcp-clear", steps: [
+            ["action": ["type": "type", "text": "hello", "input-method": "xcode-mcp", "clear": true]]
+        ])
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("cannot combine with clear") }, "\(outcome.errors)")
     }
 
     func testTypeKeyboardMethodRejectsNonUSText() throws {

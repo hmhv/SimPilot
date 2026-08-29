@@ -16,7 +16,7 @@ SimPilot 是一组面向 iOS Simulator 测试与验证的 agent skills，可在 
 ## 前置条件
 
 - macOS 15 或更高版本
-- Xcode 26 或更高版本：在**运行时**需要，用于驱动 Simulator（SimPilot 会加载 Xcode 的 private Simulator frameworks）。安装时不需要。Xcode 27 或更高版本还会额外启用 Face ID / Touch ID 和无障碍外观设置，它们通过 `xcrun devicectl` 实现。
+- Xcode 26 或更高版本：在**运行时**需要，用于驱动 Simulator（SimPilot 会加载 Xcode 的 private Simulator frameworks）。安装时不需要。Xcode 27 或更高版本还会额外启用 Face ID / Touch ID 和无障碍外观设置，它们通过 `xcrun devicectl` 实现，并且可以作为键盘输入的回退路径（见[向不再接受按键输入的 simulator 输入文本](#向不再接受按键输入的-simulator-输入文本)）。
 - [Claude Code](https://claude.com/claude-code) 或 Codex
 
 ## 安装
@@ -160,11 +160,31 @@ SimPilot 在 `.simpilot/` 下使用如下目录结构:
 
 ## 已知限制
 
-- 文本输入默认写入字段的无障碍值（`set-text`），无需键盘，任何文字系统都适用。按键级别的输入（`type`）默认通过剪贴板粘贴；逐键直接 HID 输入仅支持美式键盘布局
-- **长期使用的 simulator 可能不再投递键盘 HID**（在 Xcode 27.0 beta 4 上实测）：粘贴、逐键输入和全选+删除都会被忽略，而触摸输入正常。这取决于设备的使用时长而非 iOS 版本，`simctl erase` 和重启都无法恢复，需要重新创建设备。`type` 会检测到这一点并直接失败，而不是报告成功；`set-text` 不受影响
+- 文本输入默认写入字段的无障碍值（`set-text`），无需键盘，任何文字系统都适用。按键级别的输入（`type`）默认通过剪贴板粘贴；逐键直接 HID 输入仅支持美式键盘布局，若客户机当前启用的是其他布局则会输入错误的字符
+- **长期使用的 simulator 可能不再接受键盘 HID**（在 Xcode 27.0 beta 6 上实测）：粘贴、逐键输入和全选+删除都会被忽略，而触摸输入正常。这取决于设备的使用时长而非 iOS 版本，`simctl erase` 和重启都无法恢复。`type` 会检测到这一点并直接失败，而不是报告成功；`set-text` 不受影响。若已启用 Xcode 27 的服务，`type` 会经由它重试并成功（见下文）
+- 无障碍树声称存在、但实际无法触摸的元素，点击后仍会报告成功。`describe-point` 同样会返回该元素，因此任何一层都无法区分；Xcode 自身的工具也是同样的行为
 - Face ID / Touch ID，以及 light/dark 之外的无障碍外观项需要 Xcode 27——它们通过 `xcrun devicectl` 实现，而 devicectl 只能作用于该版本及之后的 simulator
 - 对比度和文字截断不在 `sipi a11y-audit` 的范围内；两者都需要对渲染帧做像素分析
 - 仅支持 simulator，不支持真机
+
+## 向不再接受按键输入的 simulator 输入文本
+
+simulator 可能进入忽略 SimPilot 注入的键盘事件的状态：触摸依然可用，而粘贴、逐键输入和全选+删除都失效。SimPilot 在正常设备和该状态的设备上发送的是完全相同的事件，因此 SimPilot 这一侧没有可修复之处。而 Xcode 27 自带的设备交互服务走的是另一条路径，该状态的设备仍会接受，并且这条路径也不依赖客户机的键盘布局。
+
+`sipi type` 会把它作为回退：当检测到自身的按键没有送达时，不让步骤失败，而是经由 Xcode 的服务重试。加上 `--xcode-mcp` 则从一开始就使用该路径。SimPilot 的其他功能都无需这项配置，`set-text` 本来就不需要键盘。
+
+需要满足三个条件：
+
+```bash
+xcode-select -p                    # Xcode 27 或更高版本
+sudo xcrun mcp-server enable       # 开启 headless 模式
+sipi xcode-mcp --approve <.xcodeproj 或 .xcworkspace 的路径>
+```
+
+打开该项目只是为了弹出 Xcode 的授权对话框，随后会立即关闭。配置完成后，若回退被触发而服务尚未运行，sipi 会将其启动。Xcode 将授权绑定到具体的二进制文件，因此每次 `sipi update` 或重新构建后都需要再次执行授权步骤。当前状态可用 `sipi xcode-mcp` 查看，回退是否可用可用 `sipi doctor` 确认。
+
+`--clear` 无法使用该路径：全选和删除同样是按键输入，而该服务只能输入文本、无法清空字段。需要整体替换值时请使用 `sipi set-text`。
+
 
 ## Note
 

@@ -325,6 +325,15 @@ private struct HarnessSelector: Decodable {
         case value
         case elementType = "element-type"
     }
+
+    /// How to name this target in a failure message, so a reader can tell which
+    /// step's selector is at fault without opening the test file.
+    var describedTarget: String {
+        if let id { return "id '\(id)'" }
+        if let label { return "label '\(label)'" }
+        if let value { return "value '\(value)'" }
+        return "the selector"
+    }
 }
 
 private struct HarnessPoint: Decodable {
@@ -1385,7 +1394,7 @@ private final class HarnessRunner {
 
         case "double-tap":
             if let selector = action.selector {
-                try DoubleTapInput.perform(try resolveSelectorPoint(selector), driver: driver, udid: udid)
+                try DoubleTapInput.perform(try resolveSelectorPoint(selector, verb: "double-tap"), driver: driver, udid: udid)
                 return attemptedMethod(for: selector)
             }
             guard let pointSpec = action.point else { throw HarnessError("double-tap action requires selector or point.") }
@@ -1435,7 +1444,7 @@ private final class HarnessRunner {
         case "long-press":
             let hold = action.duration ?? 0.5
             if let selector = action.selector {
-                try driver.longPress(try resolveSelectorPoint(selector), hold: hold, udid: udid)
+                try driver.longPress(try resolveSelectorPoint(selector, verb: "long-press"), hold: hold, udid: udid)
                 return attemptedMethod(for: selector)
             }
             guard let pointSpec = action.point else { throw HarnessError("long-press action requires selector or point.") }
@@ -1454,7 +1463,8 @@ private final class HarnessRunner {
                 clear: clear,
                 driver: driver,
                 udid: udid,
-                verifyEffect: action.verifyEffect ?? true
+                verifyEffect: action.verifyEffect ?? true,
+                allowXcodeMCPFallback: true
             )
             return ["method": "input", "value": clear ? "\(method.rawValue)+clear" : method.rawValue]
 
@@ -1807,12 +1817,57 @@ private final class HarnessRunner {
 
     /// Resolve a selector to a normalized activation point against the fast tree,
     /// re-fetching the deep grid on a not-found. Shared by `tap` and `long-press`.
-    private func resolveSelectorPoint(_ selector: HarnessSelector) throws -> Point {
+    private func resolveSelectorPoint(_ selector: HarnessSelector, verb: String = "tap") throws -> Point {
         let query = try accessibilityQuery(selector)
-        let roots = try resolvingRoots(query: query, elementType: selector.elementType)
-        let resolution = try AccessibilityTargetResolver.resolveTap(roots: roots, query: query, elementType: selector.elementType)
-        guard let frame = screenFrame(of: roots), let point = normalized(resolution.point, in: frame) else {
+        var screen: AXNode.Frame?
+
+        func resolveOnce() throws -> (resolution: TapResolution, screen: AXNode.Frame?) {
+            let roots = try resolvingRoots(query: query, elementType: selector.elementType)
+            let resolution = try AccessibilityTargetResolver.resolveTap(
+                roots: roots, query: query, elementType: selector.elementType
+            )
+            screen = screenFrame(of: roots)
+            return (resolution, screen)
+        }
+
+        // An element scrolled out of view still resolves to a frame, and tapping
+        // its center sends the touch to a coordinate the display does not have —
+        // accepted by the injector, never seen by the app, reported as a pass.
+        // Scroll it into view first, and fail the step if it cannot be reached.
+        let resolution: TapResolution
+        do {
+            resolution = try ScrollIntoView.bring(driver: driver, udid: udid, resolve: resolveOnce)
+        } catch let error as ScrollIntoView.Failure {
+            throw HarnessError("Cannot \(verb) \(selector.describedTarget): \(error.reason).")
+        }
+        guard resolution.isOnScreen else {
+            throw HarnessError(
+                "Cannot \(verb) \(selector.describedTarget): it is not on screen, so the touch would be discarded without reaching the app."
+            )
+        }
+        guard let frame = screen, let point = normalized(resolution.point, in: frame) else {
             throw HarnessError("Could not normalize the resolved point.")
+        }
+
+        // Confirm the guest agrees the target is at that coordinate. Without
+        // this a clipped or mis-framed control produces a touch into empty
+        // space, which no layer reports as an error — the step would pass
+        // having done nothing.
+        //
+        // `element(at:)` takes the LOGICAL point, not the normalized one. A
+        // throw is a bridge failure rather than an answer about the point, so it
+        // must not be read as "nothing there": the step proceeds unverified and
+        // the action's own verify clause stays the backstop.
+        do {
+            let hit = try driver.element(at: resolution.point, udid: udid)
+            let outcome = TapTargetCheck.evaluate(target: resolution, hit: hit, screen: frame)
+            guard outcome.isMatch else {
+                throw HarnessError(TapTargetCheck.describe(outcome, selector: "\(verb.capitalized) on \(selector.describedTarget)"))
+            }
+        } catch let harness as HarnessError {
+            throw harness
+        } catch {
+            // Bridge failure: nothing learned either way.
         }
         return point
     }
@@ -2206,7 +2261,7 @@ private final class HarnessRunner {
     private func resolveInputMethod(_ raw: String?) throws -> TextInputMethod {
         guard let raw else { return .paste }
         guard let method = TextInputMethod(rawValue: raw) else {
-            throw HarnessError("type input-method must be 'paste' or 'keyboard'.")
+            throw HarnessError("type input-method must be 'paste', 'keyboard' or 'xcode-mcp'.")
         }
         return method
     }

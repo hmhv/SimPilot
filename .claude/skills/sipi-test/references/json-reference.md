@@ -33,7 +33,7 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
       container-after.json       # primary app data container; when capture succeeds
       container-diff.json        # primary app data container; when both succeed
       step-NNN.png
-      step-NNN.describe-before.json
+      step-NNN.describe-before.json    # describe-ui tree, see below
       step-NNN.describe-after.json
   verify/<timestamp>_<description>/
     checks.json
@@ -279,6 +279,20 @@ makes "the button is disabled" or "there are exactly five rows" expressible:
   ]
 }
 ```
+
+Every node in a `describe-ui` tree (including the `step-NNN.describe-*.json`
+artifacts) carries `AXLabel`, `AXValue`, `role_description`, `role`, `subrole`,
+`type`, `AXUniqueId`, `enabled`, `frame{x,y,width,height}`, `children`, and:
+
+| Field | Type | Description |
+|---|---|---|
+| `hitPoint` | `{x,y}` | A point ON the screen that reaches this element. Present only when the element can be touched |
+| `onscreen` | bool | Whether any part of the element is currently visible |
+
+`frame` is the element's own report and is not a tap target: it can extend past
+the display, and an element inside a cross-process view (a share sheet) reports
+a frame in that view's coordinate space, not the screen's. Read `hitPoint` when
+a coordinate is needed, and `onscreen` to tell "scrolled away" from "absent".
 
 Selector fields — at least one required, ANDed:
 

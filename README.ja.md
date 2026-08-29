@@ -16,7 +16,7 @@ SimPilot は、Claude Code や Codex から自然言語で使える、iOS Simula
 ## 前提条件
 
 - macOS 15 以降
-- Xcode 26 以降: Simulator を操作するために**実行時**に必要です（SimPilot は Xcode の private Simulator frameworks を読み込みます）。インストール時には不要です。Xcode 27 以降ではさらに Face ID / Touch ID、アクセシビリティ表示設定が使えます。これらは `xcrun devicectl` を経由します。
+- Xcode 26 以降: Simulator を操作するために**実行時**に必要です（SimPilot は Xcode の private Simulator frameworks を読み込みます）。インストール時には不要です。Xcode 27 以降ではさらに Face ID / Touch ID、アクセシビリティ表示設定が使えます。これらは `xcrun devicectl` を経由します。また、キーボード入力のフォールバックとしても使えます（[キー入力を受け付けなくなった simulator への入力](#キー入力を受け付けなくなった-simulator-への入力)を参照）。
 - [Claude Code](https://claude.com/claude-code) または Codex
 
 ## インストール
@@ -160,11 +160,30 @@ SimPilot は `.simpilot/` 配下に次の構成を使います。
 
 ## 既知の制限
 
-- テキスト入力は既定でフィールドのアクセシビリティ値を書き込む方式（`set-text`）を使います。キーボードが不要で、どの文字体系でも入力できます。キー入力レベルの入力（`type`）は既定で clipboard（paste）を経由し、直接の HID キー入力は US キーボード配列のみ対応です
-- **長く使った simulator はキーボード HID を配送しなくなることがあります**（Xcode 27.0 beta 4 で計測）。paste、キー単位の入力、select-all+delete はいずれも無視され、タッチ入力は動作します。これは iOS のバージョンではなくデバイスの使用期間に依存し、`simctl erase` でも再起動でも回復しません。デバイスを作り直してください。`type` はこの状態を検出し、成功と報告せずに失敗します。`set-text` は影響を受けません
+- テキスト入力は既定でフィールドのアクセシビリティ値を書き込む方式（`set-text`）を使います。キーボードが不要で、どの文字体系でも入力できます。キー入力レベルの入力（`type`）は既定で clipboard（paste）を経由し、直接の HID キー入力は US キーボード配列のみ対応です。ゲスト側で別の配列が有効な場合は誤った文字が入力されます
+- **長く使った simulator はキーボード HID を受け付けなくなることがあります**（Xcode 27.0 beta 6 で計測）。paste、キー単位の入力、select-all+delete はいずれも無視され、タッチ入力は動作します。これは iOS のバージョンではなくデバイスの使用期間に依存し、`simctl erase` でも再起動でも回復しません。`type` はこの状態を検出し、成功と報告せずに失敗します。`set-text` は影響を受けません。Xcode 27 のサービスを有効にしてあれば `type` はそちら経由で再試行して成功します（後述）
+- アクセシビリティツリー上は存在するのに実際には触れない要素へのタップは、成功と報告されます。`describe-point` もその要素を返すため、この違いはどの層でも判別できません。Xcode 自身のツールも同じ挙動です
 - Face ID / Touch ID、light/dark を超えるアクセシビリティ表示設定には Xcode 27 が必要です。これらは `xcrun devicectl` を経由し、devicectl はそのリリース以降の simulator しか対象にできません
 - コントラスト比と文字切れは `sipi a11y-audit` の対象外です。どちらも描画されたフレームのピクセル解析が必要です
 - simulator のみ対応で、実機はサポートしていません
+
+## キー入力を受け付けなくなった simulator への入力
+
+simulator は、SimPilot が送るキーボードイベントを無視する状態になることがあります。タッチは動き続け、paste・キー単位の入力・select-all+delete だけが効かなくなります。SimPilot は正常なデバイスと同一のイベントを送っているため、SimPilot 側に直せる箇所はありません。一方 Xcode 27 のデバイス操作サービスは別経路で入力するため、この状態のデバイスでも通ります。さらにこの経路はゲスト側のキーボード配列にも依存しません。
+
+`sipi type` はこれをフォールバックとして使います。自前のキー入力が届かなかったことを検出すると、ステップを失敗させる代わりに Xcode のサービス経由で再試行します。`--xcode-mcp` を付けると最初からその経路を使います。これ以外の SimPilot の機能はすべてこの設定なしで動作し、`set-text` はそもそもキーボードを必要としません。
+
+利用には次の3つが必要です。
+
+```bash
+xcode-select -p                    # Xcode 27 以降
+sudo xcrun mcp-server enable       # headless モードを有効化
+sipi xcode-mcp --approve <.xcodeproj または .xcworkspace のパス>
+```
+
+プロジェクトは Xcode の承認ダイアログを出すためだけに開き、すぐ閉じます。設定後、フォールバックが発動した際にサービスが停止していれば sipi が起動します。Xcode は承認をバイナリ単位で紐付けるため、`sipi update` や再ビルドのたびに承認手順が必要です。現在の状態は `sipi xcode-mcp` で、フォールバックが使えるかどうかは `sipi doctor` で確認できます。
+
+`--clear` はこの経路では使えません。select-all と delete もキー入力であり、このサービスは入力はできてもフィールドを空にはできないためです。値を置き換えたい場合は `sipi set-text` を使ってください。
 
 ## Note
 

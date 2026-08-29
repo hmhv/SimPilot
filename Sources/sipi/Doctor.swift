@@ -238,6 +238,21 @@ private struct DoctorReport {
             )
         }
 
+        switch XcodeMCP.availability(developerDir: developerDir) {
+        case .success:
+            notes.append(
+                "Xcode's MCP device-interaction service is enabled: `sipi type --xcode-mcp` is "
+                + "available, and a `type` whose keystrokes do not reach the guest is retried "
+                + "through it automatically."
+            )
+        case .failure(let reason):
+            notes.append(
+                "Xcode's MCP device-interaction service is not usable, so `sipi type` has only its "
+                + "own keyboard paths. \(reason.description) On a simulator that has stopped "
+                + "accepting keyboard HID, `sipi set-text` still writes the value without a keyboard."
+            )
+        }
+
         if let app = SimulatorUIApp.resolve(developerDir: developerDir) {
             notes.append(
                 "sipi drives simulators headlessly (no window needed); "

@@ -233,10 +233,28 @@ matrix gate on it.
 `describe-ui` emits a top-level JSON array (pretty-printed with the spaced-colon
 `"key" : "value"` style) so skills can grep it as raw text. Each node may carry
 `AXLabel`, `AXValue`, `role_description`, `role`, `subrole`, `type`,
-`AXUniqueId`, `enabled`, `frame{x,y,width,height}`, and `children`. The default
-path is frontmost + recursive (fast, ~0.1s); the 16pt `objectAtPoint` grid
-pass that surfaces System UI (PhotosPicker, status bar, cross-process overlays)
-is opt-in via `--deep` or auto-triggered when an `--expect`ed string is missing.
+`AXUniqueId`, `enabled`, `frame{x,y,width,height}`, `hitPoint{x,y}`,
+`onscreen`, and `children`. The default path is frontmost + recursive (fast,
+~0.1s); the 16pt `objectAtPoint` grid pass that surfaces System UI
+(PhotosPicker, status bar, cross-process overlays) is opt-in via `--deep` or
+auto-triggered when an `--expect`ed string is missing.
+
+`frame` is what the element reports about itself, and it is not a tap target.
+It can extend past the display (a row scrolled out of view, a control taller
+than the screen), and elements inside a cross-process remote view — a share
+sheet — report frames in that view's own coordinate space. `hitPoint` is
+always a point on the screen: the grid records the coordinate that hit-tested
+to the element when its frame turns out not to be in screen space, and
+everything else gets the centre of the frame clipped to the display.
+`onscreen` is false for an element with no visible area at all, and such an
+element carries no `hitPoint` — there is no honest point to offer for
+something that cannot be touched. Selector-based `tap` scrolls those into view
+before touching them, and fails if it cannot.
+
+Grid discovery sweeps points in the tree's LOGICAL space but hands them to a
+hit-test that reads PHYSICAL portrait coordinates. Those agree only in
+portrait, so probe-derived hit points are discarded on a rotated device (and
+`--deep` discovery is unreliable there for the same reason).
 
 ```sh
 sipi describe-ui <udid> [--deep]      # accessibility tree as JSON (--deep sees System UI)

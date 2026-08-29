@@ -150,23 +150,77 @@ public enum AccessibilityTargetResolver {
             throw ElementResolutionError.invalidFrame(reason: "Matched element has an invalid frame size (\(frame.width)x\(frame.height)).")
         }
 
+        let screen = applicationFrame(from: roots)
         return TapResolution(
-            point: activationPoint(for: activationElement, frame: frame),
-            isSwitchLikeControl: activationElement.isSwitchLikeControl
+            point: activationPoint(for: activationElement, frame: frame, screen: screen),
+            isSwitchLikeControl: activationElement.isSwitchLikeControl,
+            isOnScreen: isReachable(activationElement, frame: frame, screen: screen),
+            frame: frame,
+            identifier: activationElement.AXUniqueId,
+            label: activationElement.AXLabel
         )
     }
 
+    /// Whether the element can be touched at all right now: some part of it is
+    /// inside the display, or the driver measured a hit point for it (which only
+    /// happens when a hit-test on screen actually reached it).
+    private static func isReachable(
+        _ element: AXNode,
+        frame: AXNode.Frame,
+        screen: AXNode.Frame?
+    ) -> Bool {
+        // `onscreen` is computed against the display, so it is the authority
+        // even when a hit point exists: a probe on the very edge of the grid can
+        // sit on the exclusive boundary, which is not a touchable coordinate.
+        if let onscreen = element.onscreen { return onscreen }
+        if element.hitPoint != nil { return true }
+        guard let screen else { return true }
+        return frame.intersected(with: screen) != nil
+    }
+
+    /// The point to touch for this element.
+    ///
+    /// A hit point that lies OUTSIDE the element's own frame can only have come
+    /// from a hit-test that actually reached the element — the driver records
+    /// one when the frame turns out not to be in screen coordinates at all,
+    /// which is the case inside a cross-process remote view such as the share
+    /// sheet. There the frame is unusable and the measured point is the only way
+    /// in, so it wins outright.
+    ///
+    /// A hit point inside the frame is just the clipped center the driver
+    /// computed, and carries no more information than the frame does. Ignoring
+    /// it here keeps the switch/toggle rule below alive: a wide switch row must
+    /// be tapped near its trailing edge, where the knob is, not at its center.
+    ///
+    /// Otherwise the frame is clipped to the display first, so an element that
+    /// runs past the edge is touched where it is actually visible instead of at
+    /// a center that may be off screen.
     private static func activationPoint(
         for element: AXNode,
-        frame: AXNode.Frame
+        frame: AXNode.Frame,
+        screen: AXNode.Frame?
     ) -> Point {
-        let centerY = frame.y + (frame.height / 2.0)
-
-        if element.isSwitchLikeControl, frame.width > wideSwitchActivationWidthThreshold {
-            return Point(x: frame.x + frame.width - switchTrailingActivationInset, y: centerY)
+        if let measured = element.hitPoint, !frame.contains(measured) {
+            return Point(x: measured.x, y: measured.y)
         }
 
-        return Point(x: frame.x + (frame.width / 2.0), y: centerY)
+        let visible = screen.flatMap { frame.intersected(with: $0) } ?? frame
+        let centerY = visible.y + (visible.height / 2.0)
+
+        // The trailing inset is measured from the element's own trailing edge —
+        // that is where the switch knob sits — but it has to stay inside the
+        // visible slice, or a switch running off the right edge would be tapped
+        // off screen.
+        if element.isSwitchLikeControl, frame.width > wideSwitchActivationWidthThreshold {
+            let trailing = frame.x + frame.width - switchTrailingActivationInset
+            // The visible slice is half-open, so its own maximum is the first
+            // coordinate NOT on the element: clamp inside it, never onto it.
+            let inset = min(0.5, visible.width / 2.0)
+            let clamped = min(max(trailing, visible.x), visible.x + visible.width - inset)
+            return Point(x: clamped, y: centerY)
+        }
+
+        return Point(x: visible.x + (visible.width / 2.0), y: centerY)
     }
 
     private static func applicationFrame(from roots: [AXNode]) -> AXNode.Frame? {

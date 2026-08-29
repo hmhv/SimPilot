@@ -129,9 +129,11 @@ default; `--keyboard` injects US-only keystrokes and `--clear` selects-all and
 deletes first. Because `set-text` types nothing, it also does not exercise input
 filters — a length cap or character whitelist may be bypassed (unmeasured).
 
-`type` has three measured failure modes — a simulator that has stopped delivering
-keyboard HID, IME composition under a non-Latin keyboard, and `--clear` against a
-pending composition. All three, with their recovery steps, are in
+`type` has three measured failure modes — a simulator that has stopped accepting
+keyboard HID, the guest keyboard layout deciding what `--keyboard` actually types
+(and IME composition under a non-Latin keyboard), and `--clear` against a pending
+composition. All three, with their recovery steps — including the Xcode 27
+service `type` falls back to when its own keystrokes do not arrive — are in
 `troubleshooting.md`.
 
 ### Scrolling

@@ -56,6 +56,18 @@ with its own preconditions, not as optional steps inside one.
 { "type": "tap", "point": { "x": 0.5, "y": 0.8, "unit": "norm" } }
 ```
 
+A selector may match an element that is scrolled out of view. `describe-ui`
+lists those — they exist, they are just not on screen — and touching the centre
+of such a frame sends the touch to a coordinate the display does not have, which
+the app never sees. A selector `tap` therefore scrolls the element into view
+first (along its own column or row, so a neighbouring scroll view is not the one
+that moves), and FAILS when it cannot be reached rather than reporting a success
+that did nothing. A `point` tap is taken at face value; nothing scrolls.
+
+Each element carries `hitPoint` (a point that is actually on the screen) and
+`onscreen` in `describe-ui` output, so a spec can be written against what is
+reachable rather than against raw frames.
+
 `double-tap` — zoom-to-fit in map and photo views, double-tap-to-select text. Two
 full taps inside the system double-tap window, which two separate `tap` steps
 cannot guarantee:
@@ -98,7 +110,7 @@ poll timeout:
 **`set-text` is the default.** It writes the element's accessibility value
 directly, so it needs no keyboard, no pasteboard, and no focus, and it carries any
 text (Japanese, emoji) regardless of the guest keyboard layout or IME. It is the
-only text action that works on a device that has stopped delivering keyboard HID.
+only text action that works on a device that has stopped accepting keyboard HID.
 The write is confirmed against a fresh read of the app, so the step FAILS when the
 value did not take — only editable text elements accept it.
 
@@ -110,8 +122,8 @@ Three constraints to plan around:
 
 - **The target must be on screen.** The write goes through a hit-test at the
   element's activation point, so a field scrolled out of view (or hidden behind
-  the keyboard) has a frame but cannot be hit. Scroll it into view first, exactly
-  as before a `tap`.
+  the keyboard) has a frame but cannot be hit. Unlike `tap`, `set-text` does not
+  scroll it into view — add a `gesture` step first.
 - **A field that reports something other than what was written** fails the
   built-in confirmation. `SecureField` is the common case: the write lands
   (measured — an 11-character write reached the app) but AXValue reads back as
@@ -144,10 +156,21 @@ already be focused (tap it first):
 
 By default `type` pastes through the simulator pasteboard (Cmd+V), independent of
 the guest keyboard layout and input language. `"input-method": "keyboard"` sends
-real per-character keystrokes but supports US-keyboard characters only and is
-rejected for accented / non-Latin / emoji text. Pasting clobbers and best-effort
-restores the simulator pasteboard, which is synced with the Mac pasteboard — the
-host clipboard is transiently replaced too.
+real per-character keystrokes but supports US-keyboard characters only, is
+rejected for accented / non-Latin / emoji text, and produces the WRONG characters
+when the guest's active keyboard is a different layout (typing "hello" under a
+Japanese keyboard yields "へっぉ"). Pasting clobbers and best-effort restores the
+simulator pasteboard, which is synced with the Mac pasteboard — the host
+clipboard is transiently replaced too.
+
+`"input-method": "xcode-mcp"` hands the text to Xcode 27's own device-interaction
+service, which types through a path that is neither HID nor layout-dependent. It
+is also what `type` falls back to on its own: when the default keystrokes are
+detected not to have arrived and that service is available, the step retries
+through it instead of failing. Setup is one-time and per-binary — see
+`../../sipi-common/docs/troubleshooting.md` § `type` failures. It cannot perform
+`"clear": true` (select-all and delete are keystrokes too), so that combination is
+rejected; use `set-text` to replace a value outright.
 
 Both methods insert at the caret, so a field that already holds text ends up with
 both strings. `"clear": true` selects all (Cmd+A) and deletes first.

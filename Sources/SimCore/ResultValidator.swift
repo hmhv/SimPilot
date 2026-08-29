@@ -845,10 +845,16 @@ public enum ResultValidator {
         case "type":
             if !(a["text"] is String) { diag.errors.append("\(path): \(ordinal) (type) requires a text string") }
             if let method = a["input-method"] as? String {
-                if !["paste", "keyboard"].contains(method) {
-                    diag.errors.append("\(path): \(ordinal).input-method must be paste or keyboard")
+                if !["paste", "keyboard", "xcode-mcp"].contains(method) {
+                    diag.errors.append("\(path): \(ordinal).input-method must be paste, keyboard or xcode-mcp")
                 } else if method == "keyboard", let text = a["text"] as? String, !TextToHIDEvents.validateText(text) {
                     diag.errors.append("\(path): \(ordinal) (type) input-method 'keyboard' cannot type non-US-keyboard text; use paste")
+                } else if method == "xcode-mcp", a["clear"] as? Bool == true {
+                    // Xcode's service types but cannot empty a field, and the
+                    // select-all/delete keystrokes are exactly what a device in
+                    // this state drops — the field would end up holding both
+                    // strings with every check passing.
+                    diag.errors.append("\(path): \(ordinal) (type) input-method 'xcode-mcp' cannot combine with clear; use set-text to replace a value")
                 }
             }
         case "key":

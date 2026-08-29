@@ -57,7 +57,19 @@ public final class NativeDriver: SimDriver {
             deep: deep,
             developerDir: developerDir
         )
-        return raw.map { Self.node(from: $0) }
+        // The grid pass sweeps points in the tree's LOGICAL space but hands them
+        // to a hit-test that reads PHYSICAL portrait coordinates. Those agree
+        // only in portrait; rotated, the probe points land somewhere else
+        // entirely, so the points it recorded are not where those elements are
+        // and must not be presented as hit points. (Grid discovery on a rotated
+        // device is unreliable for the same reason — a pre-existing limit this
+        // only declines to make worse.)
+        let portrait = ((try? uiOrientation(udid)) ?? .portrait) == .portrait
+        let nodes = raw.map { Self.node(from: $0, trustProbeHitPoints: portrait) }
+        // Every node leaves the driver with a hitPoint it is safe to touch and an
+        // honest onscreen flag; without this a caller has only frames, which are
+        // not tap targets (see HitPoints.swift).
+        return HitPoints.annotate(nodes, screen: HitPoints.screenFrame(of: nodes))
     }
 
     public func element(at point: Point, udid: String) throws -> AXNode? {
@@ -76,7 +88,14 @@ public final class NativeDriver: SimDriver {
             developerDir: developerDir
         )
         guard !raw.isEmpty else { return nil }
-        return Self.node(from: raw)
+        var node = Self.node(from: raw)
+        // `point` is already in the logical space describe-ui frames use, and it
+        // just reached this element, so it is by construction a point that hits
+        // it — better ground truth than anything the element's frame can offer,
+        // which for a remote view is not even in screen space.
+        node.hitPoint = AXNode.Frame.Point(x: point.x, y: point.y)
+        node.onscreen = true
+        return node
     }
 
     public func setValue(_ value: String, at point: Point, udid: String) throws {
@@ -533,7 +552,7 @@ public final class NativeDriver: SimDriver {
     /// childless nodes), and subrole only when SimBridge included it. Keeping the
     /// empty strings rather than collapsing them to nil keeps the AXNode JSON
     /// stable so skills can grep it as raw text.
-    static func node(from raw: [String: Any]) -> AXNode {
+    static func node(from raw: [String: Any], trustProbeHitPoints: Bool = true) -> AXNode {
         var frame: AXNode.Frame?
         if let f = raw["frame"] as? [String: Any] {
             frame = AXNode.Frame(
@@ -544,9 +563,17 @@ public final class NativeDriver: SimDriver {
             )
         }
 
+        // Present only for elements the grid pass reached by hit-testing, where
+        // the probe point is the one trustworthy screen coordinate for the
+        // element (see SPRecordProbeHit in SimBridge.m).
+        var hitPoint: AXNode.Frame.Point?
+        if trustProbeHitPoints, let p = raw["hitPoint"] as? [String: Any] {
+            hitPoint = AXNode.Frame.Point(x: doubleValue(p["x"]), y: doubleValue(p["y"]))
+        }
+
         var children: [AXNode]?
         if let rawChildren = raw["children"] as? [[String: Any]] {
-            children = rawChildren.map { node(from: $0) }
+            children = rawChildren.map { node(from: $0, trustProbeHitPoints: trustProbeHitPoints) }
         }
 
         return AXNode(
@@ -559,6 +586,7 @@ public final class NativeDriver: SimDriver {
             AXUniqueId: raw["AXUniqueId"] as? String,
             enabled: boolValue(raw["enabled"]),
             frame: frame,
+            hitPoint: hitPoint,
             children: children
         )
     }

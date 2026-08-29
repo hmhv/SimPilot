@@ -27,6 +27,10 @@ public enum AXNodeJSON {
                 "x": f.x, "y": f.y, "width": f.width, "height": f.height
             ]
         }
+        if let p = node.hitPoint {
+            dict["hitPoint"] = ["x": p.x, "y": p.y]
+        }
+        if let v = node.onscreen { dict["onscreen"] = v }
         if let children = node.children {
             dict["children"] = children.map { dictionary(for: $0) }
         }

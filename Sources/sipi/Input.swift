@@ -100,7 +100,10 @@ extension Sipi {
             which replaces the whole value without touching the keyboard.
 
             A simulator can stop delivering keyboard HID entirely — paste, --keyboard
-            and --clear then all leave the field untouched. This command DETECTS that:
+            and --clear then all leave the field untouched. When Xcode 27's MCP
+            service is enabled, sipi retries such a failure through it
+            automatically (it types through a different, non-HID path); pass
+            --xcode-mcp to use that route from the start. This command DETECTS that:
             it compares the text fields' contents before and after and fails when
             nothing changed, instead of printing ok over a no-op. Measured: this
             follows DEVICE age, not the iOS version, and neither `simctl erase` nor a
@@ -138,6 +141,9 @@ extension Sipi {
 
         @Option(name: .customLong("file"), help: "Read the text from this file.")
         var inputFile: String?
+
+        @Flag(name: .customLong("xcode-mcp"), help: "Type through Xcode's device-interaction service instead (Xcode 27 with `sudo xcrun mcp-server enable`). Works on a simulator whose keyboard HID has stopped accepting input, and ignores the guest keyboard layout.")
+        var useXcodeMCP: Bool = false
 
         @Flag(name: .customLong("keyboard"), help: "Inject US-keyboard HID keystrokes instead of pasting (US-representable text only).")
         var useKeyboard = false
@@ -178,7 +184,10 @@ extension Sipi {
             }
 
             let driver = NativeDriver()
-            let method: TextInputMethod = useKeyboard ? .keyboard : .paste
+            if useKeyboard && useXcodeMCP {
+                throw ValidationError("--keyboard and --xcode-mcp select different input paths; pass at most one.")
+            }
+            let method: TextInputMethod = useXcodeMCP ? .xcodeMCP : (useKeyboard ? .keyboard : .paste)
             do {
                 try TextInput.insert(
                     inputText,
@@ -186,7 +195,8 @@ extension Sipi {
                     clear: clearField,
                     driver: driver,
                     udid: udid,
-                    verifyEffect: !noVerify
+                    verifyEffect: !noVerify,
+                    allowXcodeMCPFallback: true
                 )
             } catch let error as TextInputError {
                 throw ValidationError(error.description)

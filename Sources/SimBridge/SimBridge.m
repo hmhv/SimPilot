@@ -786,11 +786,32 @@ static BOOL SPFrameContainsPoint(NSDictionary *f, CGPoint p) {
     return p.x >= x && p.x < x + w && p.y >= y && p.y < y + h;
 }
 
+// Roles that group other controls. Such an element reports no
+// accessibilityChildren of its own for some UIKit/SwiftUI controls — a
+// segmented control is the clear case: the whole control answers as one
+// AXTabGroup with an empty child list, while each segment is reachable only by
+// hit-testing inside it. Letting the group's frame suppress grid probing hides
+// every segment, so a container role never counts as a leaf no matter how small
+// it is.
+static BOOL SPIsContainerRole(NSString *type) {
+    static NSSet *containers;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        containers = [NSSet setWithArray:@[
+            @"TabGroup", @"SegmentedControl", @"Toolbar", @"Group", @"ScrollArea",
+            @"List", @"Table", @"Outline", @"Grid", @"SplitGroup", @"Sheet",
+            @"Popover", @"Alert", @"Drawer", @"Layout", @"Application", @"Window"
+        ]];
+    });
+    return type != nil && [containers containsObject:type];
+}
+
 // A node's frame may suppress future grid probes only if it is a small leaf:
 // containers and full-screen-ish elements must keep probing their interior so
 // distinct sibling/overlay elements are still hit-tested.
 static BOOL SPIsCoverable(NSDictionary *node, CGFloat screenArea) {
     if ([node[@"children"] count] != 0) return NO;
+    if (SPIsContainerRole(node[@"type"])) return NO;
     NSDictionary *f = node[@"frame"];
     CGFloat area = [f[@"width"] doubleValue] * [f[@"height"] doubleValue];
     // Only genuinely small leaves (buttons, labels, annotations) suppress
@@ -968,6 +989,25 @@ static BOOL SPIsCoverable(NSDictionary *node, CGFloat screenArea) {
     return ((CGRect (*)(id, SEL))objc_msgSend)(element, sel);
 }
 
+// Just this element's own identifying fields — no children, no visited
+// bookkeeping, no budget spent. The grid uses it to ask "have I already got
+// this one?" before paying to serialize a whole subtree it is about to throw
+// away, which is what used to exhaust the node budget partway down the screen
+// and leave the lower half of a busy screen unprobed.
+- (NSDictionary<NSString *, id> *)serializeShallowElement:(id)element {
+    NSMutableDictionary<NSString *, id> *node = [NSMutableDictionary dictionary];
+    node[@"AXLabel"] = SPAXString(element, @"accessibilityLabel") ?: @"";
+    NSString *rawRole = SPAXString(element, @"accessibilityRole") ?: @"";
+    NSString *role = rawRole;
+    if ([role hasPrefix:@"AX"]) role = [role substringFromIndex:2];
+    node[@"type"] = role;
+    node[@"AXUniqueId"] = SPAXString(element, @"accessibilityIdentifier") ?: @"";
+    CGRect frame = [self frameOf:element];
+    node[@"frame"] = @{ @"x": @(frame.origin.x), @"y": @(frame.origin.y),
+                        @"width": @(frame.size.width), @"height": @(frame.size.height) };
+    return node;
+}
+
 - (nullable NSDictionary<NSString *, id> *)serializeElement:(id)element
                                                     visited:(NSMutableSet *)visited
                                                   remaining:(NSInteger *)remaining
@@ -1016,17 +1056,83 @@ static BOOL SPIsCoverable(NSDictionary *node, CGFloat screenArea) {
     return node;
 }
 
-// Index an already-serialized node tree: record content keys (for dedupe) and
-// frames (for grid coverage). Full-screen-ish containers are excluded from
-// coverage so the grid still probes open areas they nominally "cover".
-- (void)indexNode:(NSDictionary *)node
-             keys:(NSMutableSet *)keys
+// Remember that a hit-test at `p` reached this node. Only called when the
+// node's own frame does not contain `p`, i.e. the frame is in some other
+// coordinate space than the screen — a cross-process remote view such as the
+// share sheet reports frames local to that view, so its frames cannot be
+// touched directly. The probe point is measured in screen space, so it is the
+// only trustworthy way to reach those elements. Several probes land on one
+// element; keep the bounds so the final point can be their center rather than
+// whichever edge the grid happened to touch first.
+// Grid pitch for hit-test discovery, in points. Matches the reference binary.
+static const CGFloat SPGridPitch = 16.0;
+
+static void SPRecordProbeHit(NSMutableDictionary *node, CGPoint p) {
+    NSNumber *minX = node[@"_probeMinX"];
+    if (minX == nil) {
+        node[@"_probeMinX"] = @(p.x); node[@"_probeMaxX"] = @(p.x);
+        node[@"_probeMinY"] = @(p.y); node[@"_probeMaxY"] = @(p.y);
+        node[@"_probeCount"] = @1;
+        return;
+    }
+    node[@"_probeMinX"] = @(MIN([node[@"_probeMinX"] doubleValue], p.x));
+    node[@"_probeMaxX"] = @(MAX([node[@"_probeMaxX"] doubleValue], p.x));
+    node[@"_probeMinY"] = @(MIN([node[@"_probeMinY"] doubleValue], p.y));
+    node[@"_probeMaxY"] = @(MAX([node[@"_probeMaxY"] doubleValue], p.y));
+    node[@"_probeCount"] = @([node[@"_probeCount"] integerValue] + 1);
+}
+
+// Turn the recorded probe bounds into the node's hitPoint and drop the
+// scratch keys, so the serialized tree carries only the contract fields.
+static void SPFinalizeProbeHit(NSMutableDictionary *node) {
+    if (node[@"_probeMinX"] != nil) {
+        double minX = [node[@"_probeMinX"] doubleValue], maxX = [node[@"_probeMaxX"] doubleValue];
+        double minY = [node[@"_probeMinY"] doubleValue], maxY = [node[@"_probeMaxY"] doubleValue];
+        NSDictionary *f = node[@"frame"];
+        double w = [f[@"width"] doubleValue], h = [f[@"height"] doubleValue];
+
+        // Only believe the probes when they agree with each other and with the
+        // element's size. A frame that does not contain the probe point USUALLY
+        // means the frame is in another coordinate space, but not always: some
+        // system elements answer a hit-test well outside their reported frame
+        // (the status bar hands back one element for the whole row), and a frame
+        // can change between two probes. Taking a stray hit as gospel would move
+        // a perfectly good hit point somewhere useless, so require corroboration
+        // — at least two probes, spanning no more than the element's own size.
+        // Probe points are quantized to the grid pitch, so two hits on a short
+        // control can sit one pitch apart even though the control is shorter
+        // than that. Allow the span one pitch of slack in each axis, and no
+        // more: a span beyond that means the probes found different things.
+        BOOL corroborated = [node[@"_probeCount"] integerValue] >= 2
+            && (maxX - minX) <= w + SPGridPitch && (maxY - minY) <= h + SPGridPitch;
+        if (corroborated) {
+            node[@"hitPoint"] = @{ @"x": @((minX + maxX) / 2.0), @"y": @((minY + maxY) / 2.0) };
+        }
+        [node removeObjectForKey:@"_probeMinX"];
+        [node removeObjectForKey:@"_probeMaxX"];
+        [node removeObjectForKey:@"_probeMinY"];
+        [node removeObjectForKey:@"_probeMaxY"];
+        [node removeObjectForKey:@"_probeCount"];
+    }
+    for (NSMutableDictionary *child in node[@"children"]) {
+        SPFinalizeProbeHit(child);
+    }
+}
+
+// Index an already-serialized node tree: map content keys to their nodes (for
+// dedupe, and so a later probe can annotate a node the tree walk already
+// produced) and record frames for grid coverage. Full-screen-ish containers are
+// excluded from coverage so the grid still probes open areas they nominally
+// "cover".
+- (void)indexNode:(NSMutableDictionary *)node
+            index:(NSMutableDictionary<NSString *, NSMutableDictionary *> *)index
           covered:(NSMutableArray<NSDictionary *> *)covered
        screenArea:(CGFloat)screenArea {
-    [keys addObject:SPNodeKey(node)];
+    NSString *key = SPNodeKey(node);
+    if (index[key] == nil) index[key] = node;
     if (SPIsCoverable(node, screenArea)) [covered addObject:node[@"frame"]];
-    for (NSDictionary *child in node[@"children"]) {
-        [self indexNode:child keys:keys covered:covered screenArea:screenArea];
+    for (NSMutableDictionary *child in node[@"children"]) {
+        [self indexNode:child index:index covered:covered screenArea:screenArea];
     }
 }
 
@@ -1044,15 +1150,15 @@ static BOOL SPIsCoverable(NSDictionary *node, CGFloat screenArea) {
     if (![_translator respondsToSelector:atPoint]) return;
 
     CGFloat screenArea = screen.size.width * screen.size.height;
-    NSMutableSet *seenKeys = [NSMutableSet set];
+    NSMutableDictionary<NSString *, NSMutableDictionary *> *index = [NSMutableDictionary dictionary];
     NSMutableArray<NSDictionary *> *covered = [NSMutableArray array];
-    for (NSDictionary *n in rootChildren) {
-        [self indexNode:n keys:seenKeys covered:covered screenArea:screenArea];
+    for (NSMutableDictionary *n in rootChildren) {
+        [self indexNode:n index:index covered:covered screenArea:screenArea];
     }
 
-    const CGFloat step = 16.0; // matches the reference binary's grid pitch
-    for (CGFloat y = screen.origin.y; y <= CGRectGetMaxY(screen) && *remaining > 0; y += step) {
-        for (CGFloat x = screen.origin.x; x <= CGRectGetMaxX(screen) && *remaining > 0; x += step) {
+    const CGFloat step = SPGridPitch;
+    for (CGFloat y = screen.origin.y; y < CGRectGetMaxY(screen) && *remaining > 0; y += step) {
+        for (CGFloat x = screen.origin.x; x < CGRectGetMaxX(screen) && *remaining > 0; x += step) {
             CGPoint p = CGPointMake(x, y);
             BOOL skip = NO;
             for (NSDictionary *f in covered) { if (SPFrameContainsPoint(f, p)) { skip = YES; break; } }
@@ -1065,16 +1171,41 @@ static BOOL SPIsCoverable(NSDictionary *node, CGFloat screenArea) {
                 : translation;
             if (el == nil) continue;
 
-            NSDictionary *node = [self serializeElement:el visited:visited remaining:remaining depth:0];
-            if (node == nil) continue;
-            NSString *key = SPNodeKey(node);
-            if ([seenKeys containsObject:key]) {
-                if (SPIsCoverable(node, screenArea)) [covered addObject:node[@"frame"]];
+            // Identify before serializing. Most probes land on something the
+            // tree walk already produced, and serializing that subtree again
+            // just to discard it burns the node budget.
+            NSDictionary *shallow = [self serializeShallowElement:el];
+            NSMutableDictionary *existing = index[SPNodeKey(shallow)];
+            if (existing != nil) {
+                // Already known. The probe still taught us something the tree
+                // walk could not: `p` is where this element actually is on
+                // screen. Record it when the element's own frame disagrees —
+                // that is exactly the remote-view case, where the frame is
+                // local to another process's view and would tap the wrong spot.
+                if (!SPFrameContainsPoint(existing[@"frame"], p)) {
+                    SPRecordProbeHit(existing, p);
+                }
                 continue;
             }
+
+            NSMutableDictionary *node = (NSMutableDictionary *)[self serializeElement:el visited:visited remaining:remaining depth:0];
+            if (node == nil) continue;
+            NSString *key = SPNodeKey(node);
+            if (index[key] != nil) {
+                if (!SPFrameContainsPoint(index[key][@"frame"], p)) {
+                    SPRecordProbeHit(index[key], p);
+                }
+                continue;
+            }
+            if (!SPFrameContainsPoint(node[@"frame"], p)) {
+                SPRecordProbeHit(node, p);
+            }
             [rootChildren addObject:node];
-            [self indexNode:node keys:seenKeys covered:covered screenArea:screenArea];
+            [self indexNode:node index:index covered:covered screenArea:screenArea];
         }
+    }
+    for (NSMutableDictionary *n in rootChildren) {
+        SPFinalizeProbeHit(n);
     }
     SPAXLog(@"discoverByGrid: rootChildren now %lu", (unsigned long)rootChildren.count);
 }

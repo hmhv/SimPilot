@@ -8,6 +8,7 @@
 // that must receive real per-character keystrokes.
 
 import Foundation
+import SimBridge
 import SimCore
 import SimShell
 
@@ -17,6 +18,10 @@ enum TextInputMethod: String {
     case paste
     /// Inject US-keyboard HID keystrokes. Requires US-representable text.
     case keyboard
+    /// Hand the text to Xcode's own device-interaction service, which types it
+    /// through a path that is neither HID nor layout-dependent. Needs Xcode 27
+    /// with `sudo xcrun mcp-server enable`; see XcodeMCP.swift.
+    case xcodeMCP = "xcode-mcp"
 }
 
 /// An error that knows whether re-running the action that produced it is safe.
@@ -55,7 +60,9 @@ enum TextInput {
         clear: Bool = false,
         driver: SimDriver,
         udid: String,
-        verifyEffect: Bool = true
+        verifyEffect: Bool = true,
+        developerDir: String? = nil,
+        allowXcodeMCPFallback: Bool = false
     ) throws {
         // WHERE the baseline is read decides which question the check asks, and
         // the right question depends on what this call is for.
@@ -110,6 +117,18 @@ enum TextInput {
             probe = try settledBaseline(driver: driver, udid: udid, changedFrom: preClear)
         }
 
+        if method == .xcodeMCP && clear {
+            // Select-all and delete are keystrokes, and Xcode's service types but
+            // does not clear. Running the clear through HID and the insertion
+            // through the service would leave a dead-HID device holding the old
+            // value with the new text appended, while every check passed because
+            // the field did change.
+            throw TextInputError(description:
+                "--clear cannot be combined with --xcode-mcp: the service types text but cannot "
+                + "empty a field, and the select-all/delete keystrokes are exactly what a device "
+                + "in this state is dropping. Use `sipi set-text` to replace the value outright.")
+        }
+
         switch method {
         case .keyboard:
             guard TextToHIDEvents.validateText(text) else {
@@ -135,9 +154,13 @@ enum TextInput {
                 try driver.key(usage: event.usage, down: event.down, udid: udid)
             }
             if let saved { try? SimShell.pbcopy(saved, udid: udid) }
+
+        case .xcodeMCP:
+            try typeViaXcode(text, udid: udid, developerDir: developerDir)
         }
 
-        if let probe {
+        guard let probe else { return }
+        do {
             try assertEffect(
                 probe: probe,
                 method: method,
@@ -145,7 +168,116 @@ enum TextInput {
                 driver: driver,
                 udid: udid
             )
+        } catch let failure as TextInputError {
+            // The keystrokes did not arrive. On a simulator whose Indigo HID
+            // keyboard has stopped accepting input, that is true of paste,
+            // per-key typing and clear alike, and no amount of retrying sipi's
+            // own path will change it — but Xcode's service types into the same
+            // field through a different route. Try it once rather than failing a
+            // test over a device-side condition sipi cannot fix.
+            // Opt-in, not automatic-everywhere: reaching for Xcode's service is a
+            // call out to whatever is installed on this machine, so it happens
+            // only where a caller asked for it. Without this a unit test driving
+            // a mock would take a different path depending on the developer's
+            // Xcode setup.
+            guard allowXcodeMCPFallback,
+                  method != .xcodeMCP,
+                  !clearIsTheEffect,
+                  !text.isEmpty,
+                  case .success = XcodeMCP.availability(developerDir: resolvedDeveloperDir(developerDir))
+            else { throw failure }
+
+            // A clear that never happened must not be papered over. The fallback
+            // can only insert text; it has no way to empty a field, and the
+            // keystrokes that would have done it are exactly the ones this device
+            // is dropping. Typing over the old value would leave the field
+            // holding both strings while every check passed.
+            if clear {
+                throw TextInputError(
+                    description: failure.description
+                        + " Xcode's service could type the text, but it cannot perform the --clear "
+                        + "(select-all and delete are keystrokes too), so the field would end up holding "
+                        + "the old value and the new one. Use `sipi set-text` to replace the value outright.",
+                    retrySafe: failure.retrySafe
+                )
+            }
+
+            // The original keystrokes may simply have been slow. Typing again
+            // now would leave the text in twice, so re-check before doing it.
+            if (try? assertEffect(
+                probe: probe,
+                method: method,
+                clearIsTheEffect: clearIsTheEffect,
+                driver: driver,
+                udid: udid
+            )) != nil {
+                return
+            }
+
+            try typeViaXcode(text, udid: udid, developerDir: developerDir)
+            do {
+                try assertEffect(
+                    probe: probe,
+                    method: .xcodeMCP,
+                    clearIsTheEffect: clearIsTheEffect,
+                    driver: driver,
+                    udid: udid
+                )
+            } catch let unverified as TextInputError {
+                // The service accepted the text, so it may land after this check
+                // gives up. Re-running the step would enter it a second time.
+                throw TextInputError(description: unverified.description, retrySafe: false)
+            }
+            try assertNotDuplicated(text, probe: probe, driver: driver, udid: udid)
         }
+    }
+
+    /// Fail when the field ended up holding `text` more than once.
+    ///
+    /// Switching paths mid-action cannot be made atomic: the original keystrokes
+    /// are in flight somewhere in the guest, and there is no point at which sipi
+    /// can know they will never arrive. So the residual risk is that a slow — as
+    /// opposed to dead — device applies both. That is rare, but a test that
+    /// silently records the wrong value is worse than one that stops, so the
+    /// duplicate is looked for and reported instead of passed over.
+    private static func assertNotDuplicated(
+        _ text: String,
+        probe: Probe,
+        driver: SimDriver,
+        udid: String
+    ) throws {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return }
+        guard case .fields(let after) = read(driver: driver, udid: udid, deep: probe.deep) else { return }
+        guard after.components(separatedBy: trimmed).count - 1 >= 2 else { return }
+        throw TextInputError(
+            description:
+                "The text was entered twice. The original keystrokes were reported as not having "
+                + "arrived, so it was re-sent through Xcode's service, and then both landed — the "
+                + "device is slow rather than unable to accept keyboard input. Clear the field and "
+                + "retry, or use `sipi set-text`, which replaces the value in one write.",
+            retrySafe: false
+        )
+    }
+
+    /// Send `text` through Xcode's device-interaction service, translating its
+    /// failures into the error type the harness already understands.
+    ///
+    /// Whether a retry is safe depends on how far the call got. Everything up to
+    /// and including the session handshake happens before a single character is
+    /// sent, so those failures are safe to retry; once the typing command itself
+    /// has been issued the text may already be in the field, and re-running the
+    /// step would insert it twice.
+    private static func typeViaXcode(_ text: String, udid: String, developerDir: String?) throws {
+        do {
+            try XcodeMCP.typeText(text, udid: udid, developerDir: resolvedDeveloperDir(developerDir))
+        } catch let reason as XcodeMCP.Unavailable {
+            throw TextInputError(description: reason.description, retrySafe: reason.isBeforeTyping)
+        }
+    }
+
+    private static func resolvedDeveloperDir(_ explicit: String?) -> String {
+        explicit ?? SPSimBridge.defaultDeveloperDir()
     }
 
     /// The pre-insertion reading: the text-entry content plus the tree depth it

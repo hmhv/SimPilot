@@ -16,7 +16,7 @@ Los resultados se guardan en `.simpilot/` con informes HTML que se pueden abrir 
 ## Requisitos previos
 
 - macOS 15 o posterior
-- Xcode 26 o posterior: necesario en **tiempo de ejecución** para controlar el Simulator (SimPilot carga los private Simulator frameworks de Xcode). No hace falta para instalar. Xcode 27 o posterior habilita además Face ID / Touch ID y los ajustes de apariencia de accesibilidad, que pasan por `xcrun devicectl`.
+- Xcode 26 o posterior: necesario en **tiempo de ejecución** para controlar el Simulator (SimPilot carga los private Simulator frameworks de Xcode). No hace falta para instalar. Xcode 27 o posterior habilita además Face ID / Touch ID y los ajustes de apariencia de accesibilidad, que pasan por `xcrun devicectl`, y puede actuar como alternativa para el teclado (véase [Escribir en un simulador que dejó de aceptar pulsaciones](#escribir-en-un-simulador-que-dejó-de-aceptar-pulsaciones)).
 - [Claude Code](https://claude.com/claude-code) o Codex
 
 ## Instalación
@@ -160,11 +160,31 @@ Se recomienda añadir `.simpilot/` completa, o al menos `runs/` y `verify/`, al 
 
 ## Limitaciones conocidas
 
-- La entrada de texto escribe por defecto el valor de accesibilidad del campo (`set-text`), que no necesita teclado y admite cualquier sistema de escritura. La entrada tecla a tecla (`type`) pega por el portapapeles de forma predeterminada; la escritura HID directa tecla por tecla solo cubre la distribución de teclado de EE. UU.
-- **Un simulador con mucho uso puede dejar de entregar HID de teclado** (medido en Xcode 27.0 beta 4): pegar, escribir tecla por tecla y seleccionar todo + borrar se ignoran, mientras la entrada táctil sigue funcionando. Depende de la antigüedad del dispositivo, no de la versión de iOS, y ni `simctl erase` ni un reinicio lo recuperan: cree un dispositivo nuevo. `type` detecta esta condición y falla en lugar de informar éxito; `set-text` no se ve afectado
+- La entrada de texto escribe por defecto el valor de accesibilidad del campo (`set-text`), que no necesita teclado y admite cualquier sistema de escritura. La entrada tecla a tecla (`type`) pega por el portapapeles de forma predeterminada; la escritura HID directa tecla por tecla solo cubre la distribución de teclado de EE. UU. y escribe caracteres incorrectos si el invitado tiene activa otra distribución
+- **Un simulador con mucho uso puede dejar de aceptar HID de teclado** (medido en Xcode 27.0 beta 6): pegar, escribir tecla por tecla y seleccionar todo + borrar se ignoran, mientras la entrada táctil sigue funcionando. Depende de la antigüedad del dispositivo, no de la versión de iOS, y ni `simctl erase` ni un reinicio lo recuperan. `type` detecta esta condición y falla en lugar de informar éxito; `set-text` no se ve afectado. Con el servicio propio de Xcode 27 habilitado, `type` reintenta a través de él y lo consigue (véase más abajo)
+- Un toque sobre un elemento que el árbol de accesibilidad declara presente pero cuya área visible no es realmente táctil sigue informando éxito. `describe-point` también devuelve ese elemento, así que ninguna capa puede distinguirlo; las herramientas del propio Xcode se comportan igual
 - Face ID / Touch ID y las facetas de apariencia de accesibilidad más allá de light/dark necesitan Xcode 27: pasan por `xcrun devicectl`, que solo apunta a simuladores de esa versión en adelante
 - Las relaciones de contraste y el texto recortado quedan fuera del alcance de `sipi a11y-audit`; ambos requieren un análisis de píxeles del fotograma renderizado
 - Solo simulador: los dispositivos físicos no son compatibles
+
+## Escribir en un simulador que dejó de aceptar pulsaciones
+
+Un simulador puede llegar a un estado en el que ignora los eventos de teclado que inyecta SimPilot. El toque sigue funcionando; pegar, escribir tecla por tecla y seleccionar todo + borrar, no. SimPilot envía exactamente los mismos eventos en un dispositivo sano y en uno afectado, así que no hay nada que corregir de su lado. En cambio, el servicio de interacción con dispositivos del propio Xcode 27 escribe por otra vía que el dispositivo afectado sí acepta, y esa vía además ignora la distribución de teclado del invitado.
+
+`sipi type` la usa como alternativa: cuando detecta que sus propias pulsaciones no llegaron, reintenta a través del servicio de Xcode en lugar de fallar el paso. `--xcode-mcp` selecciona esa vía desde el principio. Todo lo demás en SimPilot funciona sin nada de esto, y `set-text` nunca necesita teclado.
+
+Deben cumplirse tres condiciones:
+
+```bash
+xcode-select -p                    # Xcode 27 o posterior
+sudo xcrun mcp-server enable       # activar el modo headless
+sipi xcode-mcp --approve <ruta a un .xcodeproj o .xcworkspace>
+```
+
+El proyecto se abre solo para provocar el diálogo de aprobación de Xcode y se cierra de inmediato. Una vez configurado, si la alternativa se activa y el servicio no está en marcha, sipi lo inicia. Xcode vincula la concesión al binario exacto, así que `sipi update` o una recompilación obligan a repetir el paso de aprobación. `sipi xcode-mcp` informa del estado actual y `sipi doctor` indica si la alternativa está disponible.
+
+`--clear` no puede usar esta vía: seleccionar todo y borrar también son pulsaciones, y el servicio escribe pero no puede vaciar un campo. Use `sipi set-text` para reemplazar un valor por completo.
+
 
 ## Note
 

@@ -61,6 +61,7 @@ struct Sipi: ParsableCommand {
             VerifyReport.self,
             Validate.self,
             Doctor.self,
+            XcodeMCPCommand.self,
             Version.self,
             Setup.self,
             Update.self,
