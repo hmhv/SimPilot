@@ -50,18 +50,40 @@ final class XcodeMCPParsingTests: XCTestCase {
     Permission: enabled
     Permitted agents:
       95A5E505-...: unsigned /opt/homebrew/bin/python3 39d850585e74…
-      C2D5E452-...: unsigned /Users/u/.local/bin/sipi fe5ec1bbc28d…
+      C2D5E452-...: unsigned /Users/u/.local/bin/sipi fe5ec1bbc28d… (expires 2026-08-30 03:38:17 +0000)
     Permitted folders:
       BC75CE42-...: /Users/u/projects
     mcp-server: running
     """
 
     func testAPermittedAgentIsRecognised() {
-        XCTAssertTrue(XcodeMCP.isApproved(in: listing, executable: "/Users/u/.local/bin/sipi"))
+        XCTAssertTrue(XcodeMCP.hasGrant(in: listing, executable: "/Users/u/.local/bin/sipi"))
     }
 
     func testAnAgentThatIsNotListedIsNotApproved() {
-        XCTAssertFalse(XcodeMCP.isApproved(in: listing, executable: "/usr/local/bin/sipi"))
+        XCTAssertFalse(XcodeMCP.hasGrant(in: listing, executable: "/usr/local/bin/sipi"))
+    }
+
+    func testAPathThatMerelyContainsOursIsNotOurs() {
+        // `/usr/local/bin/sipi` must not be satisfied by a grant for
+        // `/usr/local/bin/sipi-debug`, which contains it as a substring.
+        let neighbour = """
+        Permission: enabled
+        Permitted agents:
+          C2D5E452-...: unsigned /Users/u/.local/bin/sipi-debug fe5ec1bbc28d… (expires 2026-08-30 03:38:17 +0000)
+        mcp-server: running
+        """
+        XCTAssertFalse(XcodeMCP.hasGrant(in: neighbour, executable: "/Users/u/.local/bin/sipi"))
+    }
+
+    func testAPathWithSpacesIsReadWhole() {
+        let spaced = """
+        Permission: enabled
+        Permitted agents:
+          C2D5E452-...: unsigned /Users/u/My Tools/sipi fe5ec1bbc28d… (expires 2026-08-30 03:38:17 +0000)
+        mcp-server: running
+        """
+        XCTAssertTrue(XcodeMCP.hasGrant(in: spaced, executable: "/Users/u/My Tools/sipi"))
     }
 
     func testAPathOutsideThePermittedAgentsSectionDoesNotCount() {
@@ -75,7 +97,7 @@ final class XcodeMCPParsingTests: XCTestCase {
           BC75CE42-...: /Users/u/projects
         mcp-server: running
         """
-        XCTAssertFalse(XcodeMCP.isApproved(in: pending, executable: "/Users/u/.local/bin/sipi"))
+        XCTAssertFalse(XcodeMCP.hasGrant(in: pending, executable: "/Users/u/.local/bin/sipi"))
     }
 
     func testUnsafeModeApprovesEveryAgent() {
@@ -83,7 +105,19 @@ final class XcodeMCPParsingTests: XCTestCase {
         Permission: enabled (unsafe: always allow all agents)
         mcp-server: running
         """
-        XCTAssertTrue(XcodeMCP.isApproved(in: unsafe, executable: "/anything"))
+        XCTAssertTrue(XcodeMCP.hasGrant(in: unsafe, executable: "/anything"))
+    }
+
+    func testUnsafeIsReadFromThePermissionLineOnly() {
+        // A permitted folder whose path contains the words must not turn every
+        // unapproved binary into an approved one.
+        let misleading = """
+        Permission: enabled
+        Permitted folders:
+          BC75CE42-...: /Users/u/projects/unsafe-allow-list
+        mcp-server: running
+        """
+        XCTAssertFalse(XcodeMCP.hasGrant(in: misleading, executable: "/Users/u/.local/bin/sipi"))
     }
 
     func testOnlyAFailureOfTheTypingCallBlocksARetry() {

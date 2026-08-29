@@ -47,11 +47,13 @@ extension Sipi {
 
             guard let approveWith else {
                 switch XcodeMCP.readiness(developerDir: developerDir) {
-                case .ready:
-                    print("Xcode MCP service: ready.")
-                    print("  This binary is approved; `sipi type --xcode-mcp` and the automatic fallback are available.")
+                case .likelyApproved:
+                    print("Xcode MCP service: enabled, an agent at this path is approved.")
+                    print("  `sipi type --xcode-mcp` and the automatic fallback should work.")
+                    print("  Xcode keys the grant to the exact binary by a digest sipi cannot read back,")
+                    print("  so if a call is refused the grant belongs to an earlier build — approve again.")
                 case .notApprovedYet:
-                    print("Xcode MCP service: enabled, this binary not approved.")
+                    print("Xcode MCP service: enabled, nothing at this path is approved.")
                     print("  Run `sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>` once.")
                     print("  The grant is tied to this exact binary, so an update or rebuild needs it again.")
                 case .unavailable(let reason):

@@ -77,10 +77,17 @@ enum XcodeMCP {
 
     /// How much of the service is usable right now.
     enum Readiness {
-        /// Enabled, and this binary is approved: the fallback will work.
-        case ready
-        /// Enabled, but this binary has not been approved. Everything is in
-        /// place except one `sipi xcode-mcp --approve` run.
+        /// Enabled, and an agent at this executable's path is permitted.
+        ///
+        /// NOT a guarantee. Xcode identifies an agent by a digest sipi cannot
+        /// reproduce — the listing prints a truncated one that matches neither
+        /// the file's SHA-256 nor its CDHash (measured on Xcode 27.0 beta 6) —
+        /// so a grant left over from a previous build at the same path looks
+        /// exactly like a grant for this one. Callers must say "looks approved",
+        /// and point at re-approving if a call is refused anyway.
+        case likelyApproved
+        /// Enabled, and nothing at this path is permitted. This one IS certain:
+        /// no entry means no grant.
         case notApprovedYet
         case unavailable(Unavailable)
     }
@@ -108,7 +115,7 @@ enum XcodeMCP {
         case .failure(let reason):
             return .unavailable(reason)
         case .success(let status):
-            return isApproved(in: status) ? .ready : .notApprovedYet
+            return hasGrant(in: status) ? .likelyApproved : .notApprovedYet
         }
     }
 
@@ -205,45 +212,90 @@ enum XcodeMCP {
         return nil
     }
 
-    /// Poll until the service lists this executable as approved, or give up.
+    /// Whether the live listing carries a grant for this executable.
+    private static func hasGrant(developerDir: String) -> Bool {
+        guard let path = toolPath(developerDir: developerDir),
+              let status = capture(path, ["status"], timeout: 5) else { return false }
+        return hasGrant(in: status)
+    }
+
+    /// Poll until the service lists a grant for this executable, or give up.
     private static func awaitApproval(developerDir: String, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if isApproved(developerDir: developerDir) { return true }
+            if hasGrant(developerDir: developerDir) { return true }
             usleep(500 * 1000)
         } while Date() < deadline
         return false
     }
 
-    /// Whether the service currently grants this executable access.
-    private static func isApproved(developerDir: String) -> Bool {
-        guard let path = toolPath(developerDir: developerDir),
-              let status = capture(path, ["status"], timeout: 5) else { return false }
-        return isApproved(in: status)
-    }
-
-    /// Whether a `mcp-server status` listing grants this executable access.
+    /// Whether a `mcp-server status` listing carries a grant that could be this
+    /// executable's.
     ///
-    /// Reads only the "Permitted agents" section. The listing also names
-    /// PENDING requests with the same executable path, and matching anywhere in
-    /// the blob would report a request that is still waiting as a grant that
-    /// already happened.
-    static func isApproved(in status: String, executable: String? = Bundle.main.executablePath) -> Bool {
+    /// A negative answer is reliable and a positive one is not. Xcode keys a
+    /// grant to a per-binary digest it prints truncated and which sipi cannot
+    /// reproduce (it is neither the file's SHA-256 nor its CDHash — measured),
+    /// so all this can check is the path, and a stale grant for a previous build
+    /// sits at the same path. Reporting is written around that: absent means
+    /// certainly not approved, present means probably.
+    static func hasGrant(in status: String, executable: String? = Bundle.main.executablePath) -> Bool {
         guard let executable else { return false }
-
-        // Headless mode can be enabled with --unsafe-always-allow-all-agents,
-        // in which case there is no per-agent record and every agent is already
-        // permitted.
-        if status.contains("unsafe") && status.contains("allow") { return true }
+        if isUnsafeAllowAll(in: status) { return true }
 
         var inPermittedAgents = false
         for line in status.split(separator: "\n", omittingEmptySubsequences: false) {
             let text = String(line)
+            // Section headers start at column zero; entries are indented. The
+            // listing also names PENDING requests with the same path, and taking
+            // one of those for a grant would report a request still waiting as
+            // one already given.
             if !text.hasPrefix(" ") && text.contains(":") {
                 inPermittedAgents = text.hasPrefix("Permitted agents")
                 continue
             }
-            if inPermittedAgents, text.contains(executable) { return true }
+            guard inPermittedAgents else { continue }
+            if grantedPath(in: text) == executable { return true }
+        }
+        return false
+    }
+
+    /// The executable path named by one permitted-agent line, or nil.
+    ///
+    /// A line reads:
+    ///
+    ///     <uuid>: unsigned /Users/u/.local/bin/sipi c8182f6627b4… (expires ...)
+    ///
+    /// The path is compared whole rather than by substring, so a different
+    /// binary whose path merely contains this one — `/usr/local/bin/sipi` beside
+    /// `/usr/local/bin/sipi-debug` — is not mistaken for it.
+    private static func grantedPath(in line: String) -> String? {
+        guard let afterID = line.range(of: ": ") else { return nil }
+        var rest = line[afterID.upperBound...].trimmingCharacters(in: .whitespaces)
+        for prefix in ["unsigned ", "signed "] where rest.hasPrefix(prefix) {
+            rest = String(rest.dropFirst(prefix.count))
+        }
+        // Trailing metadata is optional and variable-length, so it is removed by
+        // shape rather than by counting fields.
+        if let expires = rest.range(of: " (expires") {
+            rest = String(rest[..<expires.lowerBound])
+        }
+        // What remains is "<path> <digest>", and a path may contain spaces, so
+        // only the digest is dropped.
+        guard let lastSpace = rest.lastIndex(of: " ") else { return nil }
+        let path = String(rest[..<lastSpace])
+        return path.hasPrefix("/") ? path : nil
+    }
+
+    /// Whether headless mode was enabled with --unsafe-always-allow-all-agents,
+    /// which permits every agent with no per-agent record.
+    ///
+    /// Read from the `Permission:` line alone. Searching the whole listing for
+    /// the words would let a permitted FOLDER whose path happens to contain
+    /// them turn every unapproved binary into an approved one.
+    private static func isUnsafeAllowAll(in status: String) -> Bool {
+        for line in status.split(separator: "\n") where line.hasPrefix("Permission:") {
+            let text = line.lowercased()
+            return text.contains("unsafe") || text.contains("all agents")
         }
         return false
     }

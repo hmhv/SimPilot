@@ -239,15 +239,19 @@ private struct DoctorReport {
         }
 
         switch XcodeMCP.readiness(developerDir: developerDir) {
-        case .ready:
+        case .likelyApproved:
             notes.append(
-                "Xcode's MCP device-interaction service is enabled and this sipi is approved: "
-                + "`sipi type --xcode-mcp` is available, and a `type` whose keystrokes do not reach "
-                + "the guest is retried through it automatically."
+                "Xcode's MCP device-interaction service is enabled and an agent at this sipi's path "
+                + "is approved: `sipi type --xcode-mcp` is available, and a `type` whose keystrokes "
+                + "do not reach the guest is retried through it automatically. Xcode keys the grant "
+                + "to the exact binary by a digest sipi cannot read back, so if a call is refused "
+                + "anyway the grant belongs to an earlier build — run `sipi xcode-mcp --approve "
+                + "<project>` again."
             )
         case .notApprovedYet:
             notes.append(
-                "Xcode's MCP device-interaction service is enabled but this sipi is NOT approved, so "
+                "Xcode's MCP device-interaction service is enabled but nothing at this sipi's path is "
+                + "approved, so "
                 + "the `type` keyboard fallback would be refused. Run `sipi xcode-mcp --approve "
                 + "<path to an .xcodeproj or .xcworkspace>` once — the grant is tied to this exact "
                 + "binary, so an update or rebuild needs it again."
