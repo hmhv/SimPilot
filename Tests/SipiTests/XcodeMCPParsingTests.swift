@@ -44,6 +44,48 @@ final class XcodeMCPParsingTests: XCTestCase {
         )
     }
 
+    // MARK: - approval listing
+
+    private let listing = """
+    Permission: enabled
+    Permitted agents:
+      95A5E505-...: unsigned /opt/homebrew/bin/python3 39d850585e74…
+      C2D5E452-...: unsigned /Users/u/.local/bin/sipi fe5ec1bbc28d…
+    Permitted folders:
+      BC75CE42-...: /Users/u/projects
+    mcp-server: running
+    """
+
+    func testAPermittedAgentIsRecognised() {
+        XCTAssertTrue(XcodeMCP.isApproved(in: listing, executable: "/Users/u/.local/bin/sipi"))
+    }
+
+    func testAnAgentThatIsNotListedIsNotApproved() {
+        XCTAssertFalse(XcodeMCP.isApproved(in: listing, executable: "/usr/local/bin/sipi"))
+    }
+
+    func testAPathOutsideThePermittedAgentsSectionDoesNotCount() {
+        // A pending request names the same executable. Matching anywhere in the
+        // blob would report a request that is still waiting as a granted one.
+        let pending = """
+        Permission: enabled
+        Pending approvals:
+          11111111-...: unsigned /Users/u/.local/bin/sipi aaaaaaaaaaaa…
+        Permitted folders:
+          BC75CE42-...: /Users/u/projects
+        mcp-server: running
+        """
+        XCTAssertFalse(XcodeMCP.isApproved(in: pending, executable: "/Users/u/.local/bin/sipi"))
+    }
+
+    func testUnsafeModeApprovesEveryAgent() {
+        let unsafe = """
+        Permission: enabled (unsafe: always allow all agents)
+        mcp-server: running
+        """
+        XCTAssertTrue(XcodeMCP.isApproved(in: unsafe, executable: "/anything"))
+    }
+
     func testOnlyAFailureOfTheTypingCallBlocksARetry() {
         // Everything before the text is sent is safe to retry; once the typing
         // command has been issued the text may already be in the field.

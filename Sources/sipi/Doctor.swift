@@ -238,14 +238,21 @@ private struct DoctorReport {
             )
         }
 
-        switch XcodeMCP.availability(developerDir: developerDir) {
-        case .success:
+        switch XcodeMCP.readiness(developerDir: developerDir) {
+        case .ready:
             notes.append(
-                "Xcode's MCP device-interaction service is enabled: `sipi type --xcode-mcp` is "
-                + "available, and a `type` whose keystrokes do not reach the guest is retried "
-                + "through it automatically."
+                "Xcode's MCP device-interaction service is enabled and this sipi is approved: "
+                + "`sipi type --xcode-mcp` is available, and a `type` whose keystrokes do not reach "
+                + "the guest is retried through it automatically."
             )
-        case .failure(let reason):
+        case .notApprovedYet:
+            notes.append(
+                "Xcode's MCP device-interaction service is enabled but this sipi is NOT approved, so "
+                + "the `type` keyboard fallback would be refused. Run `sipi xcode-mcp --approve "
+                + "<path to an .xcodeproj or .xcworkspace>` once — the grant is tied to this exact "
+                + "binary, so an update or rebuild needs it again."
+            )
+        case .unavailable(let reason):
             notes.append(
                 "Xcode's MCP device-interaction service is not usable, so `sipi type` has only its "
                 + "own keyboard paths. \(reason.description) On a simulator that has stopped "

@@ -75,9 +75,45 @@ enum XcodeMCP {
         }
     }
 
+    /// How much of the service is usable right now.
+    enum Readiness {
+        /// Enabled, and this binary is approved: the fallback will work.
+        case ready
+        /// Enabled, but this binary has not been approved. Everything is in
+        /// place except one `sipi xcode-mcp --approve` run.
+        case notApprovedYet
+        case unavailable(Unavailable)
+    }
+
     /// Whether the service is present and switched on. Cheap: reads the
     /// service's own status, and does not start it.
+    ///
+    /// Deliberately does NOT consider approval. This gates the fallback, and
+    /// approval is read by parsing human-readable output — a parsing miss would
+    /// silently switch the feature off, whereas actually attempting the call
+    /// gets an authoritative answer from Xcode itself. Reporting uses
+    /// `readiness` instead, where being wrong only costs a misleading line.
     static func availability(developerDir: String) -> Result<Void, Unavailable> {
+        switch enabledStatus(developerDir: developerDir) {
+        case .success: return .success(())
+        case .failure(let reason): return .failure(reason)
+        }
+    }
+
+    /// Availability plus whether THIS binary is approved — what `doctor` and
+    /// `sipi xcode-mcp` report, so neither claims the fallback is available
+    /// when the next call would be refused.
+    static func readiness(developerDir: String) -> Readiness {
+        switch enabledStatus(developerDir: developerDir) {
+        case .failure(let reason):
+            return .unavailable(reason)
+        case .success(let status):
+            return isApproved(in: status) ? .ready : .notApprovedYet
+        }
+    }
+
+    /// The service's status output, once, or why it could not be read.
+    private static func enabledStatus(developerDir: String) -> Result<String, Unavailable> {
         guard let path = toolPath(developerDir: developerDir),
               FileManager.default.isExecutableFile(atPath: path) else {
             return .failure(.toolMissing)
@@ -89,7 +125,7 @@ enum XcodeMCP {
             return .failure(.notAnswering)
         }
         guard status.contains("Permission: enabled") else { return .failure(.notEnabled) }
-        return .success(())
+        return .success(status)
     }
 
     /// Ask Xcode's service to approve this copy of `sipi`.
@@ -180,19 +216,24 @@ enum XcodeMCP {
     }
 
     /// Whether the service currently grants this executable access.
-    ///
-    /// Reads only the "Permitted agents" section. The status output also lists
-    /// PENDING requests, and those name the same executable path — matching
-    /// anywhere in the blob would report a request that is still waiting as a
-    /// grant that already happened.
     private static func isApproved(developerDir: String) -> Bool {
         guard let path = toolPath(developerDir: developerDir),
-              let status = capture(path, ["status"], timeout: 5),
-              let executable = Bundle.main.executablePath else { return false }
+              let status = capture(path, ["status"], timeout: 5) else { return false }
+        return isApproved(in: status)
+    }
 
-        // Headless mode can be enabled with --unsafe-always-allow-all-agents, in
-        // which case there is no per-agent record to find and every agent is
-        // already permitted.
+    /// Whether a `mcp-server status` listing grants this executable access.
+    ///
+    /// Reads only the "Permitted agents" section. The listing also names
+    /// PENDING requests with the same executable path, and matching anywhere in
+    /// the blob would report a request that is still waiting as a grant that
+    /// already happened.
+    static func isApproved(in status: String, executable: String? = Bundle.main.executablePath) -> Bool {
+        guard let executable else { return false }
+
+        // Headless mode can be enabled with --unsafe-always-allow-all-agents,
+        // in which case there is no per-agent record and every agent is already
+        // permitted.
         if status.contains("unsafe") && status.contains("allow") { return true }
 
         var inPermittedAgents = false
