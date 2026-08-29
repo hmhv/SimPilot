@@ -11,7 +11,7 @@ SimPilot은 Claude Code 또는 Codex에서 자연어 요청으로 구동되는 i
 - **`/sipi-test`**: iOS Simulator에서 UI 테스트와 이상 상태 테스트를 자동화합니다. skill이 자연어 의도를 명시적인 v2 JSON 명세로 바꾸고, `sipi run-test` / `sipi run-suite`가 결정적 harness로 실행합니다. 저장된 테스트는 권한, deep link, 푸시 알림, 위치, 화면 모드, Dynamic Type, Increase Contrast, Face ID / Touch ID, 더 넓은 범위의 접근성 화면 설정, 실행 환경, 명시적으로 구성한 network-condition provider를 제어할 수 있습니다.
 - **`/sipi-verify`**: 구현 후 검증입니다. 기능 추가나 버그 수정 후 변경 사항이 올바르게 동작하고 화면도 문제가 없는지 확인합니다.
 
-결과는 `.simpilot/`에 저장되며, 브라우저에서 열 수 있는 HTML 리포트가 생성됩니다.
+결과는 에이전트나 CI가 바로 읽을 수 있는 JSON으로 `.simpilot/`에 저장됩니다. 브라우저에서 볼 HTML 리포트는 필요할 때 생성합니다.
 
 ## 사전 요구 사항
 
@@ -98,7 +98,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test HTML 리포트를 열어줘
 ```
 
-각 run은 run 디렉터리에 `report.html`을 생성합니다. 결과는 `.simpilot/runs/`에 저장됩니다.
+각 run은 `summary.json`(상태, 건수, 실패한 각 테스트의 첫 실패 단계)을 `run.json` 및 테스트별 `result.json`과 함께 기록합니다. 결과는 `.simpilot/runs/`에 저장됩니다. `report.html`은 사람이 브라우저에서 훑어보기 위한 페이지로, 실행 시 `--html`을 붙이거나 나중에 `sipi report <run-dir>`를 실행했을 때만 생성됩니다.
 
 **스위트 관리:**
 ```text
@@ -137,7 +137,7 @@ SimPilot은 `.simpilot/` 아래에 다음 구조를 사용합니다.
     <run-id>/
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
-      report.html              # HTML report (open in browser)
+      report.html              # only with --html, or `sipi report`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
@@ -147,9 +147,11 @@ SimPilot은 `.simpilot/` 아래에 다음 구조를 사용합니다.
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      summary.json             # 상태, 건수, findings, variant 폴더
       checks.json
       findings.json
-      report.html
+      <variant>/NNN_<check>.png
+      report.html              # `finalize --html` 또는 `sipi verify-report`일 때만
 ```
 
 `.simpilot/` 전체 또는 최소한 `runs/`와 `verify/`는 프로젝트의 `.gitignore`에 추가하는 것을 권장합니다.

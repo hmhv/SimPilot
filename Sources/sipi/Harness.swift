@@ -450,6 +450,10 @@ private struct HarnessRunOptions {
     var stopOnFailure: Bool
     var resetBetweenTests: Bool
     var evidenceBundleIDs: [String]
+    /// Also render `report.html`. Off by default: a run's readers are agents and
+    /// CI, which take `summary.json` and `result.json`, and rendering a page
+    /// nobody opens costs time on every run.
+    var html: Bool = false
 }
 
 private enum HarnessTime {
@@ -653,7 +657,14 @@ private final class HarnessRunner {
         // intentionally surfaced as a throw) can never discard run.json,
         // summary.json, or report.html.
         try writeRunJSON(finished: Date())
-        try ReportGenerator.writeTestReport(runDir: runDir)
+        // Refresh a page that is already there even without --html: a summary
+        // naming a page that no longer describes the run is worse than either
+        // writing the page or leaving the directory without one.
+        if options.html || fm.fileExists(atPath: runDir + "/report.html") {
+            try ReportGenerator.writeTestReport(runDir: runDir)
+        } else {
+            try ReportGenerator.writeTestRunSummary(runDir: runDir)
+        }
         runTrace.event("run-finish", fields: ["run-dir": runDir])
         try cleanupEnvironment()
         environmentWasCleaned = true
@@ -2617,6 +2628,9 @@ extension Sipi {
         @Flag(name: .customLong("no-launch"), help: "Do not terminate/launch the app before running.")
         var noLaunch = false
 
+        @Flag(name: .customLong("html"), help: "Also render report.html. Off by default; run.json, summary.json and each result.json are always written.")
+        var html = false
+
         func run() throws {
             do {
                 // Validate the spec before touching the simulator.
@@ -2634,7 +2648,8 @@ extension Sipi {
                     suiteName: nil,
                     stopOnFailure: false,
                     resetBetweenTests: true,
-                    evidenceBundleIDs: tests.compactMap(\.app)
+                    evidenceBundleIDs: tests.compactMap(\.app),
+                    html: html
                 ))
                 let path = try runner.run(tests: tests)
                 print("Run results: \(URL(fileURLWithPath: path).path)")
@@ -2672,6 +2687,9 @@ extension Sipi {
         @Flag(name: .customLong("no-launch"), help: "Do not terminate/launch the app before running.")
         var noLaunch = false
 
+        @Flag(name: .customLong("html"), help: "Also render report.html. Off by default; run.json, summary.json and each result.json are always written.")
+        var html = false
+
         func run() throws {
             do {
                 let data = try Data(contentsOf: URL(fileURLWithPath: suitePath))
@@ -2697,7 +2715,8 @@ extension Sipi {
                     suiteName: suite.name,
                     stopOnFailure: suite.settings?.stopOnFailure ?? false,
                     resetBetweenTests: suite.settings?.resetBetweenTests ?? true,
-                    evidenceBundleIDs: tests.compactMap(\.app)
+                    evidenceBundleIDs: tests.compactMap(\.app),
+                    html: html
                 ))
                 let path = try runner.run(tests: tests)
                 print("Run results: \(URL(fileURLWithPath: path).path)")

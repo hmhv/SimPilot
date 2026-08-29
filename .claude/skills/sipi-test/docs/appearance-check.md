@@ -84,8 +84,9 @@ the report:
 sipi verify-session capture "$VERIFY_DIR" <variant> "<check>" --index N --appearance light|dark
 ```
 
-It forces the appearance with a built-in settle, and `finalize` renders the
-iPhone/iPad × light/dark grid — the same engine as `/sipi-verify`. Dynamic Type
+It forces the appearance with a built-in settle, and `finalize --html` renders
+the iPhone/iPad × light/dark grid — the same engine as `/sipi-verify`. Without
+`--html`, `finalize` writes `summary.json` only. Dynamic Type
 still needs the `content_size` commands above; `--appearance` cannot set it.
 
 ## Checks

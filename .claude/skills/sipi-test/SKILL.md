@@ -13,7 +13,7 @@ Write explicit v2 JSON specs, then hand execution to `sipi run-test` /
 
 **The harness owns** the step loop, target resolution, retry policy, conditional
 waits, screenshot and describe-ui capture, verify evaluation, `result.json`,
-`trace.jsonl`, `summary.json`, `report.html`, reversible file fixtures,
+`trace.jsonl`, `summary.json`, reversible file fixtures,
 primary app data-container snapshots/diffs, unified logs, and crash evidence.
 Do not reconstruct any of it with Bash. If fixture restoration fails, use only
 the explicit `sipi` recovery commands in `docs/run.md`; that is recovery from a
@@ -66,9 +66,11 @@ sipi run-test .simpilot/tests/<id>.json --workspace .simpilot
 sipi run-suite .simpilot/suites/<name>.json --workspace .simpilot
 ```
 
-4. Read `"$RUN_DIR/summary.json"` for the compact result; open
-   `"$RUN_DIR/report.html"` for screenshots, failure detail, evidence warnings,
-   and links to logs/container/crash artifacts. Gate on the CLI exit code too.
+4. Read `"$RUN_DIR/summary.json"` for the result, and each failing test's
+   `<test-id>/result.json` for its steps. Gate on the CLI exit code too.
+   Screenshots sit in `<test-id>/step-NNN.png`; `summary.json` `top-failures`
+   names the one for each failure. Pass `--html` when a person wants to look
+   through the run in a browser, or run `sipi report "$RUN_DIR"` afterwards.
 
 If asked to "create and run", proceed without waiting for confirmation.
 

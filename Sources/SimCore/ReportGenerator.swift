@@ -468,7 +468,17 @@ public enum ReportGenerator {
         } catch {
             throw ReportError("Failed to write \(outPath): \(error.localizedDescription)")
         }
-        try writeTestRunSummary(runDir: runDir)
+        // Rewrite the summary so its `report` field points at the page that now
+        // exists. Generating the page after a run has already finished is a
+        // supported flow (`sipi report <run-dir>`), and a summary that still
+        // said the page was absent would be wrong from that moment on.
+        //
+        // The page is already on disk by the time this runs, so a failure here
+        // leaves the two disagreeing. That is reported rather than repaired: the
+        // repairs available — deleting the page, or writing it through a
+        // temporary name — each add a failure path of their own for a case that
+        // already exits non-zero and heals on the next successful write.
+        try rewriteSummaryAfterReport(at: outPath) { try writeTestRunSummary(runDir: runDir) }
         return outPath
     }
 
@@ -547,11 +557,42 @@ public enum ReportGenerator {
                 "skipped": skipped
             ],
             "top-failures": topFailures,
-            "report": "report.html"
+            // Named only when the page is actually there. HTML is opt-in, and it
+            // can be generated later with `sipi report`, so the file on disk —
+            // not the flag this call was made with — is what decides.
+            "report": reportReference(in: runDir)
         ]
     }
 
+    /// Run the summary rewrite that follows a report write, and say plainly what
+    /// state a failure leaves behind.
+    ///
+    /// Without this the error names only the summary, so a reader is told a
+    /// write failed and not that the page beside it now exists and the summary
+    /// no longer describes it.
+    private static func rewriteSummaryAfterReport(
+        at reportPath: String,
+        _ rewrite: () throws -> String
+    ) throws {
+        do {
+            _ = try rewrite()
+        } catch let error as ReportError {
+            throw ReportError(
+                error.message
+                + " \(reportPath) was written, so summary.json no longer describes the directory:"
+                + " its `report` field still says the page is absent. Fix the permission and re-run"
+                + " to bring them back into agreement."
+            )
+        }
+    }
+
+    /// `"report.html"` when that page exists in `dir`, otherwise JSON null.
+    private static func reportReference(in dir: String) -> Any {
+        FileManager.default.fileExists(atPath: dir + "/report.html") ? "report.html" : NSNull()
+    }
+
     /// Write `<runDir>/summary.json` and return its path.
+    ///
     @discardableResult
     public static func writeTestRunSummary(runDir: String) throws -> String {
         let summary = try testRunSummary(runDir: runDir)
@@ -874,6 +915,98 @@ public enum ReportGenerator {
         } catch {
             throw ReportError("Failed to write \(outPath): \(error.localizedDescription)")
         }
+        // Keep the summary's `report` field truthful now that the page exists.
+        // Same caveat as the test-run path above.
+        try rewriteSummaryAfterReport(at: outPath) {
+            try writeVerifySummary(verifyDir: verifyDir, title: title, statusOverride: statusOverride)
+        }
         return outPath
+    }
+
+    /// The compact machine-readable summary of a verification.
+    ///
+    /// `checks.json` and `findings.json` are raw arrays: they say what was
+    /// captured and what was wrong, but not whether the verification passed, how
+    /// many variants each check covers, or where the screenshots are. That is
+    /// what a reader needs first, and it is what this answers, in the same shape
+    /// as a test run's `summary.json` so one reader handles both.
+    public static func verifySummary(
+        verifyDir: String,
+        title: String = "Verification",
+        statusOverride: String? = nil
+    ) -> [String: Any] {
+        let checks = discoverChecks(verifyDir)
+        let findings = (loadJSONArray(verifyDir + "/findings.json") ?? [])
+
+        // Same fail-safe rule the page uses: findings.json decides, and anything
+        // unreadable counts as an issue rather than silently passing.
+        let status: String
+        if let parsed = loadJSONArray(verifyDir + "/findings.json") {
+            status = parsed.isEmpty ? "ok" : "issue"
+        } else if FileManager.default.fileExists(atPath: verifyDir + "/findings.json") {
+            status = "issue"
+        } else {
+            // The override is a fallback, not a free-text field. The page treats
+            // anything that is not "ok" as an issue, so an unrecognised value
+            // written here would put a status in summary.json that the page
+            // beside it contradicts.
+            status = statusOverride == "ok" ? "ok" : "issue"
+        }
+
+        // Only variants that actually hold a capture. `init` creates all four
+        // directories up front, so their existence says nothing about what was
+        // photographed — and a reader told there are four variants when two are
+        // empty will go looking for screenshots that were never taken.
+        let variants = verifyVariants.filter { variant in
+            guard let items = try? FileManager.default.contentsOfDirectory(atPath: verifyDir + "/" + variant)
+            else { return false }
+            return items.contains { $0.hasSuffix(".png") }
+        }
+
+        return [
+            "status": status,
+            "title": title,
+            "verify-id": URL(fileURLWithPath: verifyDir).lastPathComponent,
+            "counts": [
+                "checks": checks.count,
+                "findings": findings.count,
+                "variants": variants.count
+            ],
+            // Where the screenshots are, per variant. The files themselves are
+            // listed in checks.json; naming the directories saves a reader
+            // guessing at the layout.
+            "variants": variants,
+            "findings": findings,
+            "checks": "checks.json",
+            "report": reportReference(in: verifyDir)
+        ]
+    }
+
+    /// Write `<verifyDir>/summary.json` and return its path.
+    @discardableResult
+    public static func writeVerifySummary(
+        verifyDir: String,
+        title: String = "Verification",
+        statusOverride: String? = nil
+    ) throws -> String {
+        let summary = verifySummary(
+            verifyDir: verifyDir, title: title, statusOverride: statusOverride
+        )
+        let data = try JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys])
+        let outPath = verifyDir + "/summary.json"
+        do {
+            try data.write(to: URL(fileURLWithPath: outPath))
+        } catch {
+            throw ReportError("Failed to write \(outPath): \(error.localizedDescription)")
+        }
+        return outPath
+    }
+
+    /// A JSON array of objects at `path`, or nil when it is missing or malformed.
+    private static func loadJSONArray(_ path: String) -> [JSON]? {
+        guard let data = FileManager.default.contents(atPath: path),
+              let parsed = try? JSONSerialization.jsonObject(with: data),
+              let array = parsed as? [JSON] else { return nil }
+        return array
     }
 }

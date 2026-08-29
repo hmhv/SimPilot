@@ -11,7 +11,7 @@ SimPilot 是一組用於 iOS Simulator 測試與驗證的 agent skills，可在 
 - **`/sipi-test`**: 在 iOS Simulator 上自動化 UI 測試與異常狀態測試。skill 會把自然語言意圖轉換成明確的 v2 JSON 規格，再由 `sipi run-test` / `sipi run-suite` 透過確定性 harness 執行。儲存的測試可以控制權限、deep links、推播通知、定位、外觀、Dynamic Type、Increase Contrast、Face ID / Touch ID、更廣泛的無障礙外觀設定、啟動環境，以及明確設定的 network-condition provider。
 - **`/sipi-verify`**: 實作後驗證。用於在功能新增或錯誤修正後，確認行為與畫面都符合預期。
 
-結果會儲存在 `.simpilot/` 中，並產生可在瀏覽器開啟的 HTML 報告。
+結果會以 JSON 形式儲存在 `.simpilot/` 中，代理或 CI 可直接讀取。供瀏覽器開啟的 HTML 報告可按需產生。
 
 ## 前置需求
 
@@ -98,7 +98,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test 開啟 HTML 報告
 ```
 
-每次 run 都會在 run 目錄中產生 `report.html`。結果會儲存在 `.simpilot/runs/`。
+每次 run 都會寫出 `summary.json`（狀態、計數，以及每個失敗測試的第一個失敗步驟），同時還有 `run.json` 與每個測試的 `result.json`。結果會儲存在 `.simpilot/runs/`。`report.html` 是給人在瀏覽器中翻閱的頁面，只有在執行時加 `--html`，或事後執行 `sipi report <run-dir>` 時才會產生。
 
 **管理 suites:**
 ```text
@@ -137,7 +137,7 @@ SimPilot 在 `.simpilot/` 下使用以下標準結構:
     <run-id>/
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
-      report.html              # HTML report (open in browser)
+      report.html              # only with --html, or `sipi report`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
@@ -147,9 +147,11 @@ SimPilot 在 `.simpilot/` 下使用以下標準結構:
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      summary.json             # 狀態、計數、findings、variant 目錄
       checks.json
       findings.json
-      report.html
+      <variant>/NNN_<check>.png
+      report.html              # 僅在 `finalize --html` 或 `sipi verify-report` 時
 ```
 
 建議將整個 `.simpilot/`，或至少 `runs/` 與 `verify/`，加入專案的 `.gitignore`。

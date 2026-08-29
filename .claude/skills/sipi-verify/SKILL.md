@@ -71,12 +71,17 @@ Use the element-interaction fallback chain in
 
 ## Output
 
-Screenshots, `checks.json`, `findings.json`, and a self-contained HTML report
-land in `.simpilot/verify/<timestamp>_<description>/`.
+Screenshots, `checks.json`, `findings.json`, and `summary.json` land in
+`.simpilot/verify/<timestamp>_<description>/`.
 
 ```bash
 sipi verify-session finalize "$VERIFY_DIR" --title "Description"
 ```
+
+`summary.json` is the result to read: `status`, counts, the findings themselves,
+and which variant directories hold captures. Add `--html` when a person is going
+to page through the screenshots in a browser; `sipi verify-report "$VERIFY_DIR"`
+produces the same page afterwards. Neither is written unless asked for.
 
 `finalize` is the only finalizer this skill uses and it has no status flag —
 status is derived from `findings.json` (empty `[]` → All OK, any finding →

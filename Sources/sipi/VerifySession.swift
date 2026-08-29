@@ -217,7 +217,7 @@ extension Sipi {
         struct Finalize: ParsableCommand {
             static let configuration = CommandConfiguration(
                 commandName: "finalize",
-                abstract: "Generate the verification HTML report."
+                abstract: "Write summary.json for a verification, and optionally report.html."
             )
 
             @Argument(help: "Verification directory.")
@@ -226,9 +226,22 @@ extension Sipi {
             @Option(name: .long, help: "Report title.")
             var title: String = "Verification"
 
+            @Flag(name: .customLong("html"), help: "Also render report.html. Off by default; summary.json, checks.json and findings.json are always written.")
+            var html = false
+
             func run() throws {
-                let out = try ReportGenerator.writeVerifyReport(verifyDir: verifyDir, title: title)
-                print("Report generated: \(out)")
+                // Refresh a page that is already there even without --html. The
+                // flag asks for the page to EXIST; leaving a stale one beside a
+                // rewritten summary is worse than either writing it or not —
+                // summary.json would name a page that contradicts it.
+                let pageExists = FileManager.default.fileExists(atPath: verifyDir + "/report.html")
+                if html || pageExists {
+                    let out = try ReportGenerator.writeVerifyReport(verifyDir: verifyDir, title: title)
+                    print("Report generated: \(out)")
+                } else {
+                    let out = try ReportGenerator.writeVerifySummary(verifyDir: verifyDir, title: title)
+                    print("Summary generated: \(out)")
+                }
                 print("Verify results: \(URL(fileURLWithPath: verifyDir).path)")
             }
         }

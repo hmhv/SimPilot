@@ -1,20 +1,23 @@
-# HTML Report Generation
+# Run Output
 
-`sipi run-test` and `sipi run-suite` generate the report automatically. To regenerate a report for an existing run directory, use:
+Every run writes `run.json`, `summary.json`, and a `<test-id>/result.json` per
+test. That is the result, and it is what to read.
+
+`report.html` is a browser page for a person to page through, and it is NOT
+written by default — rendering it costs time on every run and an agent has no
+use for it. Ask for it when a human is going to look:
 
 ```bash
-sipi report "$RUN_DIR"
-open "$RUN_DIR/report.html"
+sipi run-test  … --html          # during the run
+sipi run-suite … --html
+sipi report "$RUN_DIR"           # afterwards, from the same artifacts
 ```
 
-`sipi report` reads `run.json` and each `result.json`, then writes:
+`sipi report` reads `run.json` and each `result.json`, writes `report.html`, and
+rewrites `summary.json` so its `report` field names the page. There is no
+manual/by-hand path — do not assemble the HTML or summary yourself.
 
-- `report.html`: browser report with embedded screenshots and linked evidence artifacts
-- `summary.json`: compact machine-readable run summary for agents and CI
-
-There is no manual/by-hand path — do not assemble the HTML or summary yourself.
-
-## What the report contains
+## What the HTML report contains
 
 Screenshots are embedded in `report.html` as **Base64 data URIs**. Logs, primary
 app data-container snapshots/diffs, fixture manifests, and crash reports remain
@@ -38,14 +41,14 @@ Screenshots are downscaled to 600px on the long side before embedding. That boun
 
 ## summary.json
 
-`summary.json` is for tools and agents that need the run result without scraping HTML. It includes:
+`summary.json` is the default result, for tools and agents. It includes:
 
 - `status`: `pass`, `fail`, `review`, or `empty`
 - `run-id`, `started`, `finished`
 - `device`: name, runtime, and UDID
 - `counts`: total, passed, failed, review, skipped
 - `top-failures`: first failed step per failed test, including missing verify text and screenshot path when available
-- `report`: `report.html`
+- `report`: `report.html` when that page exists, `null` when it does not
 
 `summary.json` deliberately stays compact. Read `run.json` for run-level
 `artifacts` and `evidence-warnings`, and each `<test-id>/result.json` for

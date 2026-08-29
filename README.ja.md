@@ -11,7 +11,7 @@ SimPilot は、Claude Code や Codex から自然言語で使える、iOS Simula
 - **`/sipi-test`**: iOS Simulator 上での UI テストと異常系テストの自動化。skill が自然言語の意図を明示的な v2 JSON 仕様に変換し、`sipi run-test` / `sipi run-suite` が決定論的な harness で実行します。保存したテストでは、権限、deep link、push 通知、位置情報、外観、Dynamic Type、Increase Contrast、Face ID / Touch ID、より広いアクセシビリティ表示設定、起動環境、明示的に設定した network-condition provider を制御できます。
 - **`/sipi-verify`**: 実装後の検証。機能追加や修正後に、その変更が正しく動作し見た目も問題ないかを確認します。
 
-結果は `.simpilot/` に保存され、HTML レポートをブラウザで確認できます。
+結果は `.simpilot/` に、エージェントや CI がそのまま読める JSON として保存されます。ブラウザで見る HTML レポートは必要なときに生成できます。
 
 ## 前提条件
 
@@ -98,7 +98,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test HTML レポートを開いて
 ```
 
-各 run では run ディレクトリ内に `report.html` が生成されます。結果は `.simpilot/runs/` に保存されます。
+各 run は `summary.json`（status・件数・失敗テストごとの最初の失敗ステップ）を `run.json` およびテストごとの `result.json` とあわせて書き出します。結果は `.simpilot/runs/` に保存されます。`report.html` は人がブラウザで見るためのページで、`--html` を付けたときか、後から `sipi report <run-dir>` を実行したときだけ生成されます。
 
 **スイート管理:**
 ```text
@@ -137,7 +137,7 @@ SimPilot は `.simpilot/` 配下に次の構成を使います。
     <run-id>/
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
-      report.html              # HTML report (open in browser)
+      report.html              # only with --html, or `sipi report`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
@@ -147,9 +147,11 @@ SimPilot は `.simpilot/` 配下に次の構成を使います。
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      summary.json             # ステータス・件数・findings・variant フォルダ
       checks.json
       findings.json
-      report.html
+      <variant>/NNN_<check>.png
+      report.html              # `finalize --html` か `sipi verify-report` のときだけ
 ```
 
 `.simpilot/` 全体、または少なくとも `runs/` と `verify/` はプロジェクトの `.gitignore` に追加することを勧めます。

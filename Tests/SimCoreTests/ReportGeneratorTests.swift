@@ -636,3 +636,87 @@ final class ReportGeneratorTests: XCTestCase {
         return out as Data
     }
 }
+
+extension ReportGeneratorTests {
+
+    /// The verify summary's status must be one the HTML page also recognises.
+    /// `--status` is a fallback for a missing findings.json, not a free-text
+    /// field: the page treats anything but "ok" as an issue, so an unrecognised
+    /// value in summary.json would contradict the page written beside it.
+    func testVerifyStatusOverrideIsNarrowedToTheTwoStates() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try FileManager.default.createDirectory(atPath: dir + "/iphone-light", withIntermediateDirectories: true)
+
+        for override in ["banana", "ISSUE", "", "issue"] {
+            let summary = ReportGenerator.verifySummary(verifyDir: dir, statusOverride: override)
+            XCTAssertEqual(summary["status"] as? String, "issue", "override '\(override)'")
+        }
+        let ok = ReportGenerator.verifySummary(verifyDir: dir, statusOverride: "ok")
+        XCTAssertEqual(ok["status"] as? String, "ok")
+    }
+
+    /// `init` creates all four variant directories before anything is captured,
+    /// so their existence says nothing about what was photographed.
+    func testOnlyVariantsHoldingACaptureAreListed() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        for variant in ["iphone-light", "iphone-dark", "ipad-light", "ipad-dark"] {
+            try FileManager.default.createDirectory(atPath: dir + "/" + variant, withIntermediateDirectories: true)
+        }
+        FileManager.default.createFile(atPath: dir + "/iphone-light/001_a.png", contents: Data())
+
+        let summary = ReportGenerator.verifySummary(verifyDir: dir)
+        XCTAssertEqual(summary["variants"] as? [String], ["iphone-light"])
+        XCTAssertEqual((summary["counts"] as? [String: Any])?["variants"] as? Int, 1)
+    }
+
+    /// The `report` field describes the directory, not the flag the call was
+    /// made with: a page generated later must be named, and one that was never
+    /// generated must not be.
+    func testReportFieldFollowsTheFileOnDisk() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        XCTAssertTrue(ReportGenerator.verifySummary(verifyDir: dir)["report"] is NSNull)
+        FileManager.default.createFile(atPath: dir + "/report.html", contents: Data())
+        XCTAssertEqual(ReportGenerator.verifySummary(verifyDir: dir)["report"] as? String, "report.html")
+    }
+
+    private func makeTemporaryDirectory() throws -> String {
+        let dir = NSTemporaryDirectory() + "sipi-verify-summary-" + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        return dir
+    }
+}
+
+extension ReportGeneratorTests {
+
+    /// Regenerating the summary must not leave a page beside it that describes
+    /// an earlier state. `--html` asks for the page to EXIST; once it does, it
+    /// is kept current, because summary.json names it and a reader following
+    /// that name must not land on a contradiction.
+    func testAnExistingPageIsRefreshedWithTheSummary() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try FileManager.default.createDirectory(atPath: dir + "/iphone-light", withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: dir + "/findings.json", contents: Data("[]".utf8))
+
+        _ = try ReportGenerator.writeVerifyReport(verifyDir: dir, title: "Old")
+        XCTAssertTrue(try String(contentsOfFile: dir + "/report.html", encoding: .utf8).contains("Old"))
+
+        // The state changes, and the page is rewritten from it.
+        FileManager.default.createFile(
+            atPath: dir + "/findings.json",
+            contents: Data(#"[{"check":"a","variant":"iphone-light","issue":"clipped"}]"#.utf8)
+        )
+        _ = try ReportGenerator.writeVerifyReport(verifyDir: dir, title: "New")
+
+        let page = try String(contentsOfFile: dir + "/report.html", encoding: .utf8)
+        XCTAssertTrue(page.contains("New"))
+        XCTAssertFalse(page.contains("Verify: Old"))
+        let summary = ReportGenerator.verifySummary(verifyDir: dir, title: "New")
+        XCTAssertEqual(summary["status"] as? String, "issue")
+        XCTAssertEqual(summary["report"] as? String, "report.html")
+    }
+}

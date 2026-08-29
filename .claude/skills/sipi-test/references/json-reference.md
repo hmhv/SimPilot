@@ -20,7 +20,7 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
     run.json
     summary.json
     trace.jsonl
-    report.html
+    report.html                  # only with --html, or `sipi report <run-dir>`
     logs.ndjson
     logs.stderr.txt              # only when stderr is non-empty
     crash-reports.json           # only when matching reports exist
@@ -36,9 +36,11 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
       step-NNN.describe-before.json    # describe-ui tree, see below
       step-NNN.describe-after.json
   verify/<timestamp>_<description>/
+    summary.json
     checks.json
     findings.json
-    report.html
+    <variant>/NNN_<check>.png    # iphone-light / iphone-dark / ipad-light / ipad-dark
+    report.html                  # only with `finalize --html`, or `sipi verify-report`
 ```
 
 ## config.json
@@ -431,13 +433,16 @@ The compact result for agents and CI:
 }
 ```
 
+`report` names the HTML page only when it exists; it is `null` on a run that was
+not asked for one.
+
 `status` is the gate field for **test outcomes**. `started`, `finished`,
 `device`, and `report` are always present. In each `top-failures` entry `action`
 is always present (defaults to `(verify-only)` for a verify-only step);
 `missing`/`verify`, `matched`, and `screenshot` appear only when applicable.
 
 **`status` does not cover environment cleanup.** The harness writes `run.json`,
-`summary.json`, and `report.html` *before* the end-of-run restore — deliberately,
+`summary.json` (and `report.html` when asked for) *before* the end-of-run restore — deliberately,
 so a cleanup failure cannot destroy the artifacts. A run whose tests all passed
 therefore keeps `"status": "pass"` even when the restore afterward fails and
 leaves the simulator dirty. The failure surfaces only as a **non-zero CLI exit
@@ -448,7 +453,7 @@ before the next run.
 Fixture restoration is different because it happens inside a test: failure sets
 that test's `passed` to false, makes summary `status` `fail`, and writes
 `cleanup-error`, while the CLI may still exit 0. Such a failure can leave
-`top-failures` empty because no test step failed; inspect `report.html` and the
+`top-failures` empty because no test step failed; inspect `run.json` and the
 test's `result.json` whenever summary status is not `pass`.
 
 ## Status Display

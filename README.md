@@ -11,7 +11,7 @@ The top-level README is translated. Skill docs and code remain in English.
 - **`/sipi-test`** — UI and adverse-state test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness. Saved tests can control permissions, deep links, push notifications, location, appearance, Dynamic Type, Increase Contrast, Face ID / Touch ID, the wider accessibility appearance settings, launch environment, and an explicitly configured network-condition provider.
 - **`/sipi-verify`** — Post-implementation verification on the iOS Simulator. `sipi verify-session` owns screenshots, findings, and report generation.
 
-Results are saved in `.simpilot/` with HTML reports for browser viewing.
+Results are saved in `.simpilot/` as JSON an agent or CI can read directly. An HTML report for browser viewing is available on request.
 
 ## Prerequisites
 
@@ -105,7 +105,7 @@ Test execution is handled by the deterministic `sipi` harness. Build/install the
 /sipi-test Open the HTML report
 ```
 
-Each run generates `report.html` in the run directory. Results are saved under `.simpilot/runs/`.
+Each run writes `summary.json` — status, counts, and the first failing step of each failed test — alongside `run.json` and a `result.json` per test. Results are saved under `.simpilot/runs/`. `report.html` is a browser page for a person to page through; it is written only when asked for, with `--html` on the run or `sipi report <run-dir>` afterwards.
 
 **Manage suites:**
 ```text
@@ -148,7 +148,7 @@ SimPilot uses a standard directory layout under `.simpilot/`:
     <run-id>/
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
-      report.html              # HTML report (open in browser)
+      report.html              # only with --html, or `sipi report`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
@@ -158,9 +158,11 @@ SimPilot uses a standard directory layout under `.simpilot/`:
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      summary.json             # Status, counts, findings, variant folders
       checks.json
       findings.json
-      report.html
+      <variant>/NNN_<check>.png
+      report.html              # only with `finalize --html`, or `sipi verify-report`
 ```
 
 Recommend adding `.simpilot/` (or at least `runs/` and `verify/`) to the project's `.gitignore`.

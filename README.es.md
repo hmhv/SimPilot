@@ -11,7 +11,7 @@ Solo se traduce el README de nivel superior. Los skill docs y el código siguen 
 - **`/sipi-test`**: automatización de pruebas de UI y de estados adversos en iOS Simulator. El skill convierte la intención en lenguaje natural en especificaciones JSON v2 explícitas y luego `sipi run-test` / `sipi run-suite` las ejecuta con un harness determinista. Las pruebas guardadas pueden controlar permisos, deep links, notificaciones push, ubicación, apariencia, Dynamic Type, Increase Contrast, Face ID / Touch ID, el resto de ajustes de apariencia de accesibilidad, el entorno de lanzamiento y un proveedor de condiciones de red configurado explícitamente.
 - **`/sipi-verify`**: verificación posterior a la implementación. Confirma que una función o un arreglo funciona correctamente después de cambios en el código.
 
-Los resultados se guardan en `.simpilot/` con informes HTML que se pueden abrir en el navegador.
+Los resultados se guardan en `.simpilot/` como JSON que un agente o CI puede leer directamente. El informe HTML para el navegador se genera cuando se pide.
 
 ## Requisitos previos
 
@@ -98,7 +98,7 @@ Cuando se especifican varios dispositivos, las pruebas se ejecutan en paralelo. 
 /sipi-test Abre el informe HTML
 ```
 
-Cada ejecución genera `report.html` dentro del directorio del run. Los resultados se guardan en `.simpilot/runs/`.
+Cada ejecución escribe `summary.json` —estado, recuentos y el primer paso fallido de cada test que falló— junto a `run.json` y un `result.json` por test. Los resultados se guardan en `.simpilot/runs/`. `report.html` es una página para que una persona la recorra en el navegador; solo se genera si se pide, con `--html` en la ejecución o con `sipi report <run-dir>` después.
 
 **Gestionar suites:**
 ```text
@@ -137,7 +137,7 @@ SimPilot usa esta estructura estándar dentro de `.simpilot/`:
     <run-id>/
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
-      report.html              # HTML report (open in browser)
+      report.html              # only with --html, or `sipi report`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
@@ -147,9 +147,11 @@ SimPilot usa esta estructura estándar dentro de `.simpilot/`:
         recording.mp4          # (if enabled)
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
+      summary.json             # Estado, recuentos, findings, carpetas de variante
       checks.json
       findings.json
-      report.html
+      <variant>/NNN_<check>.png
+      report.html              # solo con `finalize --html` o `sipi verify-report`
 ```
 
 Se recomienda añadir `.simpilot/` completa, o al menos `runs/` y `verify/`, al `.gitignore` del proyecto.

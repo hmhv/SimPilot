@@ -74,7 +74,9 @@ changed. Visual checks can stay screenshot-first.
 
 ```bash
 sipi verify-session finalize "$VERIFY_DIR" --title "Description"
-open "$VERIFY_DIR/report.html"
+cat "$VERIFY_DIR/summary.json"
+
+# Add --html and open report.html when a person wants the screenshot grid.
 ```
 
 Then return the path, and state any skipped variant and why:

@@ -68,7 +68,8 @@ For each step, the harness:
 `trace.jsonl` is appended live throughout the run (run-start, per-step events,
 run-finish). After all tests, the harness normalizes `logs.ndjson`, keeps log
 stderr separate, collects exact-bundle-ID crash reports, writes final
-`run.json`, then generates `summary.json` and `report.html`.
+`run.json`, then generates `summary.json`. `report.html` is written only when
+`--html` is passed, or later by `sipi report <run-dir>`.
 
 Evidence capture is best-effort and does not change a test verdict. Read
 `run.json` `evidence-warnings` and the report even when every step passed. An
@@ -107,9 +108,21 @@ clean state instead.
   `../references/actions.md`.
 - Fixes happen in a separate FIX phase.
 
-## Results Display
+## Results
 
-Open `report.html` for visual inspection and read `summary.json` for a compact machine-readable result. Failure highlights appear before the full table.
+`summary.json` is the result: `status`, `counts`, and `top-failures` — the first
+failed STEP of each test that has one, naming the step, the failure type, the
+missing verify, and the screenshot. A test can be marked failed without any step
+failing — fixture restoration failing leaves `cleanup-error` on the test and
+nothing in `top-failures` — so read `counts` and `status` for the verdict, not
+the length of `top-failures`. Read a failing test's `<test-id>/result.json` for
+its full step list, and `<test-id>/step-NNN.png` for what the screen looked
+like.
+
+`report.html` is not written by default. Pass `--html` to `run-test` /
+`run-suite` when a person is going to page through the run in a browser, or
+generate it afterwards with `sipi report <run-dir>`. `summary.json` `report`
+names the page when it exists and is null when it does not.
 
 Check the **exit code too**, not only `summary.json` `status`. The artifacts are
 written before cleanup runs, so an all-green run whose end-of-run restore failed
