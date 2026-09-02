@@ -26,11 +26,23 @@ extension Sipi {
         @Argument(help: "Test run directory (contains run.json).")
         var runDir: String
 
+        @Flag(name: .long, help: "Also write junit.xml beside report.html.")
+        var junit = false
+
         func run() throws {
             do {
+                // junit.xml first: the summary rewrite that follows the report
+                // names it only when it is already on disk.
+                if junit {
+                    let junitPath = try JUnitReport.write(runDir: runDir)
+                    print("JUnit generated: \(junitPath)")
+                }
                 let outPath = try ReportGenerator.writeTestReport(runDir: runDir)
                 print("Report generated: \(outPath)")
             } catch let error as ReportGenerator.ReportError {
+                FileHandle.standardError.write(Data((error.message + "\n").utf8))
+                throw ExitCode.failure
+            } catch let error as JUnitReport.JUnitError {
                 FileHandle.standardError.write(Data((error.message + "\n").utf8))
                 throw ExitCode.failure
             }

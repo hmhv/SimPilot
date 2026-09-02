@@ -39,6 +39,26 @@ captures share an appearance setting, and interleaving them would race.
 Use the same `--index` and check name across variants so the report grid aligns.
 Additional checks take the next index.
 
+### Waiting for a state
+
+Between driving an action and capturing its result, wait for the state rather
+than a guessed number of seconds:
+
+```bash
+sipi wait-for "$IPHONE_UDID" --label "Saved" --timeout 10        # exit 1 at the deadline
+sipi wait-for "$IPHONE_UDID" --text "Loading" --absent --timeout 15
+```
+
+It returns the moment the condition holds, and a timeout is itself evidence — the
+screen never reached the state — worth a finding rather than a longer sleep.
+
+### Looking at the screen yourself
+
+`verify-session capture` writes full-size evidence. For a capture you are only
+going to read, `sipi screenshot "$UDID" look.png --max-pixel 600` is a fraction
+of the size, and `sipi describe-ui "$UDID" --format compact` gives the tree as
+one line per element. Neither replaces the evidence captures.
+
 ### Recording motion (optional)
 
 When the change is only observable in motion — an animation, transition, or

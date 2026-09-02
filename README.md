@@ -8,7 +8,7 @@ The top-level README is translated. Skill docs and code remain in English.
 
 ## What it does
 
-- **`/sipi-test`** — UI and adverse-state test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness. Saved tests can control permissions, deep links, push notifications, location, appearance, Dynamic Type, Increase Contrast, Face ID / Touch ID, the wider accessibility appearance settings, launch environment, and an explicitly configured network-condition provider.
+- **`/sipi-test`** — UI and adverse-state test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness. Saved tests can control permissions, deep links, push notifications, location, appearance, Dynamic Type, Increase Contrast, Face ID / Touch ID, the wider accessibility appearance settings, memory-pressure warnings, launch environment, and an explicitly configured network-condition provider.
 - **`/sipi-verify`** — Post-implementation verification on the iOS Simulator. `sipi verify-session` owns screenshots, findings, and report generation.
 
 Results are saved in `.simpilot/` as JSON an agent or CI can read directly. An HTML report for browser viewing is available on request.
@@ -16,7 +16,7 @@ Results are saved in `.simpilot/` as JSON an agent or CI can read directly. An H
 ## Prerequisites
 
 - macOS 15 or later
-- Xcode 26 or later — needed at **runtime** to drive the Simulator (SimPilot loads Xcode's private Simulator frameworks). Not needed to install. Xcode 27 or later additionally enables Face ID / Touch ID and the accessibility appearance settings, which go through `xcrun devicectl`, and can act as a keyboard fallback (see [Typing on a simulator that stopped accepting keystrokes](#typing-on-a-simulator-that-stopped-accepting-keystrokes)).
+- Xcode 26 or later — needed at **runtime** to drive the Simulator (SimPilot loads Xcode's private Simulator frameworks). Not needed to install. Xcode 27 or later additionally enables Face ID / Touch ID, the accessibility appearance settings, and memory-pressure warnings, which go through `xcrun devicectl`, and can act as a keyboard fallback (see [Typing on a simulator that stopped accepting keystrokes](#typing-on-a-simulator-that-stopped-accepting-keystrokes)).
 - [Claude Code](https://claude.com/claude-code) or Codex
 
 ## Installation
@@ -95,7 +95,7 @@ See [Test data and evidence artifacts](docs/data-artifacts.md).
 /sipi-test Run tests with the regression-profile device set
 ```
 
-Test execution is handled by the deterministic `sipi` harness. Build/install the app before running, or point `config.json` at an already-installed bundle ID.
+Test execution is handled by the deterministic `sipi` harness. Build/install the app before running, or point `config.json` at an already-installed bundle ID. Add `--junit` for a `junit.xml` a CI system can ingest, and `--record-video` (or `record-video` in `config.json`) for a per-test `recording.mp4`.
 
 **View results:**
 ```text
@@ -105,7 +105,11 @@ Test execution is handled by the deterministic `sipi` harness. Build/install the
 /sipi-test Open the HTML report
 ```
 
-Each run writes `summary.json` — status, counts, and the first failing step of each failed test — alongside `run.json` and a `result.json` per test. Results are saved under `.simpilot/runs/`. `report.html` is a browser page for a person to page through; it is written only when asked for, with `--html` on the run or `sipi report <run-dir>` afterwards.
+Each run writes `summary.json` — status, counts, and the first failing step of each failed test — alongside `run.json` and a `result.json` per test. Results are saved under `.simpilot/runs/`; `keep-runs` in `config.json` prunes the oldest. `report.html` is a browser page for a person to page through; it is written only when asked for, with `--html` on the run or `sipi report <run-dir>` afterwards. `junit.xml` works the same way with `--junit`.
+
+**Drive the simulator directly:**
+
+`sipi` is also a plain CLI an agent can call one step at a time. `describe-ui --format compact` prints the accessibility tree as one line per element — type, label, id, value, frame, tap point — at a fraction of the JSON size; `wait-for` polls until a label, id, value, or text appears (or disappears) instead of sleeping; `screenshot --max-pixel 600` returns a capture small enough to look at cheaply; `memory-warning` sends the memory-pressure warning that Simulator.app's Debug menu used to (Xcode 27+). Run `sipi --help` for the full command set.
 
 **Manage suites:**
 ```text
@@ -149,13 +153,14 @@ SimPilot uses a standard directory layout under `.simpilot/`:
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
       report.html              # only with --html, or `sipi report`
+      junit.xml                # only with --junit, or `sipi report --junit`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
         step-NNN.describe-before.json
         step-NNN.describe-after.json
-        recording.mp4          # (if enabled)
+        recording.mp4          # only with record-video / --record-video
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
       summary.json             # Status, counts, findings, variant folders

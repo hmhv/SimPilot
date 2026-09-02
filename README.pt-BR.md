@@ -8,7 +8,7 @@ Somente o README de nível superior é traduzido. Os skill docs e o código perm
 
 ## O que faz
 
-- **`/sipi-test`**: automação de testes de UI e de estados adversos no iOS Simulator. O skill converte a intenção em linguagem natural em especificações JSON v2 explícitas e, em seguida, `sipi run-test` / `sipi run-suite` as executa com um harness determinístico. Os testes salvos podem controlar permissões, deep links, notificações push, localização, aparência, Dynamic Type, Increase Contrast, Face ID / Touch ID, o restante das configurações de aparência de acessibilidade, o ambiente de lançamento e um provedor de condição de rede configurado explicitamente.
+- **`/sipi-test`**: automação de testes de UI e de estados adversos no iOS Simulator. O skill converte a intenção em linguagem natural em especificações JSON v2 explícitas e, em seguida, `sipi run-test` / `sipi run-suite` as executa com um harness determinístico. Os testes salvos podem controlar permissões, deep links, notificações push, localização, aparência, Dynamic Type, Increase Contrast, Face ID / Touch ID, o restante das configurações de aparência de acessibilidade, avisos de pressão de memória, o ambiente de lançamento e um provedor de condição de rede configurado explicitamente.
 - **`/sipi-verify`**: verificação pós-implementação. Confirma que um recurso ou correção funciona corretamente após mudanças no código.
 
 Os resultados são salvos em `.simpilot/` como JSON que um agente ou CI lê diretamente. O relatório HTML para o navegador é gerado quando pedido.
@@ -16,7 +16,7 @@ Os resultados são salvos em `.simpilot/` como JSON que um agente ou CI lê dire
 ## Pré-requisitos
 
 - macOS 15 ou superior
-- Xcode 26 ou superior: necessário em **tempo de execução** para controlar o Simulator (o SimPilot carrega os private Simulator frameworks do Xcode). Não é necessário para instalar. O Xcode 27 ou superior habilita ainda Face ID / Touch ID e as configurações de aparência de acessibilidade, que passam pelo `xcrun devicectl`, e pode servir de alternativa para o teclado (veja [Digitar em um simulador que parou de aceitar teclas](#digitar-em-um-simulador-que-parou-de-aceitar-teclas)).
+- Xcode 26 ou superior: necessário em **tempo de execução** para controlar o Simulator (o SimPilot carrega os private Simulator frameworks do Xcode). Não é necessário para instalar. O Xcode 27 ou superior habilita ainda Face ID / Touch ID, as configurações de aparência de acessibilidade e os avisos de pressão de memória, que passam pelo `xcrun devicectl`, e pode servir de alternativa para o teclado (veja [Digitar em um simulador que parou de aceitar teclas](#digitar-em-um-simulador-que-parou-de-aceitar-teclas)).
 - [Claude Code](https://claude.com/claude-code) ou Codex
 
 ## Instalação
@@ -88,7 +88,7 @@ A verificação vai além da correspondência de texto: além de `contains` / `a
 /sipi-test Execute os testes com o conjunto de dispositivos regression-profile
 ```
 
-Quando vários dispositivos são especificados, os testes rodam em paralelo. Se `.simpilot/config.json` incluir uma entrada `build`, o app será compilado antes da execução.
+A execução dos testes fica a cargo do harness determinístico do `sipi`. Compile e instale o app antes de executar, ou aponte `config.json` para um bundle ID já instalado. Adicione `--junit` para um `junit.xml` que um sistema de CI possa ingerir, e `--record-video` (ou `record-video` em `config.json`) para um `recording.mp4` por teste.
 
 **Ver resultados:**
 ```text
@@ -98,7 +98,11 @@ Quando vários dispositivos são especificados, os testes rodam em paralelo. Se 
 /sipi-test Abra o relatório HTML
 ```
 
-Cada execução grava `summary.json` — status, contagens e o primeiro passo que falhou em cada teste que falhou — junto de `run.json` e um `result.json` por teste. Os resultados são salvos em `.simpilot/runs/`. `report.html` é uma página para uma pessoa folhear no navegador; só é gerada quando pedida, com `--html` na execução ou com `sipi report <run-dir>` depois.
+Cada execução grava `summary.json` — status, contagens e o primeiro passo que falhou em cada teste que falhou — junto de `run.json` e um `result.json` por teste. Os resultados são salvos em `.simpilot/runs/`; `keep-runs` em `config.json` remove as execuções mais antigas. `report.html` é uma página para uma pessoa folhear no navegador; só é gerada quando pedida, com `--html` na execução ou com `sipi report <run-dir>` depois. `junit.xml` funciona do mesmo modo com `--junit`, e `--record-video` (ou `record-video` em `config.json`) deixa um `recording.mp4` por teste.
+
+**Controlar o simulador diretamente:**
+
+`sipi` também é uma CLI comum que um agente pode chamar passo a passo. `describe-ui --format compact` imprime a árvore de acessibilidade com um elemento por linha — tipo, rótulo, id, valor, frame, ponto de toque — numa fração do tamanho do JSON; `wait-for` faz polling até que um rótulo, id, valor ou texto apareça (ou desapareça) em vez de dormir; `screenshot --max-pixel 600` devolve uma captura pequena o bastante para olhar com baixo custo; `memory-warning` envia o aviso de pressão de memória que o menu Debug do Simulator.app oferecia (Xcode 27+). Execute `sipi --help` para ver todos os comandos.
 
 **Gerenciar suítes:**
 ```text
@@ -138,13 +142,14 @@ O SimPilot usa a seguinte estrutura padrão dentro de `.simpilot/`:
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
       report.html              # only with --html, or `sipi report`
+      junit.xml                # only with --junit, or `sipi report --junit`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
         step-NNN.describe-before.json
         step-NNN.describe-after.json
-        recording.mp4          # (if enabled)
+        recording.mp4          # only with record-video / --record-video
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
       summary.json             # Status, contagens, findings, pastas de variante

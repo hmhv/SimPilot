@@ -106,6 +106,12 @@ public enum SimShell {
         return result.stdout
     }
 
+    /// Run a guest-side executable through `simctl spawn <udid> <argv>` and
+    /// return its stdout, throwing on a non-zero exit.
+    static func spawnChecked(udid: String, _ argv: [String]) throws -> String {
+        try runChecked(["spawn", udid] + argv)
+    }
+
     // MARK: - Boot-before-use ordering
 
     /// Whether `udid` is currently booted. Pure parse over

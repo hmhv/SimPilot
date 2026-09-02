@@ -338,3 +338,74 @@ extension Sipi {
         }
     }
 }
+
+// MARK: - memory-warning
+
+extension Sipi {
+    struct MemoryWarning: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "memory-warning",
+            abstract: "Send a memory-pressure warning to a running app (what Simulator.app's Debug menu used to do).",
+            discussion: """
+            The app receives applicationDidReceiveMemoryWarning / didReceiveMemoryWarning
+            and UIApplication.didReceiveMemoryWarningNotification, so cache eviction and
+            low-memory recovery can be exercised on demand instead of waiting for the
+            guest to run short. Transient: nothing is left to restore.
+
+            Name the app with --bundle-id (its pid is looked up in the guest's launchd
+            job table) or target a pid directly with --pid.
+            """
+        )
+
+        @Argument(help: "Simulator UDID.")
+        var udid: String
+
+        @Option(name: .customLong("bundle-id"), help: "Bundle identifier of the running app to warn.")
+        var bundleID: String?
+
+        @Option(name: .long, help: "Process identifier to warn, when the bundle id is not enough (an extension, a helper).")
+        var pid: Int32?
+
+        @Flag(name: .long, help: "Emit the result as JSON ({ pid, bundle-id }).")
+        var json = false
+
+        func validate() throws {
+            guard (bundleID != nil) != (pid != nil) else {
+                throw ValidationError("memory-warning takes exactly one of --bundle-id or --pid")
+            }
+            if let pid, pid <= 0 {
+                throw ValidationError("--pid must be a positive process identifier")
+            }
+        }
+
+        func run() throws {
+            try requireDeviceCtl("sipi memory-warning")
+            do {
+                let target: Int32
+                if let pid {
+                    target = pid
+                } else if let bundleID {
+                    guard let found = try SimShell.processIdentifier(udid: udid, bundleID: bundleID) else {
+                        throw ValidationError(
+                            "\(bundleID) is not running on \(udid); launch it first (xcrun simctl launch \(udid) \(bundleID)).")
+                    }
+                    target = found
+                } else {
+                    throw ValidationError("memory-warning takes exactly one of --bundle-id or --pid")
+                }
+                try DeviceCtl.sendMemoryWarning(udid: udid, pid: target)
+                if json {
+                    var object: [String: Any] = ["pid": Int(target)]
+                    if let bundleID { object["bundle-id"] = bundleID }
+                    try emitJSON(object)
+                } else {
+                    print("ok")
+                }
+            } catch let error as DeviceCtlError {
+                throw ValidationError(error.description)
+            } catch let error as SimShellError {
+                throw ValidationError(error.description)
+            }
+        }
+    }
+}

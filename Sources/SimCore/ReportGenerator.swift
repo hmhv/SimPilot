@@ -85,29 +85,7 @@ public enum ReportGenerator {
     /// or the re-encode did not actually come out smaller — every one of those
     /// cases means the caller should embed the original bytes.
     static func downscaledPNG(_ data: Data, maxPixel: Int = thumbnailMaxPixel) -> Data? {
-        guard maxPixel > 0,
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = props[kCGImagePropertyPixelWidth] as? Int,
-              let height = props[kCGImagePropertyPixelHeight] as? Int,
-              max(width, height) > maxPixel else { return nil }
-
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixel
-        ]
-        guard let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            return nil
-        }
-        let out = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(out, "public.png" as CFString, 1, nil) else {
-            return nil
-        }
-        CGImageDestinationAddImage(dest, thumb, nil)
-        guard CGImageDestinationFinalize(dest) else { return nil }
-        let shrunk = out as Data
-        return shrunk.count < data.count ? shrunk : nil
+        PNGDownscale.downscaled(data, maxPixel: maxPixel)
     }
 
     private static func imageDataURI(_ path: String) -> String? {
@@ -560,7 +538,9 @@ public enum ReportGenerator {
             // Named only when the page is actually there. HTML is opt-in, and it
             // can be generated later with `sipi report`, so the file on disk —
             // not the flag this call was made with — is what decides.
-            "report": reportReference(in: runDir)
+            "report": reportReference(in: runDir),
+            // Same rule as `report`: named only when the file is on disk.
+            "junit": junitReference(in: runDir)
         ]
     }
 
@@ -589,6 +569,11 @@ public enum ReportGenerator {
     /// `"report.html"` when that page exists in `dir`, otherwise JSON null.
     private static func reportReference(in dir: String) -> Any {
         FileManager.default.fileExists(atPath: dir + "/report.html") ? "report.html" : NSNull()
+    }
+
+    /// `"junit.xml"` when that file exists in `dir`, otherwise JSON null.
+    private static func junitReference(in dir: String) -> Any {
+        FileManager.default.fileExists(atPath: dir + "/junit.xml") ? "junit.xml" : NSNull()
     }
 
     /// Write `<runDir>/summary.json` and return its path.

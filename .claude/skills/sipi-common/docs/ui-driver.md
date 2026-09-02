@@ -55,11 +55,13 @@ the top-left corner. Nothing warns you. Confirm a computed coordinate with
 | Need | Command |
 |---|---|
 | Read the screen | `"$SIPI" describe-ui "$UDID"` |
+| Read the screen cheaply | `"$SIPI" describe-ui "$UDID" --format compact` — one element per line, ~4-5x fewer bytes |
+| Wait for a state instead of sleeping | `"$SIPI" wait-for "$UDID" --label "Dashboard" --timeout 10` (also `--id`, `--value`, `--text`, `--absent`) |
 | Tap by label / id | `"$SIPI" tap "$UDID" --label "Sign In"` / `--id auth.sign-in` |
 | Tap a derived coordinate | `"$SIPI" tap "$UDID" --pixel -x 200 -y 700` |
 | Put text in a field | `"$SIPI" set-text "$UDID" "text" --id <id>` |
 | Press a key | `"$SIPI" key 40 "$UDID"` |
-| Capture the screen | `"$SIPI" screenshot "$UDID" out.png` |
+| Capture the screen | `"$SIPI" screenshot "$UDID" out.png` — add `--max-pixel 600` when you are going to look at it yourself |
 
 `describe-ui` reads the frontmost app tree. Pass `--expect "Text"` when a later
 grep is looking for specific text: on a miss it auto-escalates to the deeper grid
@@ -71,6 +73,27 @@ Selector taps (`--label` / `--id` / `--value`, and `sipi slider`) escalate to th
 deep tree on their own, so they reach System UI without `--deep`. Prefer observed
 UI over guessing from source, and re-read after each meaningful action when
 behavior is flaky.
+
+`--format compact` prints the same tree as one line per element —
+`Button "Sign In" id="auth.sign-in" frame=(24,88,168,44) hit=(108,110)`, with
+`disabled` / `offscreen` only when true — for scanning a screen and picking a
+selector. The JSON form is the contract the harness and `--expect` read; use it
+whenever a later grep depends on the exact shape.
+
+`wait-for` polls until a condition holds and exits 0, or exits 1 at `--timeout`
+(default 10s) with the last unmet reason. It takes exactly one of `--label`,
+`--id`, `--value` (exact match with surrounding whitespace trimmed on both
+sides, optionally narrowed with `--element-type`) or `--text` (verbatim
+substring anywhere in the tree), and `--absent` inverts it. The
+semantics are the verify semantics: absence is judged against the deep tree,
+presence escalates to it on a miss. Reach for it after any action whose result
+lands asynchronously — a navigation, a network round trip, an alert appearing or
+dismissing — instead of a guessed `sleep`.
+
+`screenshot --max-pixel N` downscales the PNG so its longest side is at most N
+pixels. A device-native capture is 3x and costs a reader far more than the
+detail is worth; 600 is plenty to judge a layout. Evidence captures (the harness,
+`verify-session capture`) stay full size.
 
 ## Input and gestures
 
@@ -110,6 +133,7 @@ themselves are under test. The rule and its exceptions live in
 | Face ID / Touch ID | `"$SIPI" biometrics "$UDID" <status\|enroll\|unenroll\|match\|no-match>` | Yes |
 | Accessibility appearance facets | `"$SIPI" appearance "$UDID" [--reduce-motion on …]` | Yes |
 | VoiceOver (read only) | `"$SIPI" voiceover "$UDID"` | — |
+| Memory-pressure warning to a running app | `"$SIPI" memory-warning "$UDID" --bundle-id <id>` (or `--pid`) | Yes |
 
 `appearance` reads the current state when given no flag and writes when given
 one. `voiceover` only reads: setting it is retired, because on iOS 27 turning it
@@ -120,6 +144,12 @@ explicit `status` operation. They all say so explicitly when the toolchain is to
 old (see
 `troubleshooting.md`). Matching a biometric does nothing while the device is
 unenrolled.
+
+`memory-warning` delivers what Simulator.app's Debug menu used to: the app gets
+`didReceiveMemoryWarning` and the matching notification, so cache eviction and
+low-memory recovery can be exercised on demand. It is transient — nothing to
+restore — and fails plainly when the app is not running. Device Hub has no such
+control, and neither does simctl.
 
 `a11y-audit` works on any supported Xcode. It reports undersized touch targets,
 unlabeled controls, ambiguous duplicate labels, meaningless labels, and truncated

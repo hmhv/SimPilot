@@ -8,7 +8,7 @@ SimPilot は、Claude Code や Codex から自然言語で使える、iOS Simula
 
 ## できること
 
-- **`/sipi-test`**: iOS Simulator 上での UI テストと異常系テストの自動化。skill が自然言語の意図を明示的な v2 JSON 仕様に変換し、`sipi run-test` / `sipi run-suite` が決定論的な harness で実行します。保存したテストでは、権限、deep link、push 通知、位置情報、外観、Dynamic Type、Increase Contrast、Face ID / Touch ID、より広いアクセシビリティ表示設定、起動環境、明示的に設定した network-condition provider を制御できます。
+- **`/sipi-test`**: iOS Simulator 上での UI テストと異常系テストの自動化。skill が自然言語の意図を明示的な v2 JSON 仕様に変換し、`sipi run-test` / `sipi run-suite` が決定論的な harness で実行します。保存したテストでは、権限、deep link、push 通知、位置情報、外観、Dynamic Type、Increase Contrast、Face ID / Touch ID、より広いアクセシビリティ表示設定、メモリ警告、起動環境、明示的に設定した network-condition provider を制御できます。
 - **`/sipi-verify`**: 実装後の検証。機能追加や修正後に、その変更が正しく動作し見た目も問題ないかを確認します。
 
 結果は `.simpilot/` に、エージェントや CI がそのまま読める JSON として保存されます。ブラウザで見る HTML レポートは必要なときに生成できます。
@@ -16,7 +16,7 @@ SimPilot は、Claude Code や Codex から自然言語で使える、iOS Simula
 ## 前提条件
 
 - macOS 15 以降
-- Xcode 26 以降: Simulator を操作するために**実行時**に必要です（SimPilot は Xcode の private Simulator frameworks を読み込みます）。インストール時には不要です。Xcode 27 以降ではさらに Face ID / Touch ID、アクセシビリティ表示設定が使えます。これらは `xcrun devicectl` を経由します。また、キーボード入力のフォールバックとしても使えます（[キー入力を受け付けなくなった simulator への入力](#キー入力を受け付けなくなった-simulator-への入力)を参照）。
+- Xcode 26 以降: Simulator を操作するために**実行時**に必要です（SimPilot は Xcode の private Simulator frameworks を読み込みます）。インストール時には不要です。Xcode 27 以降ではさらに Face ID / Touch ID、アクセシビリティ表示設定、メモリ警告が使えます。これらは `xcrun devicectl` を経由します。また、キーボード入力のフォールバックとしても使えます（[キー入力を受け付けなくなった simulator への入力](#キー入力を受け付けなくなった-simulator-への入力)を参照）。
 - [Claude Code](https://claude.com/claude-code) または Codex
 
 ## インストール
@@ -88,7 +88,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test regression-profile デバイスセットでテストを実行して
 ```
 
-複数デバイスを指定した場合、テストは並列実行されます。`.simpilot/config.json` に `build` エントリがある場合は、実行前にアプリをビルドします。
+テストの実行は決定論的な `sipi` harness が担います。実行前にアプリをビルド・インストールするか、`config.json` でインストール済みの bundle ID を指定してください。CI が取り込める `junit.xml` を出すには `--junit`、テストごとの `recording.mp4` を残すには `--record-video`（または `config.json` の `record-video`）を付けます。
 
 **結果確認:**
 ```text
@@ -98,7 +98,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test HTML レポートを開いて
 ```
 
-各 run は `summary.json`（status・件数・失敗テストごとの最初の失敗ステップ）を `run.json` およびテストごとの `result.json` とあわせて書き出します。結果は `.simpilot/runs/` に保存されます。`report.html` は人がブラウザで見るためのページで、`--html` を付けたときか、後から `sipi report <run-dir>` を実行したときだけ生成されます。
+各 run は `summary.json`（status・件数・失敗テストごとの最初の失敗ステップ）を `run.json` およびテストごとの `result.json` とあわせて書き出します。結果は `.simpilot/runs/` に保存されます（`config.json` の `keep-runs` で古い run から削除できます）。`report.html` は人がブラウザで見るためのページで、`--html` を付けたときか、後から `sipi report <run-dir>` を実行したときだけ生成されます。CI 向けの `junit.xml` も同様に `--junit` で生成され、`--record-video`（または `config.json` の `record-video`）でテストごとの `recording.mp4` が残ります。
+
+**simulator を直接操作する:**
+
+`sipi` は、エージェントが 1 ステップずつ呼べる素の CLI でもあります。`describe-ui --format compact` はアクセシビリティツリーを 1 要素 1 行（種類・ラベル・id・値・frame・タップ座標）で出力し、JSON の数分の一のサイズで済みます。`wait-for` は sleep の代わりに、ラベル・id・値・テキストが現れる（または消える）までポーリングします。`screenshot --max-pixel 600` は目で確認するのに十分な小さいキャプチャを返します。`memory-warning` は Simulator.app の Debug メニューにあったメモリ警告を送ります（Xcode 27 以降）。全コマンドは `sipi --help` を参照してください。
 
 **スイート管理:**
 ```text
@@ -138,13 +142,14 @@ SimPilot は `.simpilot/` 配下に次の構成を使います。
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
       report.html              # only with --html, or `sipi report`
+      junit.xml                # only with --junit, or `sipi report --junit`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
         step-NNN.describe-before.json
         step-NNN.describe-after.json
-        recording.mp4          # (if enabled)
+        recording.mp4          # only with record-video / --record-video
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
       summary.json             # ステータス・件数・findings・variant フォルダ

@@ -8,7 +8,7 @@ Solo se traduce el README de nivel superior. Los skill docs y el código siguen 
 
 ## Qué hace
 
-- **`/sipi-test`**: automatización de pruebas de UI y de estados adversos en iOS Simulator. El skill convierte la intención en lenguaje natural en especificaciones JSON v2 explícitas y luego `sipi run-test` / `sipi run-suite` las ejecuta con un harness determinista. Las pruebas guardadas pueden controlar permisos, deep links, notificaciones push, ubicación, apariencia, Dynamic Type, Increase Contrast, Face ID / Touch ID, el resto de ajustes de apariencia de accesibilidad, el entorno de lanzamiento y un proveedor de condiciones de red configurado explícitamente.
+- **`/sipi-test`**: automatización de pruebas de UI y de estados adversos en iOS Simulator. El skill convierte la intención en lenguaje natural en especificaciones JSON v2 explícitas y luego `sipi run-test` / `sipi run-suite` las ejecuta con un harness determinista. Las pruebas guardadas pueden controlar permisos, deep links, notificaciones push, ubicación, apariencia, Dynamic Type, Increase Contrast, Face ID / Touch ID, el resto de ajustes de apariencia de accesibilidad, avisos de presión de memoria, el entorno de lanzamiento y un proveedor de condiciones de red configurado explícitamente.
 - **`/sipi-verify`**: verificación posterior a la implementación. Confirma que una función o un arreglo funciona correctamente después de cambios en el código.
 
 Los resultados se guardan en `.simpilot/` como JSON que un agente o CI puede leer directamente. El informe HTML para el navegador se genera cuando se pide.
@@ -16,7 +16,7 @@ Los resultados se guardan en `.simpilot/` como JSON que un agente o CI puede lee
 ## Requisitos previos
 
 - macOS 15 o posterior
-- Xcode 26 o posterior: necesario en **tiempo de ejecución** para controlar el Simulator (SimPilot carga los private Simulator frameworks de Xcode). No hace falta para instalar. Xcode 27 o posterior habilita además Face ID / Touch ID y los ajustes de apariencia de accesibilidad, que pasan por `xcrun devicectl`, y puede actuar como alternativa para el teclado (véase [Escribir en un simulador que dejó de aceptar pulsaciones](#escribir-en-un-simulador-que-dejó-de-aceptar-pulsaciones)).
+- Xcode 26 o posterior: necesario en **tiempo de ejecución** para controlar el Simulator (SimPilot carga los private Simulator frameworks de Xcode). No hace falta para instalar. Xcode 27 o posterior habilita además Face ID / Touch ID, los ajustes de apariencia de accesibilidad y los avisos de presión de memoria, que pasan por `xcrun devicectl`, y puede actuar como alternativa para el teclado (véase [Escribir en un simulador que dejó de aceptar pulsaciones](#escribir-en-un-simulador-que-dejó-de-aceptar-pulsaciones)).
 - [Claude Code](https://claude.com/claude-code) o Codex
 
 ## Instalación
@@ -88,7 +88,7 @@ La verificación va más allá de la coincidencia de texto: además de `contains
 /sipi-test Ejecuta las pruebas con el conjunto de dispositivos regression-profile
 ```
 
-Cuando se especifican varios dispositivos, las pruebas se ejecutan en paralelo. Si `.simpilot/config.json` incluye una entrada `build`, la app se compila antes de ejecutar.
+La ejecución de las pruebas corre a cargo del harness determinista de `sipi`. Compila e instala la app antes de ejecutar, o apunta `config.json` a un bundle ID ya instalado. Añade `--junit` para obtener un `junit.xml` que un sistema de CI pueda ingerir, y `--record-video` (o `record-video` en `config.json`) para un `recording.mp4` por test.
 
 **Ver resultados:**
 ```text
@@ -98,7 +98,11 @@ Cuando se especifican varios dispositivos, las pruebas se ejecutan en paralelo. 
 /sipi-test Abre el informe HTML
 ```
 
-Cada ejecución escribe `summary.json` —estado, recuentos y el primer paso fallido de cada test que falló— junto a `run.json` y un `result.json` por test. Los resultados se guardan en `.simpilot/runs/`. `report.html` es una página para que una persona la recorra en el navegador; solo se genera si se pide, con `--html` en la ejecución o con `sipi report <run-dir>` después.
+Cada ejecución escribe `summary.json` —estado, recuentos y el primer paso fallido de cada test que falló— junto a `run.json` y un `result.json` por test. Los resultados se guardan en `.simpilot/runs/`; `keep-runs` en `config.json` elimina las ejecuciones más antiguas. `report.html` es una página para que una persona la recorra en el navegador; solo se genera si se pide, con `--html` en la ejecución o con `sipi report <run-dir>` después. `junit.xml` funciona igual con `--junit`, y `--record-video` (o `record-video` en `config.json`) deja un `recording.mp4` por test.
+
+**Controlar el simulador directamente:**
+
+`sipi` es también una CLI normal que un agente puede llamar paso a paso. `describe-ui --format compact` imprime el árbol de accesibilidad con un elemento por línea —tipo, etiqueta, id, valor, frame, punto de toque— en una fracción del tamaño del JSON; `wait-for` sondea hasta que una etiqueta, id, valor o texto aparece (o desaparece) en lugar de dormir; `screenshot --max-pixel 600` devuelve una captura lo bastante pequeña para mirarla a bajo coste; `memory-warning` envía el aviso de presión de memoria que ofrecía el menú Debug de Simulator.app (Xcode 27+). Ejecuta `sipi --help` para ver todos los comandos.
 
 **Gestionar suites:**
 ```text
@@ -138,13 +142,14 @@ SimPilot usa esta estructura estándar dentro de `.simpilot/`:
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
       report.html              # only with --html, or `sipi report`
+      junit.xml                # only with --junit, or `sipi report --junit`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
         step-NNN.describe-before.json
         step-NNN.describe-after.json
-        recording.mp4          # (if enabled)
+        recording.mp4          # only with record-video / --record-video
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
       summary.json             # Estado, recuentos, findings, carpetas de variante

@@ -519,3 +519,22 @@ final class NewActionValidationTests: XCTestCase {
         XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
     }
 }
+
+// MARK: - memory-warning
+
+extension NewActionValidationTests {
+    func testMemoryWarningValidatesWithAndWithoutBundleID() throws {
+        let bare = try validate(id: "mw-ok", steps: action(["type": "memory-warning"]))
+        XCTAssertTrue(bare.isValid, "\(bare.errors)")
+        let scoped = try validate(id: "mw-scoped", steps: action([
+            "type": "memory-warning", "bundle-id": "com.example.helper"
+        ]))
+        XCTAssertTrue(scoped.isValid, "\(scoped.errors)")
+    }
+
+    func testMemoryWarningRejectsANonStringBundleID() throws {
+        let outcome = try validate(id: "mw-bad", steps: action(["type": "memory-warning", "bundle-id": 42]))
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(outcome.errors.contains { $0.contains("bundle-id must be a string") }, "\(outcome.errors)")
+    }
+}

@@ -23,6 +23,9 @@ Useful flags:
 - `--run-dir <path>`: choose the output directory
 - `--retries <n>`: override retry count
 - `--no-launch`: run from current app state
+- `--junit`: also write `junit.xml` for a CI system that ingests JUnit
+- `--record-video`: record each test to `<test-id>/recording.mp4` (or set
+  `record-video` in `config.json`)
 
 `--no-launch` is rejected when any selected test has fixtures because safe
 fixture installation requires terminating the app before mutation.
@@ -123,6 +126,16 @@ like.
 `run-suite` when a person is going to page through the run in a browser, or
 generate it afterwards with `sipi report <run-dir>`. `summary.json` `report`
 names the page when it exists and is null when it does not.
+
+`junit.xml` follows the same rule: `--junit` on the run, or
+`sipi report <run-dir> --junit` afterwards, and `summary.json` `junit` names it
+when it exists. One `<testcase>` per test; a failed test carries the first
+failed step — type, action, unmet verify — and its screenshot path in
+`<failure>`, and a skipped test carries `<skipped/>`.
+
+`keep-runs` in `config.json` prunes the oldest harness-named run directories
+after each run that landed in the default `runs/` location; see
+`../references/json-reference.md`.
 
 Check the **exit code too**, not only `summary.json` `status`. The artifacts are
 written before cleanup runs, so an all-green run whose end-of-run restore failed

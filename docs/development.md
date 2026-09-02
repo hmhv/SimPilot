@@ -23,11 +23,13 @@ headless: no GUI, no Node runtime, and no spawned helper process.
   [`private-symbols.md`](private-symbols.md).
 - **Public-tooling shell-out for the rest.** App install/launch/terminate/uninstall,
   boot/shutdown/erase, addmedia, privacy, openurl, `ui appearance`, status bar,
-  pasteboard, `record-video`, and `log stream` all go through typed `Process()`
-  wrappers over `xcrun simctl` — no private APIs (see `SimShell`). `DeviceCtl`
-  wraps `xcrun devicectl` the same way for the facets simctl never exposed:
-  face-up / face-down orientation, biometric enrollment and match events,
-  reading VoiceOver, and the full accessibility appearance surface. devicectl only
+  pasteboard, `record-video`, `log stream`, and the guest `launchctl list` (to
+  turn a bundle id into a pid) all go through typed `Process()` wrappers over
+  `xcrun simctl` — no private APIs (see `SimShell`). `DeviceCtl` wraps
+  `xcrun devicectl` the same way for the facets simctl never exposed: face-up /
+  face-down orientation, biometric enrollment and match events, reading
+  VoiceOver, the full accessibility appearance surface, and per-process memory
+  warnings. devicectl only
   targets simulators from Xcode 27 on, so every call site checks
   `DeviceCtl.isSimulatorCapable()` and degrades with an explicit message.
 
@@ -101,7 +103,9 @@ never go stale relative to the source tree. `SimCore` depends on `SimSkills`, so
 
 ```sh
 sipi describe-ui <udid> [--deep] [--expect "Text"]   # AX tree (default fast; grid on --deep/auto)
+sipi describe-ui <udid> --format compact   # same tree, one element per line (type, label, id, value, frame, hit)
 sipi describe-point <udid> -x <x> -y <y>   # single objectAtPoint hit-test (cheap, no grid)
+sipi wait-for <udid> --label "Text" [--timeout 10] [--absent]   # poll until a verify-style condition holds; exit 1 at the deadline
 sipi a11y-audit <udid>                     # mechanical accessibility rules over the same tree
 ```
 
@@ -129,12 +133,13 @@ sipi a11y-audit <udid>               # mechanical audit: touch targets, labels, 
 sipi biometrics <udid> <op>          # status | enroll | unenroll | match | no-match      (devicectl, Xcode 27+)
 sipi appearance <udid> [facets]      # read/write reduce-motion, color filters, Liquid Glass, … (devicectl, Xcode 27+)
 sipi voiceover <udid>                # READ VoiceOver state; setting it is retired        (devicectl, Xcode 27+)
+sipi memory-warning <udid> --bundle-id <id>   # memory-pressure warning to a running app  (devicectl, Xcode 27+)
 ```
 
 ### Capture
 
 ```sh
-sipi screenshot <udid> <path>        # zero-copy IOSurface PNG
+sipi screenshot <udid> <path> [--max-pixel N]   # zero-copy IOSurface PNG; --max-pixel downscales for a reader
 sipi record-video <udid> <path>      # simctl io recordVideo --codec h264 (background + SIGINT)
 ```
 
@@ -161,13 +166,21 @@ sipi list-simulators                 # device list for skills
 ### Reports and validation
 
 ```sh
-sipi run-test <test-json>             # deterministic v2 test harness
-sipi run-suite <suite-json>           # deterministic v2 suite harness
+sipi run-test <test-json> [--html] [--junit] [--record-video]   # deterministic v2 test harness
+sipi run-suite <suite-json> [--html] [--junit] [--record-video] # deterministic v2 suite harness
 sipi verify-session ...               # init/capture/finding/finalize verification artifacts
-sipi report <run-dir>                # generate report.html for a sipi-test run
+sipi report <run-dir> [--junit]      # generate report.html (and junit.xml) for a sipi-test run
 sipi verify-report <verify-dir>      # generate report.html for a sipi-verify run
 sipi validate <workspace>            # validate the JSON files in a .simpilot workspace
 ```
+
+`run.json`, `summary.json`, and each `result.json` are always written. `--html`
+adds `report.html`; `--junit` adds `junit.xml` (one `<testcase>` per test, the
+first failed step as `<failure>`); `--record-video`, or `record-video` in
+`config.json`, records each test to `<test-id>/recording.mp4` and names it in
+the result's `video` field. `keep-runs` in `config.json` prunes the oldest
+harness-named run directories after a run that landed in the default `runs/`
+location.
 
 Execution and report generation live **inside** the binary (`run-test`,
 `run-suite`, `verify-session`, `report`, `verify-report`, `validate`) so a
@@ -184,7 +197,7 @@ the matching CLI command.
 Beyond input, the harness owns simulator state: `open-url`, `privacy`, `push`,
 `location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`,
 `launch`, `terminate`, `network-condition` (simctl / provider), plus
-`display-state` and `biometrics` (devicectl, Xcode 27+). The `voiceover` action is
+`display-state`, `biometrics`, and `memory-warning` (devicectl, Xcode 27+). The `voiceover` action is
 retired — see `.claude/skills/sipi-common/docs/troubleshooting.md`.
 
 Cleanup runs between tests and at end of run, but it is **not** uniform across
@@ -197,7 +210,8 @@ that list, and specs have to plan around the difference:
 - **Cleared only** — `location`, `status-bar`, `network-condition`. Reset to "no
   override"; a value the device already had is not returned.
 - **Not touched** — `privacy`, `open-url`, `push`, `launch`, `terminate`. These
-  need recovery steps in the spec itself.
+  need recovery steps in the spec itself. `memory-warning` is a one-off event
+  with no device state behind it, so there is nothing to clean.
 
 A facet has exactly one owning action: `display-state` deliberately cannot set
 light/dark, text size, or Increase Contrast, because two mechanisms capturing two

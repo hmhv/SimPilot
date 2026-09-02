@@ -8,7 +8,7 @@ SimPilot은 Claude Code 또는 Codex에서 자연어 요청으로 구동되는 i
 
 ## 기능
 
-- **`/sipi-test`**: iOS Simulator에서 UI 테스트와 이상 상태 테스트를 자동화합니다. skill이 자연어 의도를 명시적인 v2 JSON 명세로 바꾸고, `sipi run-test` / `sipi run-suite`가 결정적 harness로 실행합니다. 저장된 테스트는 권한, deep link, 푸시 알림, 위치, 화면 모드, Dynamic Type, Increase Contrast, Face ID / Touch ID, 더 넓은 범위의 접근성 화면 설정, 실행 환경, 명시적으로 구성한 network-condition provider를 제어할 수 있습니다.
+- **`/sipi-test`**: iOS Simulator에서 UI 테스트와 이상 상태 테스트를 자동화합니다. skill이 자연어 의도를 명시적인 v2 JSON 명세로 바꾸고, `sipi run-test` / `sipi run-suite`가 결정적 harness로 실행합니다. 저장된 테스트는 권한, deep link, 푸시 알림, 위치, 화면 모드, Dynamic Type, Increase Contrast, Face ID / Touch ID, 더 넓은 범위의 접근성 화면 설정, 메모리 경고, 실행 환경, 명시적으로 구성한 network-condition provider를 제어할 수 있습니다.
 - **`/sipi-verify`**: 구현 후 검증입니다. 기능 추가나 버그 수정 후 변경 사항이 올바르게 동작하고 화면도 문제가 없는지 확인합니다.
 
 결과는 에이전트나 CI가 바로 읽을 수 있는 JSON으로 `.simpilot/`에 저장됩니다. 브라우저에서 볼 HTML 리포트는 필요할 때 생성합니다.
@@ -16,7 +16,7 @@ SimPilot은 Claude Code 또는 Codex에서 자연어 요청으로 구동되는 i
 ## 사전 요구 사항
 
 - macOS 15 이상
-- Xcode 26 이상: Simulator를 구동하기 위해 **런타임**에 필요합니다(SimPilot이 Xcode의 private Simulator frameworks를 로드합니다). 설치할 때는 필요하지 않습니다. Xcode 27 이상에서는 Face ID / Touch ID, 접근성 화면 설정도 추가로 사용할 수 있으며, 이들은 `xcrun devicectl`을 거칩니다. 또한 키보드 입력의 대체 경로로도 사용할 수 있습니다([키 입력을 받지 않게 된 simulator에 입력하기](#키-입력을-받지-않게-된-simulator에-입력하기) 참고).
+- Xcode 26 이상: Simulator를 구동하기 위해 **런타임**에 필요합니다(SimPilot이 Xcode의 private Simulator frameworks를 로드합니다). 설치할 때는 필요하지 않습니다. Xcode 27 이상에서는 Face ID / Touch ID, 접근성 화면 설정, 메모리 경고도 추가로 사용할 수 있으며, 이들은 `xcrun devicectl`을 거칩니다. 또한 키보드 입력의 대체 경로로도 사용할 수 있습니다([키 입력을 받지 않게 된 simulator에 입력하기](#키-입력을-받지-않게-된-simulator에-입력하기) 참고).
 - [Claude Code](https://claude.com/claude-code) 또는 Codex
 
 ## 설치
@@ -88,7 +88,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test regression-profile 디바이스 세트로 테스트를 실행해줘
 ```
 
-여러 디바이스를 지정하면 테스트는 병렬로 실행됩니다. `.simpilot/config.json`에 `build` 항목이 있으면 실행 전에 앱을 빌드합니다.
+테스트 실행은 결정적 `sipi` harness가 담당합니다. 실행 전에 앱을 빌드·설치하거나, `config.json`에 이미 설치된 bundle ID를 지정하세요. CI가 읽을 수 있는 `junit.xml`을 만들려면 `--junit`을, 테스트별 `recording.mp4`를 남기려면 `--record-video`(또는 `config.json`의 `record-video`)를 붙입니다.
 
 **결과 보기:**
 ```text
@@ -98,7 +98,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test HTML 리포트를 열어줘
 ```
 
-각 run은 `summary.json`(상태, 건수, 실패한 각 테스트의 첫 실패 단계)을 `run.json` 및 테스트별 `result.json`과 함께 기록합니다. 결과는 `.simpilot/runs/`에 저장됩니다. `report.html`은 사람이 브라우저에서 훑어보기 위한 페이지로, 실행 시 `--html`을 붙이거나 나중에 `sipi report <run-dir>`를 실행했을 때만 생성됩니다.
+각 run은 `summary.json`(상태, 건수, 실패한 각 테스트의 첫 실패 단계)을 `run.json` 및 테스트별 `result.json`과 함께 기록합니다. 결과는 `.simpilot/runs/`에 저장되며, `config.json`의 `keep-runs`로 오래된 run부터 정리할 수 있습니다. `report.html`은 사람이 브라우저에서 훑어보기 위한 페이지로, 실행 시 `--html`을 붙이거나 나중에 `sipi report <run-dir>`를 실행했을 때만 생성됩니다. CI용 `junit.xml`도 같은 방식으로 `--junit`으로 생성되고, `--record-video`(또는 `config.json`의 `record-video`)를 쓰면 테스트별 `recording.mp4`가 남습니다.
+
+**simulator 직접 구동:**
+
+`sipi`는 에이전트가 한 단계씩 호출할 수 있는 일반 CLI이기도 합니다. `describe-ui --format compact`는 접근성 트리를 요소당 한 줄(유형, 레이블, id, 값, frame, 탭 좌표)로 출력해 JSON의 몇 분의 일 크기로 끝납니다. `wait-for`는 sleep 대신 레이블·id·값·텍스트가 나타날(또는 사라질) 때까지 폴링합니다. `screenshot --max-pixel 600`은 눈으로 확인하기에 충분한 작은 캡처를 돌려주고, `memory-warning`은 Simulator.app의 Debug 메뉴에 있던 메모리 경고를 보냅니다(Xcode 27 이상). 전체 명령은 `sipi --help`를 참고하세요.
 
 **스위트 관리:**
 ```text
@@ -138,13 +142,14 @@ SimPilot은 `.simpilot/` 아래에 다음 구조를 사용합니다.
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
       report.html              # only with --html, or `sipi report`
+      junit.xml                # only with --junit, or `sipi report --junit`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
         step-NNN.describe-before.json
         step-NNN.describe-after.json
-        recording.mp4          # (if enabled)
+        recording.mp4          # only with record-video / --record-video
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
       summary.json             # 상태, 건수, findings, variant 폴더

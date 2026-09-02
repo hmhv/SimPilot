@@ -8,7 +8,7 @@ SimPilot 是一組用於 iOS Simulator 測試與驗證的 agent skills，可在 
 
 ## 功能
 
-- **`/sipi-test`**: 在 iOS Simulator 上自動化 UI 測試與異常狀態測試。skill 會把自然語言意圖轉換成明確的 v2 JSON 規格，再由 `sipi run-test` / `sipi run-suite` 透過確定性 harness 執行。儲存的測試可以控制權限、deep links、推播通知、定位、外觀、Dynamic Type、Increase Contrast、Face ID / Touch ID、更廣泛的無障礙外觀設定、啟動環境，以及明確設定的 network-condition provider。
+- **`/sipi-test`**: 在 iOS Simulator 上自動化 UI 測試與異常狀態測試。skill 會把自然語言意圖轉換成明確的 v2 JSON 規格，再由 `sipi run-test` / `sipi run-suite` 透過確定性 harness 執行。儲存的測試可以控制權限、deep links、推播通知、定位、外觀、Dynamic Type、Increase Contrast、Face ID / Touch ID、更廣泛的無障礙外觀設定、記憶體警告、啟動環境，以及明確設定的 network-condition provider。
 - **`/sipi-verify`**: 實作後驗證。用於在功能新增或錯誤修正後，確認行為與畫面都符合預期。
 
 結果會以 JSON 形式儲存在 `.simpilot/` 中，代理或 CI 可直接讀取。供瀏覽器開啟的 HTML 報告可按需產生。
@@ -16,7 +16,7 @@ SimPilot 是一組用於 iOS Simulator 測試與驗證的 agent skills，可在 
 ## 前置需求
 
 - macOS 15 或以上
-- Xcode 26 或以上：在**執行時**需要，用於驅動 Simulator（SimPilot 會載入 Xcode 的 private Simulator frameworks）。安裝時不需要。Xcode 27 或以上還會額外啟用 Face ID / Touch ID 與無障礙外觀設定，它們透過 `xcrun devicectl` 實作，也可以作為鍵盤輸入的後備路徑（見[對不再接受按鍵輸入的 simulator 輸入文字](#對不再接受按鍵輸入的-simulator-輸入文字)）。
+- Xcode 26 或以上：在**執行時**需要，用於驅動 Simulator（SimPilot 會載入 Xcode 的 private Simulator frameworks）。安裝時不需要。Xcode 27 或以上還會額外啟用 Face ID / Touch ID、無障礙外觀設定與記憶體警告，它們透過 `xcrun devicectl` 實作，也可以作為鍵盤輸入的後備路徑（見[對不再接受按鍵輸入的 simulator 輸入文字](#對不再接受按鍵輸入的-simulator-輸入文字)）。
 - [Claude Code](https://claude.com/claude-code) 或 Codex
 
 ## 安裝
@@ -88,7 +88,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test 使用 regression-profile 裝置集執行測試
 ```
 
-指定多個裝置時，測試會平行執行。如果 `.simpilot/config.json` 內有 `build` 項目，則會在執行前先建置 app。
+測試執行由確定性的 `sipi` harness 負責。執行前請先建置並安裝 app，或在 `config.json` 指定已安裝的 bundle ID。加 `--junit` 可產生供 CI 讀取的 `junit.xml`；加 `--record-video`（或在 `config.json` 設定 `record-video`）可為每個測試保留 `recording.mp4`。
 
 **查看結果:**
 ```text
@@ -98,7 +98,11 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 /sipi-test 開啟 HTML 報告
 ```
 
-每次 run 都會寫出 `summary.json`（狀態、計數，以及每個失敗測試的第一個失敗步驟），同時還有 `run.json` 與每個測試的 `result.json`。結果會儲存在 `.simpilot/runs/`。`report.html` 是給人在瀏覽器中翻閱的頁面，只有在執行時加 `--html`，或事後執行 `sipi report <run-dir>` 時才會產生。
+每次 run 都會寫出 `summary.json`（狀態、計數，以及每個失敗測試的第一個失敗步驟），同時還有 `run.json` 與每個測試的 `result.json`。結果會儲存在 `.simpilot/runs/`（`config.json` 的 `keep-runs` 會從最舊的 run 開始清理）。`report.html` 是給人在瀏覽器中翻閱的頁面，只有在執行時加 `--html`，或事後執行 `sipi report <run-dir>` 時才會產生。給 CI 用的 `junit.xml` 同樣以 `--junit` 產生；`--record-video`（或 `config.json` 的 `record-video`）會為每個測試保留 `recording.mp4`。
+
+**直接驅動 simulator:**
+
+`sipi` 也是一個可由 agent 逐步呼叫的一般 CLI。`describe-ui --format compact` 以每個元素一行（類型、標籤、id、值、frame、點擊座標）輸出無障礙樹，大小只有 JSON 的幾分之一；`wait-for` 會輪詢直到某個標籤、id、值或文字出現（或消失），取代 sleep；`screenshot --max-pixel 600` 回傳足夠小、便於查看的截圖；`memory-warning` 送出 Simulator.app Debug 選單曾提供的記憶體警告（Xcode 27 以上）。完整命令見 `sipi --help`。
 
 **管理 suites:**
 ```text
@@ -138,13 +142,14 @@ SimPilot 在 `.simpilot/` 下使用以下標準結構:
       run.json                 # Run summary
       summary.json             # Compact agent/CI summary
       report.html              # only with --html, or `sipi report`
+      junit.xml                # only with --junit, or `sipi report --junit`
       <test-id>/
         result.json            # Test result
         trace.jsonl            # Per-test event trace
         step-NNN.png           # Step screenshots
         step-NNN.describe-before.json
         step-NNN.describe-after.json
-        recording.mp4          # (if enabled)
+        recording.mp4          # only with record-video / --record-video
   verify/                      # Verification results (sipi-verify)
     <timestamp>_<description>/
       summary.json             # 狀態、計數、findings、variant 目錄

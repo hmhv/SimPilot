@@ -21,6 +21,7 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
     summary.json
     trace.jsonl
     report.html                  # only with --html, or `sipi report <run-dir>`
+    junit.xml                    # only with --junit, or `sipi report <run-dir> --junit`
     logs.ndjson
     logs.stderr.txt              # only when stderr is non-empty
     crash-reports.json           # only when matching reports exist
@@ -32,6 +33,7 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
       container-before.json      # primary app data container; when capture succeeds
       container-after.json       # primary app data container; when capture succeeds
       container-diff.json        # primary app data container; when both succeed
+      recording.mp4              # only with `record-video` / --record-video
       step-NNN.png
       step-NNN.describe-before.json    # describe-ui tree, see below
       step-NNN.describe-after.json
@@ -69,11 +71,27 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
 | `build` | object (`project` / `scheme` / `configuration`) | No |
 
 The harness consumes `app`, `step-delay`, `max-retries`,
-`network-condition-provider`, `capture-logs`, `log-predicate`, and
-`capture-container-diff`. `build` drives the build step (see
-`../../sipi-common/docs/build.md`; all sub-keys optional, `"build": {}` enables
-auto-detection). `keep-runs` and `record-video` pass validation but the runner
-does not act on them. Log and container-diff capture default to true.
+`network-condition-provider`, `capture-logs`, `log-predicate`,
+`capture-container-diff`, `record-video`, and `keep-runs`. `build` drives the
+build step (see `../../sipi-common/docs/build.md`; all sub-keys optional,
+`"build": {}` enables auto-detection). Log and container-diff capture default to
+true.
+
+`record-video: true` records every test to `<test-id>/recording.mp4` (H.264,
+started before fixtures and launch, finalized before `result.json` is written)
+and names it in the result's `video` field; `--record-video` on the run command
+turns it on for one run. A recorder that cannot start is an `evidence-warnings`
+entry, never a failed test.
+
+`keep-runs: N` deletes the oldest completed runs under `runs/` after a run so
+at most N remain, newest first. A candidate must have the
+`yyyy-MM-dd_HHmmss_…` name the harness writes **and** a `run.json` with a
+`finished` timestamp — so a folder parked under `runs/`, and a run another
+`sipi` process is still writing, are both left alone. A run that aborted (a
+launch that failed, a result that could not be written) is stamped `finished`
+on the way out, with `run aborted: …` in `evidence-warnings`, so it is
+reclaimable too. The run just written is never removed, and a run sent to an
+explicit `--run-dir` prunes nothing. Unset or 0 keeps everything.
 
 ## tests/&lt;id&gt;.json
 
@@ -172,7 +190,7 @@ Full JSON shapes and constraints: `actions.md`.
 | `crown` | `delta` | Apple Watch only |
 | `wait` | — | `duration`, default 1s |
 | `open-url`, `privacy`, `push`, `location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`, `launch`, `terminate`, `network-condition` | varies | Simulator controls |
-| `biometrics`, `display-state` | varies | Device state, Xcode 27+ |
+| `biometrics`, `display-state`, `memory-warning` | varies | Device state, Xcode 27+ |
 
 ## Selector
 
@@ -357,6 +375,7 @@ Written by the harness; never authored by hand.
 | `steps` | ResultStep[] |
 | `artifacts` | object mapping artifact labels to relative paths |
 | `cleanup-error` | string describing failed fixture restoration |
+| `video` | `recording.mp4`, only when the test was recorded and the file finalized |
 
 Each result step may include `passed`, `duration`, `action`, `screenshot`,
 `screenshots.before`, `screenshots.after`, `verify`, `attempted-methods`,
@@ -429,12 +448,14 @@ The compact result for agents and CI:
       "screenshot": "login-flow/step-001.png"
     }
   ],
-  "report": "report.html"
+  "report": "report.html",
+  "junit": null
 }
 ```
 
 `report` names the HTML page only when it exists; it is `null` on a run that was
-not asked for one.
+not asked for one. `junit` follows the same rule for `junit.xml` (`--junit`, or
+`sipi report <run-dir> --junit` afterwards).
 
 `status` is the gate field for **test outcomes**. `started`, `finished`,
 `device`, and `report` are always present. In each `top-failures` entry `action`

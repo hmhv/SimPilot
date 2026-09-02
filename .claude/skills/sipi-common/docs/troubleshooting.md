@@ -27,6 +27,8 @@ link here rather than restating them.
 | Cannot interact with alert | Confirm labels with `describe-ui`. Wait ~0.5s. Fall back to coordinates |
 | Scroll position off | Use `sipi swipe` to control the amount. Re-read with `describe-ui` after scrolling |
 | v2 selector doesn't resolve | Prefer `selector.id`; the runner tries the fast AX tree, then the deep grid. Confirm the id/label with `describe-ui`. `sipi validate` and `run-test` reject a selector that is not exactly one of id / label / value |
+| `wait-for` exits 1 | The screen never reached the state within `--timeout`; the JSON on stdout names the unmet condition and the last reason. Read the tree before retrying with a longer timeout — a wrong label times out exactly like a slow screen |
+| `memory-warning` says the app is not running | The pid is looked up in the guest launchd job table, so a suspended or never-launched app has none. `xcrun simctl launch "$UDID" "$BUNDLE_ID"` first, or pass `--pid` for a process that is not a UIKit app |
 
 ### `describe-ui` returns a single empty root
 

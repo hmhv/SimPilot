@@ -411,6 +411,20 @@ public enum DeviceCtl {
         )
     }
 
+    // MARK: - Memory pressure
+
+    /// Deliver a memory-pressure warning to one process, the way the old
+    /// Simulator.app Debug menu did. The guest process receives
+    /// `applicationDidReceiveMemoryWarning` / `didReceiveMemoryWarning`, so an
+    /// app's cache-eviction and low-memory handling can be exercised on demand.
+    /// Transient: nothing is left behind to restore.
+    public static func sendMemoryWarning(udid: String, pid: Int32) throws {
+        try runChecked(
+            ["device", "process", "sendMemoryWarning", "--device", udid, "--pid", String(pid)],
+            timeout: 30
+        )
+    }
+
     // MARK: - VoiceOver
 
     /// Whether VoiceOver is currently on, or nil when the runtime does not report it.

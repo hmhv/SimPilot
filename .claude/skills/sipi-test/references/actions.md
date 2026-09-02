@@ -335,6 +335,19 @@ so the order is enroll → present the prompt → match:
 { "type": "biometrics", "operation": "unenroll" }
 ```
 
+`memory-warning` — deliver a memory-pressure warning to the running app (the
+configured app, or `bundle-id` for another process). The app receives
+`didReceiveMemoryWarning` / `UIApplication.didReceiveMemoryWarningNotification`;
+the step fails when the app is not running. Transient: nothing is captured and
+nothing is restored, so it belongs to no cleanup tier. Put the `verify` on the
+state the app must still hold — a list still populated, a screen still usable —
+not on the warning itself, which leaves no trace in the tree:
+
+```json
+{ "type": "memory-warning" }
+{ "type": "memory-warning", "bundle-id": "com.example.helper" }
+```
+
 `display-state` — every key is optional, at least one is required, and an unknown
 key is a validation error rather than a silently ignored setting:
 

@@ -24,6 +24,13 @@ private struct HarnessConfig: Decodable {
     var captureLogs: Bool?
     var logPredicate: String?
     var captureContainerDiff: Bool?
+    /// Record each test to `<test-id>/recording.mp4`. Off by default: a video
+    /// per test is the heaviest artifact a run writes, and the per-step
+    /// screenshots already cover the common "what did the screen look like".
+    var recordVideo: Bool?
+    /// Keep only the newest N harness-named directories under `runs/` after a
+    /// run finishes. Unset or zero means never prune.
+    var keepRuns: Int?
 
     enum CodingKeys: String, CodingKey {
         case app
@@ -33,6 +40,8 @@ private struct HarnessConfig: Decodable {
         case captureLogs = "capture-logs"
         case logPredicate = "log-predicate"
         case captureContainerDiff = "capture-container-diff"
+        case recordVideo = "record-video"
+        case keepRuns = "keep-runs"
     }
 }
 
@@ -454,6 +463,10 @@ private struct HarnessRunOptions {
     /// CI, which take `summary.json` and `result.json`, and rendering a page
     /// nobody opens costs time on every run.
     var html: Bool = false
+    /// Also write `junit.xml` for a CI system that ingests JUnit.
+    var junit: Bool = false
+    /// Record each test to video. nil defers to `config.json` `record-video`.
+    var recordVideo: Bool? = nil
 }
 
 private enum HarnessTime {
@@ -527,6 +540,12 @@ private final class HarnessRunner {
     private var evidenceWarnings: [String] = []
     private var testArtifacts: [String: [String: String]] = [:]
     private var testCleanupErrors: [String: String] = [:]
+    /// Relative path of each test's finished recording, for `result.json` `video`.
+    private var testVideos: [String: String] = [:]
+    /// Whether the end-of-run `run.json` (the one carrying `finished`) landed.
+    /// A run that throws before it is still stamped `finished` on the way out,
+    /// so a `run.json` without the field always means a process is writing it.
+    private var finalRunJSONWritten = false
 
     init(options: HarnessRunOptions) throws {
         self.options = options
@@ -620,6 +639,22 @@ private final class HarnessRunner {
     }
 
     func run(tests: [HarnessTest]) throws -> String {
+        do {
+            return try runAll(tests: tests)
+        } catch {
+            // An aborted run keeps every artifact it managed to write, and gets
+            // its `finished` stamp so `keep-runs` can reclaim it later — without
+            // the stamp it would look like a run still in progress forever. The
+            // reason goes where the other best-effort problems go.
+            if !finalRunJSONWritten {
+                evidenceWarnings.append("run aborted: \(error)")
+                try? writeRunJSON(finished: Date())
+            }
+            throw error
+        }
+    }
+
+    private func runAll(tests: [HarnessTest]) throws -> String {
         defer {
             stopEvidenceCapture()
             if !environmentWasCleaned {
@@ -657,6 +692,15 @@ private final class HarnessRunner {
         // intentionally surfaced as a throw) can never discard run.json,
         // summary.json, or report.html.
         try writeRunJSON(finished: Date())
+        finalRunJSONWritten = true
+        // junit.xml is derived from run.json and the result files, so it is
+        // written before the summary, which names it when it exists. Like
+        // report.html below, a file already in the directory is refreshed even
+        // without the flag: a reused --run-dir must not advertise the previous
+        // run's results as this one's.
+        if options.junit || fm.fileExists(atPath: runDir + "/junit.xml") {
+            try JUnitReport.write(runDir: runDir)
+        }
         // Refresh a page that is already there even without --html: a summary
         // naming a page that no longer describes the run is worse than either
         // writing the page or leaving the directory without one.
@@ -668,7 +712,35 @@ private final class HarnessRunner {
         runTrace.event("run-finish", fields: ["run-dir": runDir])
         try cleanupEnvironment()
         environmentWasCleaned = true
+        pruneOldRuns()
         return runDir
+    }
+
+    /// Apply `keep-runs`: delete the oldest completed harness runs under
+    /// `<workspace>/runs` beyond the configured count. Only when this run landed
+    /// in the default location — a caller who chose `--run-dir` is managing
+    /// their own layout — and never the directory just written. A candidate must
+    /// carry the harness's name shape AND a finished `run.json`, so a folder
+    /// someone parked under runs/ and a run another `sipi` is still writing are
+    /// both left alone. Best-effort: a deletion failure is reported on stderr
+    /// and does not fail the run.
+    private func pruneOldRuns() {
+        guard let keep = config.keepRuns, keep > 0, options.runDir == nil else { return }
+        let runsDir = options.workspace + "/runs"
+        guard let names = try? fm.contentsOfDirectory(atPath: runsDir) else { return }
+        let current = URL(fileURLWithPath: runDir).lastPathComponent
+        let completed = names.filter { $0 == current || RunRetention.isCompletedRun(at: runsDir + "/" + $0) }
+        for name in RunRetention.directoriesToPrune(names: completed, keep: keep) where name != current {
+            let path = runsDir + "/" + name
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
+            do {
+                try fm.removeItem(atPath: path)
+                runTrace.event("run-pruned", fields: ["run": name])
+            } catch {
+                FileHandle.standardError.write(Data("[sipi] keep-runs: could not remove \(path): \(error)\n".utf8))
+            }
+        }
     }
 
     private func stopEvidenceCapture() {
@@ -967,6 +1039,39 @@ private final class HarnessRunner {
         let testTrace = try TraceWriter(path: testDir + "/trace.jsonl")
         testTrace.event("test-start", fields: ["test": test.id])
 
+        // Video starts before fixtures and launch so the recording shows the
+        // whole test, not just its steps. Best-effort evidence: a recorder that
+        // cannot start is a warning, never a failed test.
+        var recording: SimShell.BackgroundProcess?
+        // Finalize on every exit from this function, including a throw from
+        // launch or a result write: the SIGINT is what makes simctl write the
+        // moov atom, and a child left running would outlive sipi itself. The
+        // normal path calls this before the final result write so `video` can be
+        // recorded; the defer then finds nothing left to stop.
+        func finishRecording() {
+            guard let active = recording else { return }
+            recording = nil
+            let status = active.stop()
+            let videoPath = testDir + "/recording.mp4"
+            if status == 0, fm.fileExists(atPath: videoPath) {
+                testVideos[test.id] = "recording.mp4"
+                testTrace.event("recording-finish", fields: ["path": "recording.mp4"])
+            } else {
+                evidenceWarnings.append("video recording for \(test.id) did not finalize (simctl exited \(status))")
+                testTrace.event("recording-error", fields: ["exit": Int(status)])
+            }
+        }
+        defer { finishRecording() }
+        if options.recordVideo ?? config.recordVideo ?? false {
+            do {
+                recording = try SimShell.recordVideo(udid: udid, outputPath: testDir + "/recording.mp4")
+                testTrace.event("recording-start", fields: ["path": "recording.mp4"])
+            } catch {
+                evidenceWarnings.append("video recording for \(test.id) could not start: \(error)")
+                testTrace.event("recording-error", fields: ["error": String(describing: error)])
+            }
+        }
+
         var stepResults: [[String: Any]] = []
         var failed = false
         var review = false
@@ -1136,6 +1241,8 @@ private final class HarnessRunner {
         } else if !fixtureManifest.entries.isEmpty {
             testTrace.event("fixture-cleanup", fields: ["succeeded": true])
         }
+
+        finishRecording()
 
         let duration = Date().timeIntervalSince(testStarted)
         try writeResultJSON(test: test, testDir: testDir, passed: !failed, review: review, steps: stepResults, started: testStarted)
@@ -1778,6 +1885,17 @@ private final class HarnessRunner {
             let targetBundleID = action.bundleID ?? bundleID
             try SimShell.terminate(udid: udid, bundleID: targetBundleID)
             return ["method": "simctl", "value": "terminate:\(targetBundleID)"]
+
+        case "memory-warning":
+            // Transient: the process handles the warning and nothing is left to
+            // restore, so this needs no baseline and no cleanup tier.
+            try requireSimulatorDeviceCtl("memory-warning")
+            let targetBundleID = action.bundleID ?? bundleID
+            guard let pid = try SimShell.processIdentifier(udid: udid, bundleID: targetBundleID) else {
+                throw HarnessError("memory-warning: \(targetBundleID) is not running, so there is no process to warn.")
+            }
+            try DeviceCtl.sendMemoryWarning(udid: udid, pid: pid)
+            return ["method": "devicectl", "value": "memory-warning:\(targetBundleID)"]
 
         case "network-condition":
             guard let operation = action.operation, ["apply", "clear"].contains(operation) else {
@@ -2438,6 +2556,8 @@ private final class HarnessRunner {
             return "launch \(action.bundleID ?? bundleID)"
         case "terminate":
             return "terminate \(action.bundleID ?? bundleID)"
+        case "memory-warning":
+            return "memory-warning \(action.bundleID ?? bundleID)"
         case "network-condition":
             return "network-condition \(action.operation ?? "") \(action.profile ?? "")"
         case "crown":
@@ -2474,6 +2594,9 @@ private final class HarnessRunner {
         }
         if let error = testCleanupErrors[test.id] {
             object["cleanup-error"] = error
+        }
+        if let video = testVideos[test.id] {
+            object["video"] = video
         }
         try writeJSON(object.filterJSON(), to: testDir + "/result.json")
     }
@@ -2631,6 +2754,12 @@ extension Sipi {
         @Flag(name: .customLong("html"), help: "Also render report.html. Off by default; run.json, summary.json and each result.json are always written.")
         var html = false
 
+        @Flag(name: .customLong("junit"), help: "Also write junit.xml (JUnit XML for CI). Derived from run.json and each result.json.")
+        var junit = false
+
+        @Flag(name: .customLong("record-video"), help: "Record each test to <test-id>/recording.mp4. Overrides config.json record-video.")
+        var recordVideo = false
+
         func run() throws {
             do {
                 // Validate the spec before touching the simulator.
@@ -2649,7 +2778,9 @@ extension Sipi {
                     stopOnFailure: false,
                     resetBetweenTests: true,
                     evidenceBundleIDs: tests.compactMap(\.app),
-                    html: html
+                    html: html,
+                    junit: junit,
+                    recordVideo: recordVideo ? true : nil
                 ))
                 let path = try runner.run(tests: tests)
                 print("Run results: \(URL(fileURLWithPath: path).path)")
@@ -2690,6 +2821,12 @@ extension Sipi {
         @Flag(name: .customLong("html"), help: "Also render report.html. Off by default; run.json, summary.json and each result.json are always written.")
         var html = false
 
+        @Flag(name: .customLong("junit"), help: "Also write junit.xml (JUnit XML for CI). Derived from run.json and each result.json.")
+        var junit = false
+
+        @Flag(name: .customLong("record-video"), help: "Record each test to <test-id>/recording.mp4. Overrides config.json record-video.")
+        var recordVideo = false
+
         func run() throws {
             do {
                 let data = try Data(contentsOf: URL(fileURLWithPath: suitePath))
@@ -2716,7 +2853,9 @@ extension Sipi {
                     stopOnFailure: suite.settings?.stopOnFailure ?? false,
                     resetBetweenTests: suite.settings?.resetBetweenTests ?? true,
                     evidenceBundleIDs: tests.compactMap(\.app),
-                    html: html
+                    html: html,
+                    junit: junit,
+                    recordVideo: recordVideo ? true : nil
                 ))
                 let path = try runner.run(tests: tests)
                 print("Run results: \(URL(fileURLWithPath: path).path)")

@@ -25,6 +25,7 @@ struct Sipi: ParsableCommand {
             ListSimulators.self,
             DescribeUI.self,
             DescribePoint.self,
+            WaitFor.self,
             A11yAudit.self,
             Tap.self,
             DoubleTap.self,
@@ -43,6 +44,7 @@ struct Sipi: ParsableCommand {
             Biometrics.self,
             Appearance.self,
             VoiceOver.self,
+            MemoryWarning.self,
             MultiTouch.self,
             Pinch.self,
             Crown.self,
@@ -143,9 +145,25 @@ extension Sipi {
         @Argument(help: "Destination PNG path.")
         var path: String
 
+        @Option(name: .customLong("max-pixel"), help: "Downscale so the longest side is at most this many pixels (a capture already within the limit is left as is). For a reader that pays per image token; omit for evidence.")
+        var maxPixel: Int?
+
+        func validate() throws {
+            if let maxPixel, maxPixel < 1 {
+                throw ValidationError("--max-pixel must be a positive pixel count")
+            }
+        }
+
         func run() throws {
             let driver = NativeDriver()
-            try driver.screenshot(to: URL(fileURLWithPath: path), udid: udid)
+            let url = URL(fileURLWithPath: path)
+            try driver.screenshot(to: url, udid: udid)
+            if let maxPixel {
+                let original = try Data(contentsOf: url)
+                if let shrunk = PNGDownscale.resized(original, maxPixel: maxPixel) {
+                    try shrunk.write(to: url, options: .atomic)
+                }
+            }
             print(path)
         }
     }

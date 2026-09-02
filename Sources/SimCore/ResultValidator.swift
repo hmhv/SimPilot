@@ -94,7 +94,7 @@ public enum ResultValidator {
         "pinch", "multitouch",
         "open-url", "privacy", "push", "location", "appearance", "content-size", "increase-contrast",
         "status-bar", "launch", "terminate", "network-condition",
-        "display-state", "biometrics"
+        "display-state", "biometrics", "memory-warning"
     ]
 
     /// Actions that used to validate and no longer do. Kept separate from the
@@ -1034,6 +1034,8 @@ public enum ResultValidator {
             }
         case "terminate":
             break
+        case "memory-warning":
+            checkString(path, a, "bundle-id", prefix: ordinal + ".", diag)
         case "network-condition":
             guard let operation = a["operation"] as? String,
                   ["apply", "clear"].contains(operation) else {

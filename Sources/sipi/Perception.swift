@@ -269,21 +269,37 @@ extension Sipi {
         @Option(name: .long, help: "Auto-trigger --deep when the fast tree does not contain this text.")
         var expect: String?
 
+        enum Format: String, ExpressibleByArgument {
+            case json
+            case compact
+        }
+
+        @Option(name: .long, help: "Output format: json (the describe-ui contract, default) or compact (one element per line: type, label, id, value, frame, hit point).")
+        var format: Format = .json
+
         func run() throws {
             let driver = NativeDriver()
 
             // Default fast (frontmost+recursive). `--deep` forces the grid pass;
             // `--expect` auto-triggers it when the fast tree misses the text.
-            let nodes = try driver.describe(udid, deep: deep)
-            let json = try AXNodeJSON.string(for: nodes)
+            var nodes = try driver.describe(udid, deep: deep)
+            var json = try AXNodeJSON.string(for: nodes)
 
+            // `--expect` is checked against the JSON text whatever the output
+            // format: it is the same "is this string anywhere in the tree" test
+            // a later grep would run, so the escalation decision stays identical.
             if !deep, let expect, !expect.isEmpty, !json.contains(expect) {
                 emitError("[sipi] fast describe-ui missed expected text '\(expect)' — running --deep")
-                print(try ChildTree.json(udid: udid, deep: true))
-                return
+                nodes = try ChildTree.nodes(udid: udid, deep: true)
+                json = try AXNodeJSON.string(for: nodes)
             }
 
-            print(json)
+            switch format {
+            case .json:
+                print(json)
+            case .compact:
+                FileHandle.standardOutput.write(Data(AXNodeCompact.string(for: nodes).utf8))
+            }
         }
     }
 }

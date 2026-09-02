@@ -154,7 +154,8 @@ service `type` falls back to when its own keystrokes do not arrive — are in
 - **Destructive-confirm alerts** (a Delete button presenting a
   `UIAlertController`): the confirm tap is absorbed if it fires during the
   presentation animation. After tapping the trigger, wait for the alert to settle
-  — a conditional wait on the confirm label, or ~0.5s — then re-read and tap.
+  — `sipi wait-for "$UDID" --label 確認 --element-type Button`, or ~0.5s — then
+  re-read and tap.
   (Observed live: a 確認 tap fired mid-animation and was dropped; re-describe +
   re-tap succeeded.)
 

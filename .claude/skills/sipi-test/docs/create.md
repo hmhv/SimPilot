@@ -6,7 +6,9 @@ interpretation.
 ## Workflow
 
 1. Understand the user goal and the affected screen.
-2. Observe the real UI with `sipi describe-ui "$UDID"` and screenshots.
+2. Observe the real UI with `sipi describe-ui "$UDID"` and screenshots
+   (`--format compact` to scan a screen for selectors; the JSON form when a
+   verify string has to be copied exactly).
 3. Prefer stable `AXUniqueId` values. Use labels only when unique and stable.
 4. Write `.simpilot/tests/<id>.json` against `../references/json-reference.md`.
 5. `sipi validate .simpilot` and fix schema issues before running.
