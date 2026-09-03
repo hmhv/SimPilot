@@ -1,6 +1,7 @@
 # UI Interaction Patterns
 
-Which control behaves how, and what to do when it misbehaves. For *which command
+Which control behaves how, and what to do when it misbehaves — plus
+§ App State on Disk, for reading back what the app persisted. For *which command
 does what*, see `ui-driver.md`; the same primitives are available as saved v2 test
 actions (`../../sipi-test/references/actions.md`).
 
@@ -169,6 +170,92 @@ service `type` falls back to when its own keystrokes do not arrive — are in
 `xcrun simctl openurl $UDID 'scheme://path'`. The first use shows a confirmation
 dialog → tap "Open" (localized, e.g. Japanese「開く」).
 
+### Home Screen Widgets
+
+Measured on iOS 27.0 (iPhone 17, Japanese locale). iOS 18.x and 26 were not
+measured — re-read the tree before relying on these labels.
+
+**Add.** Long press an empty spot to enter jiggle mode, then work the edit menu:
+
+```bash
+sipi touch "$UDID" --pixel -x 201 -y 650 --down --up --delay 1.5   # jiggle mode
+sipi tap "$UDID" --label 編集                                      # → menu
+sipi tap "$UDID" --label ウィジェットを追加                        # → gallery sheet
+```
+
+Tap the menu item in the same step that opened the menu. The 編集 menu is
+transient: with a tree read and a few seconds in between, it had dismissed
+itself and the tap found nothing.
+
+The gallery lists one `Button` per app under
+`Group id="add-sheet-collection-view"`, so `--label "カレンダー"` works there.
+Filter it by writing the search field through its placeholder:
+
+```bash
+sipi set-text "$UDID" "カレンダー" --value "ウィジェットを検索"
+```
+
+Then branch on the tree, because the filtered sheet has two shapes:
+
+| Tree after the search | Result rows | How to open one |
+|---|---|---|
+| `add-sheet-collection-view` still present | Ordinary `Button`s | `tap --label "<AppName>"` |
+| Field in its editing presentation (`Button "閉じる"` beside it, no collection group) | **Not in the tree** | Screenshot → locate the row → `tap --pixel` |
+
+In the second shape nothing recovers the rows — a 10s `wait-for --label` and a
+`describe-point` on the row's own coordinates both came back empty — but the row
+is still hit-testable, and `tap --pixel` opened it.
+
+The detail sheet holds the size carousel:
+
+```
+Button "カレンダー, 次はこちら" value="ウィジェット, 小" frame=(119,435,164,164)
+Slider value="全8ページ中の1ページ目" frame=(24,735,354,31)
+Button " ウィジェットを追加" frame=(24,766,354,50)
+```
+
+Page the carousel with `sipi drag --pixel … --steps 40` across the preview; a
+plain `swipe` over the preview left it on page 1. The selected size is the preview button's
+AXValue (`ウィジェット, 小` / `中` / `大`), the position is the unnamed `Slider`
+— re-read once the animation settles, since a mid-animation read can be missing
+the preview button. `tap --label "ウィジェットを追加"` then adds it; the real
+label starts with a space, which the selector trims (see § Constraints).
+
+**Remove or resize.** Long press the widget itself. Its context menu carries
+stable ids, so no label matching is needed:
+
+| Item | id |
+|---|---|
+| ウィジェットを編集 | `com.apple.springboardhome.application-shortcut-item.configure-widget` |
+| ホーム画面を編集 | `com.apple.springboardhome.application-shortcut-item.rearrange-icons` |
+| ウィジェットを削除 | `com.apple.springboardhome.application-shortcut-item.remove-widget` |
+
+The same menu has a size row (`アプリアイコン`, `小型のウィジェット` …
+`特大（縦向き）のウィジェット`) that morphs the widget in place. `remove-widget`
+raises a confirmation alert → `tap --label 削除`.
+
+**Pages.** `Slider id="spotlight-pill"` reports the current page in its AXValue
+(`全2ページ中の1ページ目`). Two things about paging:
+
+- **A horizontal page swipe must not cross a widget.** A swipe at `y=184`, the
+  vertical center of a widget, launched that widget's app (Maps, straight into
+  its location-permission alert) instead of paging. Pick a `y` no widget covers
+  — the empty band below the icon rows (`y=650` here) paged reliably.
+- Right after a page change the previous page's items are still in the tree,
+  reported off screen with a negative `x` — `"onscreen": false` in the JSON
+  form, the bare token `offscreen` in `--format compact`, and absent altogether
+  when the runtime does not report it. Re-read once it settles, and drop those
+  before treating what you see as the current page.
+
+Jiggle mode changes two things a selector may depend on: every icon and widget
+becomes a `GenericElement` instead of a `Button` (so `--element-type Button`
+stops matching), and `spotlight-pill` counts one extra page for the empty
+trailing page (`全2ページ` → `全3ページ`).
+
+An inventory therefore means paging through and reading every page. Widgets are
+the elements whose AXValue starts with `ウィジェット` (`ウィジェット`,
+`ウィジェット, スタック`).
+
 ---
 
 ## Device Settings
@@ -186,6 +273,42 @@ Wait ~3s for it to settle, then confirm. The plain read
 (`sipi orientation $UDID --json`) reports only the four upright orientations —
 SimulatorKit cannot express the flat ones — so confirm a `face-up` / `face-down`
 set with `--physical`, which adds `flat`, `physical`, and `locked` from devicectl.
+
+---
+
+## App State on Disk
+
+A verification often ends at a file inside the app's container or an App Group —
+what the app actually persisted. `sipi container inspect` is the reader:
+
+```bash
+sipi container inspect "$UDID" com.example.app --group group.com.example \
+  Library/Preferences/group.com.example.plist \
+  --format plist --key-path '$.lastSyncedAt'
+```
+
+**Never read a number with PlistBuddy.** `PlistBuddy -c Print` formats reals
+with `%f` — six decimals — and destroys the value silently. Measured on the same
+plist: `2.5e-08` prints as `0.000000`, a stored value that reads as zero, and
+`1234.5678901234567` prints as `1234.567871`. `container inspect --format plist`
+and `plutil -p` both report what is stored.
+
+**The file lags the app.** `UserDefaults` writes go to cfprefsd, not to disk.
+Measured on iOS 27 with a process writing two keys and no `synchronize()`: the
+plist held 0 of 2 keys immediately after the write and both within 6s, and a
+second run read 1 of 2 keys at ~1s — a partial state indistinguishable from the
+app failing to save that field. Two ways out:
+
+- Read the logical value instead —
+  `xcrun simctl spawn "$UDID" defaults read <suite>` was already correct at t=0.
+- Or terminate the app first (`xcrun simctl terminate "$UDID" <bundle-id>`) and
+  then read the file.
+
+**Do not `rm` a preferences plist to reset it.** With the domain still cached by
+cfprefsd, a deleted `Library/Preferences/<suite>.plist` was never recreated —
+observed for 148s, including after the writing process exited — so every file
+read reports the file missing while the values are still live. Reset the domain
+with `xcrun simctl spawn "$UDID" defaults delete <suite>`.
 
 ---
 
@@ -224,6 +347,22 @@ behaviors; treat the iOS 26+ column as the expected baseline and re-check with
 | iPad confirmationDialog | Buttons inside the popover cannot be tapped |
 | System UI (ASWebAuth, SFSafari) | Separate process, but the native driver inspects and acts on it in one tree |
 | UIKit full-screen toolbar | Not exposed in describe-ui. Screenshot + coordinate estimation |
+| Widget gallery search results | In the field's editing presentation the filtered rows leave the AX tree; the rows stay hit-testable — screenshot + `tap --pixel`. See § Home Screen Widgets |
+| Whitespace-only AXLabel | Trims to empty, so `--label` / `--value` cannot name it. Use `--id` or a coordinate — see below |
+
+### Labels with whitespace
+
+Every selector (`--label`, `--id`, `--value`) trims
+`.whitespacesAndNewlines` from both the query and the tree value, so a label
+that merely starts or ends with a space needs no special handling: the Home
+Screen's real `Button " ウィジェットを追加"` matches
+`--label "ウィジェットを追加"`. Copying the label out of `describe-ui` verbatim
+is still the safer habit, since the padding is invisible in the output.
+
+What cannot be selected is a label that is *entirely* whitespace — it trims to
+empty and no selector can name it. They exist: SpringBoard's own application
+element is labelled `" "`, and the Japanese keyboard exposes `"　"`
+(full-width space) and `"\n"` (Return). Reach those with `--id` or a coordinate.
 
 ### PhotosPicker multiple selection, by version
 
