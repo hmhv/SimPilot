@@ -634,19 +634,15 @@ enum XcodeMCP {
             lock.lock()
             defer { lock.unlock() }
             while true {
-                var index = 0
-                while index < lines.count {
-                    let line = lines[index]
+                while !lines.isEmpty {
+                    let line = lines.removeFirst()
                     guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
-                        lines.remove(at: index)
                         continue
                     }
                     if object["id"] as? Int == id {
-                        lines.remove(at: index)
                         return object
                     }
-                    // Not ours and not a reply we are still waiting for.
-                    lines.remove(at: index)
+                    // Not ours and not a reply we are still waiting for: discarded.
                 }
                 if streamEnded || torndown { return nil }
                 if !lock.wait(until: deadline) { return nil }
