@@ -526,6 +526,11 @@ private final class HarnessRunner {
     private let runTrace: TraceWriter
     private let started = Date()
     private var runEntries: [[String: Any]] = []
+    /// Appearance, Dynamic Type and Increase Contrast as the simulator reported
+    /// them when the run started — `run.json` `device-state`. Evidence for the
+    /// reader, not a baseline: the restore baselines below are still captured
+    /// right before the first write, so this never feeds a restore.
+    private var runStartDeviceState: [String: String] = [:]
     private var initialAppearance: String?
     private var initialContentSize: String?
     private var initialIncreaseContrast: String?
@@ -567,6 +572,19 @@ private final class HarnessRunner {
         try fm.createDirectory(atPath: self.runDir, withIntermediateDirectories: true)
         self.runTrace = try TraceWriter(path: self.runDir + "/trace.jsonl")
         runTrace.event("run-start", fields: ["device": udid, "bundle-id": bundleID])
+        // Record what the device looked like before this run touched it, so a
+        // leftover from an earlier run that never reached its cleanup (dark mode,
+        // an accessibility text size) is visible next to the results it colours.
+        let deviceState = DeviceStateRecord.capture(
+            appearance: { try SimShell.appearance(udid: resolvedUDID) },
+            contentSize: { try SimShell.contentSize(udid: resolvedUDID) },
+            increaseContrast: { try SimShell.increaseContrast(udid: resolvedUDID) }
+        )
+        self.runStartDeviceState = deviceState.state
+        self.evidenceWarnings.append(contentsOf: deviceState.warnings)
+        if !deviceState.state.isEmpty {
+            runTrace.event("device-state", fields: deviceState.state)
+        }
         if config.captureLogs != false {
             do {
                 let path = self.runDir + "/logs.ndjson"
@@ -2622,6 +2640,7 @@ private final class HarnessRunner {
         if let suite = options.suiteName { object["suite"] = suite }
         if let finished { object["finished"] = HarnessTime.iso(finished) }
         if let commit = Self.gitCommit() { object["commit"] = commit }
+        if !runStartDeviceState.isEmpty { object["device-state"] = runStartDeviceState }
         if !evidenceArtifacts.isEmpty { object["artifacts"] = evidenceArtifacts }
         if !evidenceWarnings.isEmpty { object["evidence-warnings"] = evidenceWarnings }
         try writeJSON(object.filterJSON(), to: runDir + "/run.json")

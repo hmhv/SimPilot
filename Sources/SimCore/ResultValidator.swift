@@ -120,7 +120,11 @@ public enum ResultValidator {
     private static let runRequired: Set<String> = ["started", "device", "tests", "summary"]
     private static let runOptional: Set<String> = [
         "finished", "device-name", "device-runtime", "suite", "profile", "commit", "session",
-        "build-error", "artifacts", "evidence-warnings"
+        "build-error", "artifacts", "evidence-warnings", "device-state"
+    ]
+    /// The facets `device-state` may carry: what `simctl ui` can read back.
+    private static let runDeviceStateOptional: Set<String> = [
+        "appearance", "content-size", "increase-contrast"
     ]
     private static let runTestRequired: Set<String> = ["id", "passed", "duration"]
     private static let runTestOptional: Set<String> = ["review", "skipped"]
@@ -1184,6 +1188,17 @@ public enum ResultValidator {
         checkKeys(path, data, required: runRequired, optional: runOptional, diag)
         checkTZ(path, data, "started", diag)
         checkTZ(path, data, "finished", diag)
+
+        if let deviceState = data["device-state"] {
+            guard let state = deviceState as? JSON else {
+                diag.errors.append("\(path): device-state must be an object")
+                return nil
+            }
+            checkKeys(path, state, required: [], optional: runDeviceStateOptional, prefix: "device-state ", diag)
+            for key in state.keys.sorted() where runDeviceStateOptional.contains(key) {
+                checkString(path, state, key, prefix: "device-state.", diag)
+            }
+        }
 
         var actualPassed = 0
         var actualFailed = 0

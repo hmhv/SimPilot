@@ -517,16 +517,24 @@ public enum ReportGenerator {
             }
         }
 
+        var device: [String: Any] = [
+            "name": run["device-name"] as? String ?? "",
+            "runtime": run["device-runtime"] as? String ?? "",
+            "udid": run["device"] as? String ?? ""
+        ]
+        // The appearance facets the simulator had when the run started, when the
+        // harness could read them. Carried into the summary because it is the
+        // first file a reader opens, and a dark or accessibility-sized screenshot
+        // that no step asked for is explained here or nowhere.
+        if let state = run["device-state"] as? [String: String], !state.isEmpty {
+            device["state"] = state
+        }
         return [
             "status": status,
             "run-id": URL(fileURLWithPath: runDir).lastPathComponent,
             "started": run["started"] as? String ?? "",
             "finished": run["finished"] as? String ?? "",
-            "device": [
-                "name": run["device-name"] as? String ?? "",
-                "runtime": run["device-runtime"] as? String ?? "",
-                "udid": run["device"] as? String ?? ""
-            ],
+            "device": device,
             "counts": [
                 "total": total,
                 "passed": passed,

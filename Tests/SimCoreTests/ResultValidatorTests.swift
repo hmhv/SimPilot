@@ -138,6 +138,73 @@ final class ResultValidatorTests: XCTestCase {
         return ws
     }
 
+    // MARK: - run.json device-state
+    //
+    // The harness writes the simulator's run-start appearance facets into
+    // run.json. `sipi validate` runs after every create/run in the skill
+    // workflow, so a key the harness writes but the validator does not know
+    // would fail every workspace with a completed run in it.
+
+    private func workspaceWithRunDeviceState(_ deviceState: Any) throws -> URL {
+        let ws = tempDir.appendingPathComponent("ws-device-state", isDirectory: true)
+        try write(["app": "com.example.app"], to: ws.appendingPathComponent("config.json"))
+        try write([
+            "id": "smoke",
+            "title": "Smoke",
+            "steps": [["verify": ["contains": ["Home"]]]]
+        ], to: ws.appendingPathComponent("tests/smoke.json"))
+        let runDir = ws.appendingPathComponent("runs/2026-06-19_100000", isDirectory: true)
+        try write([
+            "started": "2026-06-19T10:00:00+09:00",
+            "device": "udid",
+            "device-state": deviceState,
+            "tests": [["id": "smoke", "passed": true, "duration": 0.1]],
+            "summary": ["total": 1, "passed": 1, "failed": 0]
+        ], to: runDir.appendingPathComponent("run.json"))
+        try write([
+            "id": "smoke", "passed": true, "duration": 0.1,
+            "steps": [["passed": true]]
+        ], to: runDir.appendingPathComponent("smoke/result.json"))
+        return ws
+    }
+
+    func testRunDeviceStateWithTheThreeSimctlFacetsValidates() throws {
+        let ws = try workspaceWithRunDeviceState([
+            "appearance": "dark",
+            "content-size": "accessibility-extra-large",
+            "increase-contrast": "disabled"
+        ])
+        let diag = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertTrue(diag.isValid, "unexpected errors: \(diag.errors)")
+    }
+
+    func testRunDeviceStateWithAPartialRecordValidates() throws {
+        // A facet whose read failed is omitted, not filled in.
+        let ws = try workspaceWithRunDeviceState(["appearance": "light"])
+        let diag = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertTrue(diag.isValid, "unexpected errors: \(diag.errors)")
+    }
+
+    func testRunDeviceStateRejectsUnknownFacetsAndNonStringValues() throws {
+        let ws = try workspaceWithRunDeviceState([
+            "appearance": true,
+            "reduce-motion": "on"
+        ])
+        let diag = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(diag.isValid)
+        XCTAssertTrue(diag.errors.contains { $0.contains("device-state") && $0.contains("reduce-motion") },
+                      "the unknown facet is named: \(diag.errors)")
+        XCTAssertTrue(diag.errors.contains { $0.contains("device-state.appearance") },
+                      "the non-string value is named: \(diag.errors)")
+    }
+
+    func testRunDeviceStateMustBeAnObject() throws {
+        let ws = try workspaceWithRunDeviceState("dark")
+        let diag = try ResultValidator.validate(workspace: ws.path)
+        XCTAssertFalse(diag.isValid)
+        XCTAssertTrue(diag.errors.contains { $0.contains("device-state must be an object") }, "\(diag.errors)")
+    }
+
     // MARK: - Timestamp (ISO 8601 with timezone offset) validation
     //
     // AGENTS.md: "Run/result timestamps must be ISO 8601 with timezone offset."

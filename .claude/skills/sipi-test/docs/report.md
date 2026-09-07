@@ -45,7 +45,7 @@ Screenshots are downscaled to 600px on the long side before embedding. That boun
 
 - `status`: `pass`, `fail`, `review`, or `empty`
 - `run-id`, `started`, `finished`
-- `device`: name, runtime, and UDID
+- `device`: name, runtime, and UDID — plus `state` (appearance, content-size, increase-contrast at run start) when the harness could read it; see `run.md`
 - `counts`: total, passed, failed, review, skipped
 - `top-failures`: first failed step per failed test, including missing verify text and screenshot path when available
 - `report`: `report.html` when that page exists, `null` when it does not

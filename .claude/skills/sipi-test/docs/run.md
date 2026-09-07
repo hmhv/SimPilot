@@ -77,7 +77,17 @@ stderr separate, collects exact-bundle-ID crash reports, writes final
 Evidence capture is best-effort and does not change a test verdict. Read
 `run.json` `evidence-warnings` and the report even when every step passed. An
 empty log capture, a partial container snapshot, or failed crash collection is
-reported there. Configure `log-predicate` when the app logs under a different
+reported there.
+
+`run.json` `device-state` (also `summary.json` `device.state`) is the
+simulator's `appearance`, `content-size`, and `increase-contrast` as read at run
+start, before any step. The harness restores those facets to the value it reads
+right before its first write, so a run that was killed before its cleanup leaves
+its dark mode or accessibility text size behind and every later run adopts it as
+the baseline without failing. When a screenshot looks dark or oversized and no
+step asked for it, this is where to look. The record is evidence only: the
+harness does not decide whether the state is a leftover or intended, and a facet
+it could not read is missing from the record and named in `evidence-warnings`. Configure `log-predicate` when the app logs under a different
 subsystem/process identity.
 
 The harness also cleans up simulator state it owns, at the end of the run and —

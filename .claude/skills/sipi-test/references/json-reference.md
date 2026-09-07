@@ -414,6 +414,7 @@ The harness may add these run-level fields:
 |---|---|---|
 | `artifacts` | object | Relative links such as `logs.ndjson`, `logs.stderr.txt`, or `crash-reports.json` |
 | `evidence-warnings` | string[] | Best-effort capture problems that do not alter the test verdict |
+| `device-state` | object | `appearance`, `content-size`, `increase-contrast` as read at run start, before any step; a facet that could not be read is omitted and named in `evidence-warnings`. Evidence of what the run inherited, not a verdict (see `../docs/run.md`) |
 
 `logs.ndjson` contains JSON-object records only; the `log` command's filter
 banner and completion footer are removed. Unless `log-predicate` replaces it,
@@ -436,7 +437,10 @@ The compact result for agents and CI:
   "run-id": "2026-06-26_104522_iphone16_abc1234",
   "started": "2026-06-26T10:45:22.123+09:00",
   "finished": "2026-06-26T10:46:12.456+09:00",
-  "device": { "name": "iPhone 16 Pro", "runtime": "iOS 26.0", "udid": "..." },
+  "device": {
+    "name": "iPhone 16 Pro", "runtime": "iOS 26.0", "udid": "...",
+    "state": { "appearance": "light", "content-size": "medium", "increase-contrast": "disabled" }
+  },
   "counts": { "total": 1, "passed": 0, "failed": 1, "review": 0, "skipped": 0 },
   "top-failures": [
     {
@@ -458,7 +462,8 @@ not asked for one. `junit` follows the same rule for `junit.xml` (`--junit`, or
 `sipi report <run-dir> --junit` afterwards).
 
 `status` is the gate field for **test outcomes**. `started`, `finished`,
-`device`, and `report` are always present. In each `top-failures` entry `action`
+`device`, and `report` are always present; `device.state` is `run.json`
+`device-state` and appears only when the harness could read at least one facet. In each `top-failures` entry `action`
 is always present (defaults to `(verify-only)` for a verify-only step);
 `missing`/`verify`, `matched`, and `screenshot` appear only when applicable.
 
