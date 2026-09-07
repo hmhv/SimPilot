@@ -170,7 +170,7 @@ SimPilot uses a standard directory layout under `.simpilot/`:
       report.html              # only with `finalize --html`, or `sipi verify-report`
 ```
 
-Recommend adding `.simpilot/` (or at least `runs/` and `verify/`) to the project's `.gitignore`.
+Recommend adding `.simpilot/runs/` and `.simpilot/verify/` to the project's `.gitignore` and keeping the rest tracked: `config.json`, `tests/`, `suites/`, and `notes.md` (app-specific interaction quirks the skills record) are what a teammate or another agent benefits from. Ignoring all of `.simpilot/` works for a solo scratch setup, but nothing in it is then shared.
 
 ## Reference
 

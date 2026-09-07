@@ -7,7 +7,10 @@ directory, `findings.json`, or the report.
 
 Read the request, diff, or latest commit and identify the screens to visit, the
 behaviors to trigger, the visual states to compare, and the edge cases worth
-checking.
+checking. Read `.simpilot/notes.md` if it exists: it holds this app's known
+quirks (§ Project notes in `../../sipi-common/docs/patterns.md`). Appending a
+quirk you discover there is allowed — it is a session artifact, not product
+source.
 
 ## 2. Initialize
 

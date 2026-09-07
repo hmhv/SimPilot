@@ -159,7 +159,7 @@ SimPilot は `.simpilot/` 配下に次の構成を使います。
       report.html              # `finalize --html` か `sipi verify-report` のときだけ
 ```
 
-`.simpilot/` 全体、または少なくとも `runs/` と `verify/` はプロジェクトの `.gitignore` に追加することを勧めます。
+`.simpilot/runs/` と `.simpilot/verify/` をプロジェクトの `.gitignore` に追加し、残り（`config.json`、`tests/`、`suites/`、そしてスキルがアプリ固有の操作上の癖を記録する `notes.md`）は追跡しておくことを勧めます。チームメイトや別のエージェントが恩恵を受けるのはその部分です。`.simpilot/` 全体を無視しても個人の作業用としては動きますが、その場合は何も共有されません。
 
 ## 参照
 

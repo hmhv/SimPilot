@@ -64,8 +64,10 @@ Read `ui-driver.md` before the first interaction.
 
 If it does not exist, bootstrap it: detect the Xcode project/workspace (or
 `Package.swift`) and scheme, write at minimum `{ "app": "<bundle-id>" }`, and add
-`.simpilot/` to `.gitignore`. `build.md` is the single authority for the
-detection algorithm — follow it there. Save what you detect so later runs skip
+`.simpilot/runs/` and `.simpilot/verify/` to `.gitignore`. Leave `config.json`,
+`tests/`, `suites/`, and `notes.md` tracked: they are the part of the workspace
+a teammate or another agent benefits from. `build.md` is the single authority for
+the detection algorithm — follow it there. Save what you detect so later runs skip
 detection.
 
 ## 4. Build & install (optional)

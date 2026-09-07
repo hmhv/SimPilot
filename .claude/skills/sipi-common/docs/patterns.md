@@ -364,6 +364,28 @@ empty and no selector can name it. They exist: SpringBoard's own application
 element is labelled `" "`, and the Japanese keyboard exposes `"　"`
 (full-width space) and `"\n"` (Return). Reach those with `--id` or a coordinate.
 
+### Project notes (`.simpilot/notes.md`)
+
+This file covers controls in general. What it cannot hold is what is true of
+*one* app — that its Settings tab is labelled `Settings, tab 2 of 3`, that the
+sign-out row and the sign-out button share a label, that the onboarding sheet
+must be dismissed before the tab bar is reachable. Keep those in
+`.simpilot/notes.md`, next to the tests, so the next session (yours, another
+agent's, or a teammate's) does not rediscover them:
+
+```markdown
+# SimPilot project notes
+
+- **Settings > Account, Sign out** — label matches a row and a button; `tap --label "Sign out" --element-type Button`.
+- **First launch** — an onboarding sheet covers the tab bar; tap `Skip` (id `onboarding-skip`) before any tab.
+```
+
+One bullet per fact: screen, control, what failed, what worked. Read it before
+the first interaction when it exists; append when this app needed something the
+tables above do not cover. Do not put generic control behaviour here (that
+belongs in this file), test data, or findings — a saved test already records
+its own selectors, and `findings.json` records what was wrong with the app.
+
 ### PhotosPicker multiple selection, by version
 
 | Environment | Enter (confirm) | Esc (cancel) |

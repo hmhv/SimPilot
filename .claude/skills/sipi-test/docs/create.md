@@ -5,7 +5,9 @@ interpretation.
 
 ## Workflow
 
-1. Understand the user goal and the affected screen.
+1. Understand the user goal and the affected screen. Read `.simpilot/notes.md`
+   if it exists: it holds this app's known quirks (§ Project notes in
+   `../../sipi-common/docs/patterns.md`).
 2. Observe the real UI with `sipi describe-ui "$UDID"` and screenshots
    (`--format compact` to scan a screen for selectors; the JSON form when a
    verify string has to be copied exactly).
@@ -14,6 +16,15 @@ interpretation.
 5. `sipi validate .simpilot` and fix schema issues before running.
 6. If asked to create *and* run:
    `sipi run-test .simpilot/tests/<id>.json --workspace .simpilot`.
+7. If a control needed something the patterns doc does not cover — a
+   disambiguating `element-type`, a sheet to dismiss first, a label that differs
+   from the visible text — append one line to `.simpilot/notes.md` so the next
+   session starts from it.
+
+`run-test` takes any path, not only `.simpilot/tests/`. A sequence of steps that
+is not worth saving — an exploration, a one-off reproduction — can be written to
+a scratch file and run the same way: one command executes every step with the
+same verify, retry, screenshot, and `result.json` handling as a saved test.
 
 ## Step shape
 

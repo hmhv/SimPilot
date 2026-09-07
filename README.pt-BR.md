@@ -159,7 +159,7 @@ O SimPilot usa a seguinte estrutura padrão dentro de `.simpilot/`:
       report.html              # apenas com `finalize --html` ou `sipi verify-report`
 ```
 
-É recomendável adicionar `.simpilot/` inteira, ou ao menos `runs/` e `verify/`, ao `.gitignore` do projeto.
+É recomendável adicionar `.simpilot/runs/` e `.simpilot/verify/` ao `.gitignore` do projeto e manter o restante versionado: `config.json`, `tests/`, `suites/` e `notes.md` (as particularidades de interação do app que as skills registram) são o que um colega de equipe ou outro agente aproveita. Ignorar toda a `.simpilot/` funciona para um uso individual, mas então nada dali é compartilhado.
 
 ## Referência
 

@@ -159,7 +159,7 @@ SimPilot 在 `.simpilot/` 下使用如下目录结构:
       report.html              # 仅在 `finalize --html` 或 `sipi verify-report` 时
 ```
 
-建议将 `.simpilot/` 整体，或至少将 `runs/` 和 `verify/` 加入项目的 `.gitignore`。
+建议将 `.simpilot/runs/` 和 `.simpilot/verify/` 加入项目的 `.gitignore`，其余部分保持跟踪：`config.json`、`tests/`、`suites/` 以及 `notes.md`（技能记录的应用特有交互问题）正是队友或其他智能体能受益的部分。忽略整个 `.simpilot/` 对个人临时使用也可行，但这样其中的内容就无法共享。
 
 ## 参考
 

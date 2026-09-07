@@ -35,8 +35,11 @@ Every session runs this sequence, ad-hoc or otherwise:
 2. Write `.simpilot/config.json` if it is missing or incomplete (detection lives
    in `docs/build.md`).
 3. If the config has a `build` section, build and install per `docs/build.md`.
-4. Drive with the commands in `docs/ui-driver.md`; `docs/patterns.md` has the
-   fallback chain and per-control quirks.
+4. Read `.simpilot/notes.md` if it exists — app-specific quirks earlier sessions
+   left (§ Project notes in `docs/patterns.md`). Drive with the commands in
+   `docs/ui-driver.md`; `docs/patterns.md` has the fallback chain and
+   per-control quirks. When this app needed a workaround the patterns do not
+   cover, append one line to `.simpilot/notes.md`.
 5. For one-off data or evidence work, inspect the installed CLI instead of
    memorizing syntax: start with `sipi --help`, then run
    `sipi help container`, `sipi help files-app`, `sipi help xcappdata`, or

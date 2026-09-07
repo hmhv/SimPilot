@@ -159,7 +159,7 @@ SimPilot 在 `.simpilot/` 下使用以下標準結構:
       report.html              # 僅在 `finalize --html` 或 `sipi verify-report` 時
 ```
 
-建議將整個 `.simpilot/`，或至少 `runs/` 與 `verify/`，加入專案的 `.gitignore`。
+建議將 `.simpilot/runs/` 與 `.simpilot/verify/` 加入專案的 `.gitignore`，其餘部分保持追蹤：`config.json`、`tests/`、`suites/` 以及 `notes.md`（技能記錄的應用程式特有互動問題）正是隊友或其他代理能受益的部分。忽略整個 `.simpilot/` 對個人暫時使用也可行，但這樣其中的內容就無法共享。
 
 ## 參考
 
