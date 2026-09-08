@@ -133,8 +133,9 @@ the harness cannot undo, so **write the recovery yourself**:
   app's own reset/clear path, delete the data the event created, navigate back to
   a known screen — and then **verify** the known state rather than assuming it.
   When the app exposes no such path, reinstalling it (`simctl uninstall` +
-  `install`) removes the **app container** — see the limits below before relying
-  on it.
+  `install`; *Clean Install* in `../../sipi-common/docs/build.md`, which also
+  covers a device with no build artifact at hand) removes the **app container**
+  — see the limits below before relying on it.
 - `launch` with `arguments` / `environment` — the flags persist for the process's
   lifetime. A later test that assumes a plain launch must `launch` again without
   them.

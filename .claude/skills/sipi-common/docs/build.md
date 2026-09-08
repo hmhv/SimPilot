@@ -160,6 +160,32 @@ xcrun simctl uninstall $UDID $BUNDLE_ID 2>/dev/null
 xcrun simctl install $UDID "$APP_PATH"
 ```
 
+The reinstall gives the app a brand-new data container: `Documents`, `Library`,
+and `tmp` start empty, and `get_app_container … data` resolves to a new path,
+so re-read it rather than reusing one captured earlier. `App Group` containers
+and the keychain are not part of that — see *What reinstalling does and does not
+clear* in `../../sipi-test/references/adverse-state-testing.md`.
+
+**Without a build artifact** — `config.json` has no `build` section and the app
+is only installed on the device — the installed bundle itself is the source.
+Copy it out first: `uninstall` deletes it along with the data, so a copy made
+afterwards has nothing to copy. Keep the steps chained with `&&` exactly as
+written — the uninstall must not run when `mktemp` or the copy failed, or the
+only copy of the app is gone.
+
+```bash
+INSTALLED="$(xcrun simctl get_app_container $UDID $BUNDLE_ID app)" &&
+KEEP="$(mktemp -d)" &&
+cp -R "$INSTALLED" "$KEEP/" &&
+[ -f "$KEEP/$(basename "$INSTALLED")/Info.plist" ] &&
+xcrun simctl uninstall $UDID $BUNDLE_ID &&
+xcrun simctl install $UDID "$KEEP/$(basename "$INSTALLED")"
+```
+
+Do not empty the container in place instead. Reinstalling is what `simctl`
+supports, it is what produces a container the OS itself considers new, and it
+costs one copy.
+
 ## Automatic Bundle ID Retrieval
 
 After a build, take `PRODUCT_BUNDLE_IDENTIFIER` from `-showBuildSettings -json` (see Build Flow). For a `.app` with no project at hand:
