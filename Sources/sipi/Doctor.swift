@@ -239,27 +239,41 @@ private struct DoctorReport {
         }
 
         switch XcodeMCP.readiness(developerDir: developerDir) {
+        case .approved:
+            notes.append(
+                "Xcode's MCP device-interaction service is enabled and this sipi binary is approved: "
+                + "`sipi type --xcode-mcp` is available. It is never used unasked — on iOS 27 one "
+                + "session leaves every app launched afterwards on that device unreadable until it "
+                + "restarts, so use it last or restart the device after it."
+            )
         case .likelyApproved:
             notes.append(
                 "Xcode's MCP device-interaction service is enabled and an agent at this sipi's path "
-                + "is approved: `sipi type --xcode-mcp` is available, and a `type` whose keystrokes "
-                + "do not reach the guest is retried through it automatically. Xcode keys the grant "
-                + "to the exact binary by a digest sipi cannot read back, so if a call is refused "
-                + "anyway the grant belongs to an earlier build — run `sipi xcode-mcp --approve "
-                + "<project>` again."
+                + "is approved: `sipi type --xcode-mcp` should work (never used unasked; on iOS 27 "
+                + "one session leaves every app launched afterwards unreadable until the device "
+                + "restarts). This Xcode's listing "
+                + "gives no digest to check the grant against this exact build, so if a call is "
+                + "refused anyway the grant belongs to an earlier build — run `sipi xcode-mcp "
+                + "--approve <project>` again."
+            )
+        case .staleGrant:
+            notes.append(
+                "Xcode's MCP device-interaction service is enabled, but the grant at this sipi's path "
+                + "belongs to an earlier build, so `sipi type --xcode-mcp` would be refused. "
+                + "Run `sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>` again — "
+                + "the grant is tied to the exact binary, so every update or rebuild needs it."
             )
         case .notApprovedYet:
             notes.append(
                 "Xcode's MCP device-interaction service is enabled but nothing at this sipi's path is "
-                + "approved, so "
-                + "the `type` keyboard fallback would be refused. Run `sipi xcode-mcp --approve "
+                + "approved, so `sipi type --xcode-mcp` would be refused. Run `sipi xcode-mcp --approve "
                 + "<path to an .xcodeproj or .xcworkspace>` once — the grant is tied to this exact "
                 + "binary, so an update or rebuild needs it again."
             )
         case .unavailable(let reason):
             notes.append(
-                "Xcode's MCP device-interaction service is not usable, so `sipi type` has only its "
-                + "own keyboard paths. \(reason.description) On a simulator that has stopped "
+                "Xcode's MCP device-interaction service is not usable, so `sipi type --xcode-mcp` is "
+                + "not available. \(reason.description) On a simulator that has stopped "
                 + "accepting keyboard HID, `sipi set-text` still writes the value without a keyboard."
             )
         }

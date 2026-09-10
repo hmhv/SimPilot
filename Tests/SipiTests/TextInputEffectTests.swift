@@ -337,6 +337,31 @@ final class TextInputEffectTests: XCTestCase {
 
     /// Keyboard mode rejects text it cannot type rather than sending the wrong
     /// characters — and does so before touching the device.
+    func testXcodeMCPWithClearIsRejectedBeforeAnyKeystroke() {
+        // The rejection used to come after the Cmd+A/delete had already been sent,
+        // so a refused command had still emptied the field.
+        let driver = ScriptedDriver(trees: [field("old")])
+        XCTAssertThrowsError(try TextInput.insert(
+            "hello", method: .xcodeMCP, clear: true, driver: driver, udid: "UDID", verifyEffect: true
+        )) { error in
+            let message = (error as? TextInputError)?.description ?? "\(error)"
+            XCTAssertTrue(message.contains("--clear cannot be combined with --xcode-mcp"), message)
+        }
+        XCTAssertEqual(driver.keystrokes, 0, "a refused combination must not touch the field")
+        XCTAssertEqual(driver.describeCount, 0, "and need not read the tree to refuse")
+
+        // The pure-clear form ("" with clear) takes its baseline first; the
+        // rejection has to come before that read as well.
+        let emptying = ScriptedDriver.failingFrom(0, trees: [field("old")])
+        XCTAssertThrowsError(try TextInput.insert(
+            "", method: .xcodeMCP, clear: true, driver: emptying, udid: "UDID", verifyEffect: true
+        )) { error in
+            let message = (error as? TextInputError)?.description ?? "\(error)"
+            XCTAssertTrue(message.contains("--clear cannot be combined with --xcode-mcp"), message)
+        }
+        XCTAssertEqual(emptying.describeCount, 0)
+    }
+
     func testNonUSTextIsRejectedInKeyboardMode() {
         XCTAssertThrowsError(try insert("こんにちは", trees: [field("")])) { error in
             let message = (error as? TextInputError)?.description ?? "\(error)"

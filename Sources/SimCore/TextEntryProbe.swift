@@ -79,7 +79,10 @@ public enum TextEntryProbe {
                     not the iOS version, and survives both `simctl erase` and a reboot: create a \
                     replacement device with `simctl create` to confirm. Meanwhile `sipi set-text` \
                     writes the value through the accessibility bridge and needs no keyboard at all. \
-                    A field can also be unfocused: tap it first. Pass --no-verify to skip this check.
+                    `--xcode-mcp` types through Xcode 27's service instead, but on iOS 27 one such \
+                    session leaves every app launched afterwards unreadable until the device \
+                    restarts, so use it last. A field can also be unfocused: tap it first. Pass \
+                    --no-verify to skip this check.
                     """
             }
         }

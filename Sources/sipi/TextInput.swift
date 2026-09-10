@@ -61,8 +61,7 @@ enum TextInput {
         driver: SimDriver,
         udid: String,
         verifyEffect: Bool = true,
-        developerDir: String? = nil,
-        allowXcodeMCPFallback: Bool = false
+        developerDir: String? = nil
     ) throws {
         // WHERE the baseline is read decides which question the check asks, and
         // the right question depends on what this call is for.
@@ -88,6 +87,22 @@ enum TextInput {
         // read, and it is always taken before any text is sent, so those two
         // conditions fail the call without touching the device. Reporting them
         // after the insertion would mean a retried step types the text twice.
+        // Rejected before anything reaches the device — before even the baseline
+        // read: the clear below is itself keystrokes, and a rejection that came
+        // after it would have already mutated the field, while one that came
+        // after a failed read would report the wrong error.
+        if method == .xcodeMCP && clear {
+            // Select-all and delete are keystrokes, and Xcode's service types but
+            // does not clear. Running the clear through HID and the insertion
+            // through the service would leave a dead-HID device holding the old
+            // value with the new text appended, while every check passed because
+            // the field did change.
+            throw TextInputError(description:
+                "--clear cannot be combined with --xcode-mcp: the service types text but cannot "
+                + "empty a field, and the select-all/delete keystrokes are exactly what a device "
+                + "in this state is dropping. Use `sipi set-text` to replace the value outright.")
+        }
+
         let clearIsTheEffect = clear && text.isEmpty
         var probe = verifyEffect && clearIsTheEffect ? try baseline(driver: driver, udid: udid) : nil
 
@@ -115,18 +130,6 @@ enum TextInput {
 
         if verifyEffect && !clearIsTheEffect {
             probe = try settledBaseline(driver: driver, udid: udid, changedFrom: preClear)
-        }
-
-        if method == .xcodeMCP && clear {
-            // Select-all and delete are keystrokes, and Xcode's service types but
-            // does not clear. Running the clear through HID and the insertion
-            // through the service would leave a dead-HID device holding the old
-            // value with the new text appended, while every check passed because
-            // the field did change.
-            throw TextInputError(description:
-                "--clear cannot be combined with --xcode-mcp: the service types text but cannot "
-                + "empty a field, and the select-all/delete keystrokes are exactly what a device "
-                + "in this state is dropping. Use `sipi set-text` to replace the value outright.")
         }
 
         switch method {
@@ -160,103 +163,20 @@ enum TextInput {
         }
 
         guard let probe else { return }
-        do {
-            try assertEffect(
-                probe: probe,
-                method: method,
-                clearIsTheEffect: clearIsTheEffect,
-                driver: driver,
-                udid: udid
-            )
-        } catch let failure as TextInputError {
-            // The keystrokes did not arrive. On a simulator whose Indigo HID
-            // keyboard has stopped accepting input, that is true of paste,
-            // per-key typing and clear alike, and no amount of retrying sipi's
-            // own path will change it — but Xcode's service types into the same
-            // field through a different route. Try it once rather than failing a
-            // test over a device-side condition sipi cannot fix.
-            // Opt-in, not automatic-everywhere: reaching for Xcode's service is a
-            // call out to whatever is installed on this machine, so it happens
-            // only where a caller asked for it. Without this a unit test driving
-            // a mock would take a different path depending on the developer's
-            // Xcode setup.
-            guard allowXcodeMCPFallback,
-                  method != .xcodeMCP,
-                  !clearIsTheEffect,
-                  !text.isEmpty,
-                  case .success = XcodeMCP.availability(developerDir: resolvedDeveloperDir(developerDir))
-            else { throw failure }
-
-            // A clear that never happened must not be papered over. The fallback
-            // can only insert text; it has no way to empty a field, and the
-            // keystrokes that would have done it are exactly the ones this device
-            // is dropping. Typing over the old value would leave the field
-            // holding both strings while every check passed.
-            if clear {
-                throw TextInputError(
-                    description: failure.description
-                        + " Xcode's service could type the text, but it cannot perform the --clear "
-                        + "(select-all and delete are keystrokes too), so the field would end up holding "
-                        + "the old value and the new one. Use `sipi set-text` to replace the value outright.",
-                    retrySafe: failure.retrySafe
-                )
-            }
-
-            // The original keystrokes may simply have been slow. Typing again
-            // now would leave the text in twice, so re-check before doing it.
-            if (try? assertEffect(
-                probe: probe,
-                method: method,
-                clearIsTheEffect: clearIsTheEffect,
-                driver: driver,
-                udid: udid
-            )) != nil {
-                return
-            }
-
-            try typeViaXcode(text, udid: udid, developerDir: developerDir)
-            do {
-                try assertEffect(
-                    probe: probe,
-                    method: .xcodeMCP,
-                    clearIsTheEffect: clearIsTheEffect,
-                    driver: driver,
-                    udid: udid
-                )
-            } catch let unverified as TextInputError {
-                // The service accepted the text, so it may land after this check
-                // gives up. Re-running the step would enter it a second time.
-                throw TextInputError(description: unverified.description, retrySafe: false)
-            }
-            try assertNotDuplicated(text, probe: probe, driver: driver, udid: udid)
-        }
-    }
-
-    /// Fail when the field ended up holding `text` more than once.
-    ///
-    /// Switching paths mid-action cannot be made atomic: the original keystrokes
-    /// are in flight somewhere in the guest, and there is no point at which sipi
-    /// can know they will never arrive. So the residual risk is that a slow — as
-    /// opposed to dead — device applies both. That is rare, but a test that
-    /// silently records the wrong value is worse than one that stops, so the
-    /// duplicate is looked for and reported instead of passed over.
-    private static func assertNotDuplicated(
-        _ text: String,
-        probe: Probe,
-        driver: SimDriver,
-        udid: String
-    ) throws {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2 else { return }
-        guard case .fields(let after) = read(driver: driver, udid: udid, deep: probe.deep) else { return }
-        guard after.components(separatedBy: trimmed).count - 1 >= 2 else { return }
-        throw TextInputError(
-            description:
-                "The text was entered twice. The original keystrokes were reported as not having "
-                + "arrived, so it was re-sent through Xcode's service, and then both landed — the "
-                + "device is slow rather than unable to accept keyboard input. Clear the field and "
-                + "retry, or use `sipi set-text`, which replaces the value in one write.",
-            retrySafe: false
+        // No automatic retry through Xcode's service when the keystrokes did not
+        // land. It was tried: measured on Xcode 27.0 RC / iOS 27.0 24A434, one
+        // device-interaction session leaves every app launched afterwards on that
+        // device with an empty accessibility tree until the device restarts — the
+        // same breakage as turning VoiceOver off after on. A fallback that fired
+        // mid-run would wreck the rest of the run for a reason nothing reports.
+        // `--xcode-mcp` remains available where a caller asks for it and can plan
+        // the restart.
+        try assertEffect(
+            probe: probe,
+            method: method,
+            clearIsTheEffect: clearIsTheEffect,
+            driver: driver,
+            udid: udid
         )
     }
 

@@ -1164,7 +1164,7 @@ private final class HarnessRunner {
             // answering with a degenerate tree well past it), so wait for the app
             // to actually be reachable before the first step runs.
             let launchWaitStarted = Date()
-            let roots = waitForUsableTree()
+            let roots = waitForSettledTree()
             if ChildTree.isDegenerate(roots) {
                 testTrace.event("launch-tree-unavailable", fields: [
                     "waited": Date().timeIntervalSince(launchWaitStarted)
@@ -1599,8 +1599,7 @@ private final class HarnessRunner {
                 clear: clear,
                 driver: driver,
                 udid: udid,
-                verifyEffect: action.verifyEffect ?? true,
-                allowXcodeMCPFallback: true
+                verifyEffect: action.verifyEffect ?? true
             )
             return ["method": "input", "value": clear ? "\(method.rawValue)+clear" : method.rawValue]
 
@@ -1896,7 +1895,7 @@ private final class HarnessRunner {
             )
             // Same reason as the pre-test launch: don't hand the next step a tree
             // the app has not populated yet.
-            waitForUsableTree()
+            _ = waitForSettledTree()
             return ["method": "simctl", "value": "launch:\(targetBundleID)"]
 
         case "terminate":
@@ -2424,6 +2423,37 @@ private final class HarnessRunner {
     /// a false failure. Returning the last tree (even if still degenerate) keeps
     /// the caller's own error path in charge of reporting.
     @discardableResult
+    /// A usable tree that has also stopped changing: two reads in a row agree.
+    ///
+    /// Right after a launch the tree fills in over time, and a read that is no
+    /// longer degenerate can still be partial. Measured on iOS 27.0 24A434 with
+    /// a freshly created device: the first launch answered a tree that held
+    /// "Result, Not run" but not yet the "Network Probe" heading above it, and a
+    /// verify polling for the default 3s gave up before the heading arrived.
+    /// Waiting for the tree to settle costs one extra read on a screen that is
+    /// already complete, and is bounded so a screen that legitimately keeps
+    /// changing (a ticking clock, an animation) cannot hold a step.
+    private func waitForSettledTree(settleTimeout: TimeInterval = 3.0) -> [AXNode] {
+        var roots = waitForUsableTree()
+        // Equality is judged against the immediately preceding read, degenerate
+        // or not, so an A / empty / A flicker does not pass as "settled"; what is
+        // returned is the last usable tree.
+        var previous = roots
+        let deadline = Date().addingTimeInterval(settleTimeout)
+        while Date() < deadline {
+            usleep(300 * 1000)
+            // Compared as nodes, not as JSON text: the serializer does not order
+            // keys, so two identical trees rarely print identically.
+            guard let next = try? driver.describe(udid, deep: false) else { break }
+            // Two equal degenerate reads are not a settled screen; only a usable
+            // tree that repeats is.
+            if next == previous && !ChildTree.isDegenerate(next) { break }
+            previous = next
+            if !ChildTree.isDegenerate(next) { roots = next }
+        }
+        return roots
+    }
+
     private func waitForUsableTree(timeout: TimeInterval = 5.0) -> [AXNode] {
         let deadline = Date().addingTimeInterval(timeout)
         var roots = (try? driver.describe(udid, deep: false)) ?? []

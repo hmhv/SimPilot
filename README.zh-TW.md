@@ -168,7 +168,7 @@ SimPilot 在 `.simpilot/` 下使用以下標準結構:
 ## 已知限制
 
 - 文字輸入預設寫入欄位的無障礙值（`set-text`），不需要鍵盤，任何文字系統都適用。按鍵層級的輸入（`type`）預設透過剪貼簿貼上；逐鍵直接 HID 輸入僅支援美式鍵盤配置，若客體端啟用的是其他配置則會輸入錯誤的字元
-- **長期使用的 simulator 可能不再接受鍵盤 HID**（在 Xcode 27.0 beta 6 上實測）：貼上、逐鍵輸入與全選+刪除都會被忽略，而觸控輸入正常。這取決於裝置的使用時間而非 iOS 版本，`simctl erase` 與重新啟動都無法恢復。`type` 會偵測到這一點並直接失敗，而不是回報成功；`set-text` 不受影響。若已啟用 Xcode 27 的服務，`type` 會改由它重試並成功（見下文）
+- **長期使用的 simulator 可能不再接受鍵盤 HID**（在 Xcode 27.0 beta 6 上實測）：貼上、逐鍵輸入與全選+刪除都會被忽略，而觸控輸入正常。這取決於裝置的使用時間而非 iOS 版本，`simctl erase` 與重新啟動都無法恢復。`type` 會偵測到這一點並直接失敗，而不是回報成功；`set-text` 不受影響。`type --xcode-mcp` 會改由 Xcode 27 內建的服務輸入，在實測的裝置上由此成功，但有代價（見下文）
 - 無障礙樹宣稱存在、但實際無法觸控的元素，點擊後仍會回報成功。`describe-point` 也會回傳該元素，因此任何一層都無法分辨；Xcode 自身的工具也是相同行為
 - Face ID / Touch ID，以及 light/dark 之外的無障礙外觀項目需要 Xcode 27——它們透過 `xcrun devicectl` 實作，而 devicectl 只能作用於該版本以後的 simulator
 - 對比度與文字裁切不在 `sipi a11y-audit` 的範圍內；兩者都需要對算繪後的影格做像素分析
@@ -178,7 +178,7 @@ SimPilot 在 `.simpilot/` 下使用以下標準結構:
 
 simulator 可能進入忽略 SimPilot 注入之鍵盤事件的狀態：觸控仍可運作，而貼上、逐鍵輸入與全選+刪除都失效。SimPilot 在正常裝置與該狀態的裝置上送出的是完全相同的事件，因此 SimPilot 這一側沒有可修正之處。而 Xcode 27 內建的裝置互動服務走的是另一條路徑，該狀態的裝置仍會接受，且這條路徑也不依賴客體端的鍵盤配置。
 
-`sipi type` 會將其作為後備：偵測到自身的按鍵未送達時，不讓步驟失敗，而是改由 Xcode 的服務重試。加上 `--xcode-mcp` 則一開始就使用該路徑。SimPilot 的其他功能都不需要這項設定，`set-text` 本來就不需要鍵盤。
+`sipi type --xcode-mcp`（測試中為 `"input-method": "xcode-mcp"`）選擇該路徑。SimPilot 絕不會自行使用它：在 iOS 27 上，一次這樣的工作階段會讓該裝置之後啟動的所有 App 的無障礙樹為空，直到裝置重新啟動（`simctl shutdown` + `boot`）。請把它放在最後使用，或在下一次啟動前重新啟動裝置。SimPilot 的其他功能都不需要這項設定，`set-text` 本來就不需要鍵盤。
 
 需要滿足三個條件：
 
@@ -188,7 +188,7 @@ sudo xcrun mcp-server enable       # 開啟 headless 模式
 sipi xcode-mcp --approve <.xcodeproj 或 .xcworkspace 的路徑>
 ```
 
-開啟該專案只是為了叫出 Xcode 的授權對話框，之後會立即關閉。設定完成後，若後備被觸發而服務尚未執行，sipi 會將其啟動。Xcode 將授權綁定到特定的二進位檔，因此每次 `sipi update` 或重新建置後都需要再次執行授權步驟。目前狀態可用 `sipi xcode-mcp` 查看，後備是否可用可用 `sipi doctor` 確認。
+開啟該專案只是為了叫出 Xcode 的授權對話框，之後會立即關閉。設定完成後，若服務尚未執行，sipi 會將其啟動。Xcode 將授權綁定到特定的二進位檔，因此每次 `sipi update` 或重新建置後都需要再次執行授權步驟。目前狀態可用 `sipi xcode-mcp` 查看，該路徑是否可用可用 `sipi doctor` 確認。
 
 `--clear` 無法使用該路徑：全選與刪除同樣是按鍵輸入，而該服務只能輸入文字、無法清空欄位。需要整體取代值時請使用 `sipi set-text`。
 

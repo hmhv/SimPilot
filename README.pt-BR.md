@@ -168,7 +168,7 @@ O SimPilot usa a seguinte estrutura padrão dentro de `.simpilot/`:
 ## Limitações conhecidas
 
 - A entrada de texto grava por padrão o valor de acessibilidade do campo (`set-text`), que dispensa teclado e aceita qualquer sistema de escrita. A entrada tecla a tecla (`type`) cola pela área de transferência por padrão; a digitação HID direta tecla por tecla cobre apenas o layout de teclado dos EUA e digita caracteres errados se o convidado estiver com outro layout ativo
-- **Um simulador muito usado pode parar de aceitar HID de teclado** (medido no Xcode 27.0 beta 6): colar, digitar tecla por tecla e selecionar tudo + apagar são ignorados, enquanto a entrada por toque continua funcionando. Isso acompanha a idade do dispositivo, não a versão do iOS, e nem `simctl erase` nem uma reinicialização o recuperam. `type` detecta a condição e falha em vez de relatar sucesso; `set-text` não é afetado. Com o serviço do próprio Xcode 27 habilitado, `type` tenta novamente por ele e consegue (veja abaixo)
+- **Um simulador muito usado pode parar de aceitar HID de teclado** (medido no Xcode 27.0 beta 6): colar, digitar tecla por tecla e selecionar tudo + apagar são ignorados, enquanto a entrada por toque continua funcionando. Isso acompanha a idade do dispositivo, não a versão do iOS, e nem `simctl erase` nem uma reinicialização o recuperam. `type` detecta a condição e falha em vez de relatar sucesso; `set-text` não é afetado. `type --xcode-mcp` digita em vez disso pelo serviço do próprio Xcode 27, o que recuperou o dispositivo medido, com um custo (veja abaixo)
 - Um toque em um elemento que a árvore de acessibilidade declara presente, mas cuja área visível não é de fato tocável, ainda relata sucesso. `describe-point` também devolve esse elemento, então nenhuma camada consegue distinguir; as ferramentas do próprio Xcode se comportam da mesma forma
 - Face ID / Touch ID e as facetas de aparência de acessibilidade além de light/dark exigem o Xcode 27 — elas passam pelo `xcrun devicectl`, que só alcança simuladores dessa versão em diante
 - Taxas de contraste e texto cortado estão fora do escopo do `sipi a11y-audit`; ambos exigem análise de pixels do frame renderizado
@@ -178,7 +178,7 @@ O SimPilot usa a seguinte estrutura padrão dentro de `.simpilot/`:
 
 Um simulador pode chegar a um estado em que ignora os eventos de teclado que o SimPilot injeta. O toque continua funcionando; colar, digitar tecla por tecla e selecionar tudo + apagar, não. O SimPilot envia exatamente os mesmos eventos em um dispositivo saudável e em um afetado, então não há o que corrigir do lado dele. Já o serviço de interação com dispositivos do próprio Xcode 27 digita por outro caminho que o dispositivo afetado ainda aceita, e esse caminho também ignora o layout de teclado do convidado.
 
-`sipi type` o usa como alternativa: quando detecta que as próprias teclas não chegaram, tenta novamente pelo serviço do Xcode em vez de falhar o passo. `--xcode-mcp` seleciona esse caminho desde o início. Todo o resto do SimPilot funciona sem nada disso, e `set-text` nunca precisa de teclado.
+`sipi type --xcode-mcp` (ou `"input-method": "xcode-mcp"` em um teste) seleciona esse caminho. O SimPilot nunca o toma por conta própria: no iOS 27, uma única sessão deixa todo app iniciado depois nesse dispositivo com a árvore de acessibilidade vazia até o dispositivo reiniciar (`simctl shutdown` + `boot`); use-o por último, ou reinicie antes do próximo lançamento. Todo o resto do SimPilot funciona sem nada disso, e `set-text` nunca precisa de teclado.
 
 Três condições precisam estar satisfeitas:
 
@@ -188,7 +188,7 @@ sudo xcrun mcp-server enable       # ligar o modo headless
 sipi xcode-mcp --approve <caminho de um .xcodeproj ou .xcworkspace>
 ```
 
-O projeto é aberto apenas para levantar o diálogo de aprovação do Xcode e é fechado logo em seguida. Depois de configurado, se a alternativa disparar e o serviço não estiver rodando, o sipi o inicia. O Xcode vincula a concessão ao binário exato, então `sipi update` ou uma recompilação exigem repetir a aprovação. `sipi xcode-mcp` informa o estado atual e `sipi doctor` diz se a alternativa está disponível.
+O projeto é aberto apenas para levantar o diálogo de aprovação do Xcode e é fechado logo em seguida. Depois de configurado, o sipi inicia o serviço se ele não estiver rodando. O Xcode vincula a concessão ao binário exato, então `sipi update` ou uma recompilação exigem repetir a aprovação. `sipi xcode-mcp` informa o estado atual e `sipi doctor` diz se esse caminho está disponível.
 
 `--clear` não pode usar esse caminho: selecionar tudo e apagar também são teclas, e o serviço digita mas não consegue esvaziar um campo. Use `sipi set-text` para substituir um valor por completo.
 

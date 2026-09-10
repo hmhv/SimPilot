@@ -1,8 +1,8 @@
 // XcodeMCP.swift
 //
-// A narrow client for Xcode's own MCP device-interaction service, used as a
-// fallback for the one thing sipi's driver cannot always do: deliver real
-// keystrokes.
+// A narrow client for Xcode's own MCP device-interaction service, used only
+// where a caller asks for it (`sipi type --xcode-mcp`), for the one thing
+// sipi's driver cannot always do: deliver real keystrokes.
 //
 // A simulator can stop accepting the Indigo HID keyboard messages sipi injects.
 // Measured on Xcode 27.0 beta 6: on such a device sipi builds and sends exactly
@@ -10,20 +10,26 @@
 // the HID client resolves, every message is non-NULL — and the guest simply
 // ignores them, while Xcode's `sender keyboard kbd` types into the same focused
 // field. So the keystrokes are reaching a dead path rather than a dead device,
-// and nothing on sipi's side of that path can fix it.
+// and nothing on sipi's side of that path can fix it. Not every worn device is
+// rescued, though: on Xcode 27.0 RC one ignored Xcode's route as well while a
+// fresh device took it fine — `set-text` is what remains there.
 //
 // Xcode's route also does not care about the guest's keyboard layout. sipi's
 // per-key HID does: with a Japanese keyboard active, typing "hello" produces
 // "へっぉ" and reports success.
 //
 // This is deliberately not a general wrapper. sipi keeps its own implementation
-// of everything it already does; this covers only text entry, only when it is
-// available, and its absence is never an error — the driver's own paths remain
-// the default and `set-text` still needs no keyboard at all.
+// of everything it already does; this covers only text entry, only when asked
+// for, and its absence is never an error — the driver's own paths remain the
+// default and `set-text` still needs no keyboard at all. It is not used as an
+// automatic fallback either: measured on Xcode 27.0 RC / iOS 27.0 24A434, one
+// device-interaction session leaves every app launched afterwards on that
+// device with an empty accessibility tree until the device restarts.
 //
 // Requires Xcode 27 or later with headless mode enabled
 // (`sudo xcrun mcp-server enable`), and a one-time approval of this agent.
 
+import CryptoKit
 import Foundation
 
 enum XcodeMCP {
@@ -77,15 +83,21 @@ enum XcodeMCP {
 
     /// How much of the service is usable right now.
     enum Readiness {
-        /// Enabled, and an agent at this executable's path is permitted.
-        ///
-        /// NOT a guarantee. Xcode identifies an agent by a digest sipi cannot
-        /// reproduce — the listing prints a truncated one that matches neither
-        /// the file's SHA-256 nor its CDHash (measured on Xcode 27.0 beta 6) —
-        /// so a grant left over from a previous build at the same path looks
-        /// exactly like a grant for this one. Callers must say "looks approved",
-        /// and point at re-approving if a call is refused anyway.
+        /// Enabled, and the listing carries this file's digest: the grant is
+        /// certainly for this very binary.
+        case approved
+        /// Enabled, and an agent at this executable's path is permitted, but
+        /// there was no digest to check — the record carries none, or this file
+        /// could not be hashed. A grant left over from a previous build at the
+        /// same path then looks exactly like a grant for this one, so callers
+        /// must say "looks approved", and point at re-approving if a call is
+        /// refused anyway.
         case likelyApproved
+        /// Enabled, and the grant at this path carries a different digest: it
+        /// belongs to an earlier build, and Xcode refuses this one (measured on
+        /// 27A266a: a rebuilt binary at the approved path got "This agent isn't
+        /// approved to use Xcode's tools yet").
+        case staleGrant
         /// Enabled, and nothing at this path is permitted. This one IS certain:
         /// no entry means no grant.
         case notApprovedYet
@@ -95,11 +107,11 @@ enum XcodeMCP {
     /// Whether the service is present and switched on. Cheap: reads the
     /// service's own status, and does not start it.
     ///
-    /// Deliberately does NOT consider approval. This gates the fallback, and
-    /// approval is read by parsing human-readable output — a parsing miss would
-    /// silently switch the feature off, whereas actually attempting the call
-    /// gets an authoritative answer from Xcode itself. Reporting uses
-    /// `readiness` instead, where being wrong only costs a misleading line.
+    /// Deliberately does NOT consider approval. This gates `--xcode-mcp`, and
+    /// approval is read by parsing the listing — a parsing miss would silently
+    /// switch the feature off, whereas actually attempting the call gets an
+    /// authoritative answer from Xcode itself. Reporting uses `readiness`
+    /// instead, where being wrong only costs a misleading line.
     static func availability(developerDir: String) -> Result<Void, Unavailable> {
         switch enabledStatus(developerDir: developerDir) {
         case .success: return .success(())
@@ -108,31 +120,50 @@ enum XcodeMCP {
     }
 
     /// Availability plus whether THIS binary is approved — what `doctor` and
-    /// `sipi xcode-mcp` report, so neither claims the fallback is available
+    /// `sipi xcode-mcp` report, so neither claims the path is available
     /// when the next call would be refused.
     static func readiness(developerDir: String) -> Readiness {
         switch enabledStatus(developerDir: developerDir) {
         case .failure(let reason):
             return .unavailable(reason)
-        case .success(let status):
-            return hasGrant(in: status) ? .likelyApproved : .notApprovedYet
+        case .success(let grants):
+            switch grants.match(executable: Bundle.main.executablePath, sha256: executableSHA256) {
+            case .digest: return .approved
+            case .path: return .likelyApproved
+            case .stale: return .staleGrant
+            case .none: return .notApprovedYet
+            }
         }
     }
 
-    /// The service's status output, once, or why it could not be read.
-    private static func enabledStatus(developerDir: String) -> Result<String, Unavailable> {
+    /// The service's grant listing, once, or why it could not be read.
+    ///
+    /// The JSON listing is asked for first because it carries the file digest
+    /// that makes approval certain. An Xcode whose `status` has no JSON form
+    /// exits non-zero at once, and the text listing is read instead. A timeout
+    /// is the wedged-behind-a-prompt case and is final: the text form would only
+    /// wait through it again.
+    private static func enabledStatus(developerDir: String) -> Result<Grants, Unavailable> {
         guard let path = toolPath(developerDir: developerDir),
               FileManager.default.isExecutableFile(atPath: path) else {
             return .failure(.toolMissing)
         }
-        // `status` prints "Permission: enabled" only once headless mode is on.
-        // It also prints a warning line and still exits 0 when the service is
-        // wedged behind an approval prompt, so a nil here is a timeout.
-        guard let status = capture(path, ["status"], timeout: 3) else {
+        switch capture(path, ["status", "--format", "json"], timeout: 3) {
+        case .timedOut:
+            return .failure(.notAnswering)
+        case .output(let json):
+            if let parsed = grants(fromJSON: json) {
+                return parsed.enabled ? .success(parsed.grants) : .failure(.notEnabled)
+            }
+        case .failed:
+            break
+        }
+        guard let status = capture(path, ["status"], timeout: 3).output else {
             return .failure(.notAnswering)
         }
+        // The text form prints "Permission: enabled" only once headless mode is on.
         guard status.contains("Permission: enabled") else { return .failure(.notEnabled) }
-        return .success(status)
+        return .success(grants(fromText: status))
     }
 
     /// Ask Xcode's service to approve this copy of `sipi`.
@@ -147,11 +178,13 @@ enum XcodeMCP {
     /// Approval is granted to this exact binary. Replacing `sipi` (an update, a
     /// rebuild) invalidates it and this has to be run once more.
     static func requestApproval(projectPath: String, developerDir: String) throws -> String {
-        if case .failure(let reason) = availability(developerDir: developerDir) { throw reason }
-        guard let bridge = bridgePath(developerDir: developerDir) else { throw Unavailable.toolMissing }
-        if let server = toolPath(developerDir: developerDir) {
-            _ = capture(server, ["start"])
+        let before: Grants
+        switch enabledStatus(developerDir: developerDir) {
+        case .failure(let reason): throw reason
+        case .success(let grants): before = grants
         }
+        guard let bridge = bridgePath(developerDir: developerDir) else { throw Unavailable.toolMissing }
+        // The bridge starts the service itself; see `typeText`.
 
         let client = try Client(bridgePath: bridge, developerDir: developerDir)
         defer { client.close() }
@@ -179,7 +212,7 @@ enum XcodeMCP {
         // because the service records the grant a moment after it answers the
         // call, so a single immediate check reports a failure that is about to
         // become a success.
-        guard awaitApproval(developerDir: developerDir, timeout: 10) else {
+        guard awaitApproval(developerDir: developerDir, since: before, timeout: 10) else {
             throw Unavailable.approvalPending
         }
         return identifier ?? opened
@@ -212,54 +245,187 @@ enum XcodeMCP {
         return nil
     }
 
-    /// Whether the live listing carries a grant for this executable.
-    private static func hasGrant(developerDir: String) -> Bool {
-        guard let path = toolPath(developerDir: developerDir),
-              let status = capture(path, ["status"], timeout: 5) else { return false }
-        return hasGrant(in: status)
+    /// The live listing, or nil when it cannot be read.
+    private static func currentGrants(developerDir: String) -> Grants? {
+        guard case .success(let grants) = enabledStatus(developerDir: developerDir) else { return nil }
+        return grants
     }
 
-    /// Poll until the service lists a grant for this executable, or give up.
-    private static func awaitApproval(developerDir: String, timeout: TimeInterval) -> Bool {
+    /// Whether `grants` holds a grant for this executable that the request just
+    /// made can be credited with: one whose digest is this file's, or — when
+    /// the listing carries no usable digest — one at this path that was not in
+    /// `before`. A path match alone would be satisfied by a grant left over
+    /// from an earlier build, and "Approved" would be printed for a binary
+    /// Xcode goes on to refuse.
+    static func isNewlyApproved(_ grants: Grants, since before: Grants,
+                                executable: String?, sha256: String?) -> Bool {
+        switch grants.match(executable: executable, sha256: sha256) {
+        case .digest: return true
+        case .stale, .none: return false
+        case .path:
+            guard let executable else { return false }
+            let wanted = canonicalPath(executable)
+            let known = Set(before.agents.compactMap(\.id))
+            // A record without an id cannot be told from one that was already
+            // there, so it is never credited.
+            return grants.agents.contains {
+                canonicalPath($0.path) == wanted && ($0.id.map { !known.contains($0) } ?? false)
+            }
+        }
+    }
+
+    /// Poll until the service lists a grant this request can be credited with,
+    /// or give up. One poll always runs after the deadline: a poll is itself
+    /// bounded by the status helper's timeout, and a prompt accepted while the
+    /// last in-time poll was blocked on it would otherwise be missed.
+    private static func awaitApproval(developerDir: String, since before: Grants, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if hasGrant(developerDir: developerDir) { return true }
+        while true {
+            if let grants = currentGrants(developerDir: developerDir),
+               isNewlyApproved(grants, since: before, executable: Bundle.main.executablePath, sha256: executableSHA256) {
+                return true
+            }
+            if Date() >= deadline { return false }
             usleep(500 * 1000)
-        } while Date() < deadline
-        return false
+        }
     }
 
-    /// Whether a `mcp-server status` listing carries a grant that could be this
-    /// executable's.
-    ///
-    /// A negative answer is reliable and a positive one is not. Xcode keys a
-    /// grant to a per-binary digest it prints truncated and which sipi cannot
-    /// reproduce (it is neither the file's SHA-256 nor its CDHash — measured),
-    /// so all this can check is the path, and a stale grant for a previous build
-    /// sits at the same path. Reporting is written around that: absent means
-    /// certainly not approved, present means probably.
-    static func hasGrant(in status: String, executable: String? = Bundle.main.executablePath) -> Bool {
-        guard let executable else { return false }
-        if isUnsafeAllowAll(in: status) { return true }
+    /// Who may use the service, as read from `mcp-server status`.
+    struct Grants: Equatable {
+        /// Headless mode was enabled with --unsafe-always-allow-all-agents, which
+        /// permits every agent with no per-agent record.
+        var unsafeAllowAll = false
+        var agents: [Agent] = []
 
+        struct Agent: Equatable {
+            /// The grant's own id, as `mcp-server approve`/`deny` take it.
+            var id: String?
+            var path: String
+            /// The file digest Xcode keyed the grant to. The JSON listing carries
+            /// the full SHA-256 of the file (Xcode 27 RC); the text listing prints
+            /// its first characters, and a prefix is kept here as one — enough to
+            /// tell two builds apart, which is all it is used for.
+            var sha256: String?
+
+            /// Whether `digest` is this record's file. A text listing gives only a
+            /// prefix; anything shorter than eight hex digits is not trusted to
+            /// identify a build.
+            func matches(digest: String) -> Bool {
+                guard let sha256, sha256.count >= 8 else { return false }
+                return digest.lowercased().hasPrefix(sha256.lowercased())
+            }
+        }
+
+        /// How certain a grant for this executable is.
+        enum Match: Equatable {
+            case none
+            /// A listed path resolves to this executable. NOT a guarantee: a
+            /// grant left over from a previous build at the same path looks
+            /// exactly like a grant for this one.
+            case path
+            /// A listed digest is this file's SHA-256, so the grant is for this
+            /// very binary.
+            case digest
+            /// A listed path resolves to this executable but its digest is
+            /// another file's: a previous build was approved here, this one was
+            /// not.
+            case stale
+        }
+
+        /// A negative answer is always reliable: no entry means no grant. A
+        /// positive one is certain only when the listing carries digests.
+        func match(executable: String?, sha256: String?) -> Match {
+            if unsafeAllowAll { return .digest }
+            guard let executable else { return .none }
+            if let sha256, agents.contains(where: { $0.matches(digest: sha256) }) {
+                return .digest
+            }
+            // Compared after resolving symlinks on both sides: Xcode records the
+            // resolved path, and SwiftPM's `.build/release` is a symlink.
+            let wanted = XcodeMCP.canonicalPath(executable)
+            let atPath = agents.filter { XcodeMCP.canonicalPath($0.path) == wanted }
+            if atPath.isEmpty { return .none }
+            // A digest on the record that did not match above is a different
+            // file's; without digests on either side nothing more can be said.
+            let checkable = sha256 != nil && atPath.allSatisfy { ($0.sha256?.count ?? 0) >= 8 }
+            return checkable ? .stale : .path
+        }
+    }
+
+    /// Grants from `mcp-server status --format json`, or nil when the text is
+    /// not that listing (an older Xcode that has no JSON form).
+    ///
+    /// The shape, measured on Xcode 27.0 RC (27A266a):
+    ///
+    ///     {"permission": {"enabled": true, "unsafeAlwaysAllowAllAgents": false,
+    ///                     "permittedAgents": [{"id": "...", "trust": {"unsigned": {
+    ///                         "path": "/Users/u/.local/bin/sipi", "sha256": "1f09…", "expiration": 810774804.0}}}],
+    ///                     "permittedFolders": [...]},
+    ///      "running": true, "openWorkspaces": []}
+    ///
+    /// Only `unsigned` has been observed under `trust`; any other key is read the
+    /// same way so a signed agent's record is not silently skipped.
+    /// `capture` merges the helper's stderr into the text, and `status` is known
+    /// to put a warning line there, so the object is taken from the first `{` to
+    /// the last `}` rather than the text being parsed whole.
+    static func grants(fromJSON text: String) -> (enabled: Bool, grants: Grants)? {
+        guard let open = text.firstIndex(of: "{"), let close = text.lastIndex(of: "}"), open < close,
+              let root = try? JSONSerialization.jsonObject(with: Data(text[open...close].utf8)) as? [String: Any],
+              let permission = root["permission"] as? [String: Any] else { return nil }
+        var grants = Grants()
+        grants.unsafeAllowAll = permission["unsafeAlwaysAllowAllAgents"] as? Bool ?? false
+        for entry in permission["permittedAgents"] as? [[String: Any]] ?? [] {
+            guard let trust = entry["trust"] as? [String: Any] else { continue }
+            for case let record as [String: Any] in trust.values {
+                guard let path = record["path"] as? String else { continue }
+                grants.agents.append(Grants.Agent(
+                    id: entry["id"] as? String, path: path, sha256: record["sha256"] as? String))
+            }
+        }
+        return (permission["enabled"] as? Bool ?? false, grants)
+    }
+
+    /// Grants from the human-readable `mcp-server status` listing — the only form
+    /// the Xcode 27 betas have. Sections start at column zero; entries are
+    /// indented. Only the permitted-agents section counts: the listing also names
+    /// PENDING requests with the same path, and taking one of those for a grant
+    /// would report a request still waiting as one already given.
+    static func grants(fromText status: String) -> Grants {
+        var grants = Grants()
+        grants.unsafeAllowAll = isUnsafeAllowAll(in: status)
         var inPermittedAgents = false
         for line in status.split(separator: "\n", omittingEmptySubsequences: false) {
             let text = String(line)
-            // Section headers start at column zero; entries are indented. The
-            // listing also names PENDING requests with the same path, and taking
-            // one of those for a grant would report a request still waiting as
-            // one already given.
             if !text.hasPrefix(" ") && text.contains(":") {
                 inPermittedAgents = text.hasPrefix("Permitted agents")
                 continue
             }
-            guard inPermittedAgents else { continue }
-            if grantedPath(in: text) == executable { return true }
+            guard inPermittedAgents, let agent = textAgent(in: text) else { continue }
+            grants.agents.append(agent)
         }
-        return false
+        return grants
     }
 
-    /// The executable path named by one permitted-agent line, or nil.
+    /// Whether a text `mcp-server status` listing carries a grant that could be
+    /// this executable's. See `Grants.match`.
+    static func hasGrant(in status: String, executable: String? = Bundle.main.executablePath) -> Bool {
+        grants(fromText: status).match(executable: executable, sha256: nil) != .none
+    }
+
+    /// `path` with symlinks resolved, for comparing two spellings of one file.
+    static func canonicalPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// The SHA-256 of this executable, as Xcode's JSON listing prints it, or nil
+    /// when the file cannot be read.
+    private static var executableSHA256: String? {
+        guard let path = Bundle.main.executablePath,
+              let data = FileManager.default.contents(atPath: path) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The agent named by one permitted-agent line, or nil.
     ///
     /// A line reads:
     ///
@@ -268,8 +434,9 @@ enum XcodeMCP {
     /// The path is compared whole rather than by substring, so a different
     /// binary whose path merely contains this one — `/usr/local/bin/sipi` beside
     /// `/usr/local/bin/sipi-debug` — is not mistaken for it.
-    private static func grantedPath(in line: String) -> String? {
+    private static func textAgent(in line: String) -> Grants.Agent? {
         guard let afterID = line.range(of: ": ") else { return nil }
+        let id = line[..<afterID.lowerBound].trimmingCharacters(in: .whitespaces)
         var rest = line[afterID.upperBound...].trimmingCharacters(in: .whitespaces)
         for prefix in ["unsigned ", "signed "] where rest.hasPrefix(prefix) {
             rest = String(rest.dropFirst(prefix.count))
@@ -283,15 +450,16 @@ enum XcodeMCP {
         // only the digest is dropped.
         guard let lastSpace = rest.lastIndex(of: " ") else { return nil }
         let path = String(rest[..<lastSpace])
-        return path.hasPrefix("/") ? path : nil
+        guard path.hasPrefix("/") else { return nil }
+        // The digest is printed truncated with a trailing ellipsis; keep the hex.
+        let digest = rest[rest.index(after: lastSpace)...].prefix { $0.isHexDigit }
+        return Grants.Agent(id: id.isEmpty ? nil : id, path: path, sha256: digest.isEmpty ? nil : String(digest))
     }
 
     /// Whether headless mode was enabled with --unsafe-always-allow-all-agents,
-    /// which permits every agent with no per-agent record.
-    ///
-    /// Read from the `Permission:` line alone. Searching the whole listing for
-    /// the words would let a permitted FOLDER whose path happens to contain
-    /// them turn every unapproved binary into an approved one.
+    /// read from the text listing's `Permission:` line alone. Searching the whole
+    /// listing for the words would let a permitted FOLDER whose path happens to
+    /// contain them turn every unapproved binary into an approved one.
     private static func isUnsafeAllowAll(in status: String) -> Bool {
         for line in status.split(separator: "\n") where line.hasPrefix("Permission:") {
             let text = line.lowercased()
@@ -310,11 +478,11 @@ enum XcodeMCP {
         if case .failure(let reason) = availability(developerDir: developerDir) { throw reason }
         guard let bridge = bridgePath(developerDir: developerDir) else { throw Unavailable.toolMissing }
 
-        // The service must be running for the bridge to reach it; starting an
-        // already-running service is a no-op.
-        if let server = toolPath(developerDir: developerDir) {
-            _ = capture(server, ["start"])
-        }
+        // Nothing starts the service here on purpose: since Xcode 27 RC the bridge
+        // brings it up itself (`mcp-server start` no longer exists; measured on
+        // 27A266a: initialize answered in 0.3s and tools/list in 1.5s with the
+        // service stopped), and on the betas `mcpbridge` did the same once
+        // headless mode was on.
 
         // Session identifiers are rejected while a previous one with the same
         // name is still settling, so make each call's name unique.
@@ -361,19 +529,33 @@ enum XcodeMCP {
         return out
     }
 
-    /// Run a helper and return its standard output, or nil when it cannot be
-    /// launched, exits non-zero, or takes longer than `timeout`.
+    /// What running a helper came to.
+    private enum Captured {
+        case output(String)
+        /// Could not be launched, or exited non-zero — an answer, given at once.
+        case failed
+        /// Neither answered nor exited within the timeout.
+        case timedOut
+
+        var output: String? {
+            if case .output(let text) = self { return text }
+            return nil
+        }
+    }
+
+    /// Run a helper and return its standard output.
     ///
     /// The timeout is not optional. `mcp-server status` talks to the running
     /// service, and that service stops answering while an approval prompt is on
     /// screen waiting for a human — so an unbounded read here would hang
-    /// `sipi doctor` and every text-entry fallback check behind a dialog nobody
-    /// may be looking at.
+    /// `sipi doctor` and every `--xcode-mcp` readiness check behind a dialog nobody
+    /// may be looking at. A timeout is reported apart from a plain failure so a
+    /// caller with a second form to try does not wait through it twice.
     private static func capture(
         _ path: String,
         _ arguments: [String],
         timeout: TimeInterval = 5
-    ) -> String? {
+    ) -> Captured {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
@@ -384,7 +566,7 @@ enum XcodeMCP {
         // means a relocated line is still seen rather than silently read as
         // "disabled".
         process.standardError = pipe
-        guard (try? process.run()) != nil else { return nil }
+        guard (try? process.run()) != nil else { return .failed }
 
         // Read on a background thread so a child that neither answers nor exits
         // cannot hold the caller past the timeout, and so the pipe keeps draining
@@ -408,11 +590,11 @@ enum XcodeMCP {
             // Reap it. Without this the killed helper lingers as a zombie and
             // the next status call runs against a duplicate.
             process.waitUntilExit()
-            return nil
+            return .timedOut
         }
         process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return String(decoding: box.get(), as: UTF8.self)
+        guard process.terminationStatus == 0 else { return .failed }
+        return .output(String(decoding: box.get(), as: UTF8.self))
     }
 
     /// A value handed between the reading thread and the caller.

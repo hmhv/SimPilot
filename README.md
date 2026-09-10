@@ -179,7 +179,7 @@ Recommend adding `.simpilot/runs/` and `.simpilot/verify/` to the project's `.gi
 ## Known limitations
 
 - Text entry defaults to writing the field's accessibility value (`set-text`), which needs no keyboard and takes any script. Keystroke-level entry (`type`) pastes through the clipboard by default; direct per-key HID typing covers the US keyboard layout only, and types the wrong characters if the guest's active keyboard is a different layout
-- **A long-lived simulator can stop accepting keyboard HID** (measured on Xcode 27.0 beta 6): paste, per-key typing, and select-all+delete are all ignored while touch still works. This follows device age rather than the iOS version, and neither `simctl erase` nor a reboot revives it. `type` detects the condition and fails rather than reporting success; `set-text` is unaffected. With Xcode 27's own service enabled, `type` retries through it and succeeds — see below
+- **A long-lived simulator can stop accepting keyboard HID** (measured on Xcode 27.0 beta 6): paste, per-key typing, and select-all+delete are all ignored while touch still works. This follows device age rather than the iOS version, and neither `simctl erase` nor a reboot revives it. `type` detects the condition and fails rather than reporting success; `set-text` is unaffected. `type --xcode-mcp` types through Xcode 27's own service instead, which rescued the device measured — with a cost, see below
 - A tap that resolves to an element the accessibility tree claims is present, but whose visible area is not actually touchable, still reports success. `describe-point` returns the element, so nothing in the stack can tell the difference; Xcode's own tooling behaves the same way
 - Face ID / Touch ID and the accessibility appearance facets beyond light/dark need Xcode 27 — they go through `xcrun devicectl`, which only targets simulators from that release on
 - Contrast ratios and clipped text are out of scope for `sipi a11y-audit`; both need pixel analysis of the rendered frame
@@ -191,13 +191,16 @@ A simulator can reach a state where it ignores the keyboard events SimPilot
 injects. Touch keeps working; paste, per-key typing and select-all+delete do
 not. SimPilot sends exactly the same events on a healthy and an affected
 device, so there is nothing on its side to fix — but Xcode 27's own
-device-interaction service types through a different path that the affected
-device still accepts, and that path also ignores the guest's keyboard layout.
+device-interaction service types through a different path, which the affected
+device measured still accepted (a device worn further ignored that one too), and
+that path also ignores the guest's keyboard layout.
 
-`sipi type` uses it as a fallback: when its own keystrokes are detected not to
-have arrived, it retries through Xcode's service instead of failing the step.
-`--xcode-mcp` selects that path from the start. Everything else in SimPilot
-works without any of this, and `set-text` never needs a keyboard at all.
+`sipi type --xcode-mcp` (or `"input-method": "xcode-mcp"` in a test) selects
+that path. SimPilot never takes it on its own: on iOS 27 one such session leaves
+every app launched afterwards on that device with an empty accessibility tree
+until the device restarts (`simctl shutdown` + `boot`), so use it last, or
+restart before the next launch. Everything else in SimPilot works without any of
+this, and `set-text` never needs a keyboard at all.
 
 Three things must be true before it can be used:
 
@@ -208,10 +211,11 @@ sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>
 ```
 
 The project is opened only to raise Xcode's approval prompt and is closed again
-immediately. Once set up, a fallback that fires will start the service if it is
-not already running. Xcode ties the grant to the exact binary, so `sipi update` or a
-rebuild means running the approve step once more. `sipi xcode-mcp` reports the
-current state, and `sipi doctor` says whether the fallback is available.
+immediately. Once set up, sipi starts the service if it is not already running.
+Xcode ties the grant to the exact binary, so `sipi update` or a rebuild means
+running the approve step once more. `sipi xcode-mcp` reports the current state —
+including a grant that belongs to an earlier build at the same path — and
+`sipi doctor` says whether the path is available.
 
 `--clear` cannot use this path: select-all and delete are keystrokes too, and
 the service types but cannot empty a field. Use `sipi set-text` to replace a

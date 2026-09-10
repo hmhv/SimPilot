@@ -35,10 +35,12 @@ link here rather than restating them.
 Two different causes. Tell them apart by waiting.
 
 **1. Right after an app launch** — the app has not published its tree yet. Wait and
-re-read; measured on iOS 27.0 (24A5423a), three launches in a row read a partial
-tree at 1s (5 of 11 nodes) and the full tree from 3s on. The earlier 24A5408d
-runtime read a single empty root at 1s instead, so how the early read looks
-varies by runtime build; the wait is the fix either way. Before any app is
+re-read (the harness `launch` step and the pre-test launch already wait for the tree
+to be non-degenerate and then to stop changing between two reads, bounded at 3s); measured on iOS 27.0 (24A5423a), three launches in a row read a partial
+tree at 1s (5 of 11 nodes) and the full tree from 3s on. The 24A5408d and the
+release 24A434 runtimes read a single empty root at 1s instead (24A434: n=3, full
+15-node tree at 3s), so how the early read looks varies by runtime build; the wait
+is the fix either way. Before any app is
 frontmost at all — right after a boot — `describe-ui` fails with
 `frontmostApplicationWithDisplayId returned nil` instead of returning a root.
 
@@ -78,7 +80,15 @@ on iOS 27.0 24A5423a — the key-sorted JSON matches exactly with VoiceOver on a
 off).
 
 So case 2 now only happens when VoiceOver was switched by hand, in Settings or on
-another tool's behalf. `sipi voiceover "$UDID"` reads the state, which is how you
+another tool's behalf — **or after a `type --xcode-mcp`** (Xcode's
+device-interaction service; sipi never takes that path unasked). Measured on
+Xcode 27.0 RC / iOS 27.0 24A434 with a
+control: one such session typed fine and left the running app readable (16 nodes),
+and every app launched afterwards read a single empty root (5s and 10s) while
+SpringBoard stayed at 12 — the same signature as OFF-after-ON, and the same
+recovery: `simctl shutdown` + `boot`. `sipi voiceover` still reads `disabled`
+throughout, so that check does not identify this cause. Treat `--xcode-mcp` like
+a VoiceOver toggle: run it last, or restart the device before the next launch. `sipi voiceover "$UDID"` reads the state, which is how you
 confirm that is what you are looking at:
 
 - reads `enabled: true` — leave it on and read the tree; it works while enabled
@@ -93,9 +103,10 @@ Note the setting itself survives shutdown/boot (measured: enable, shutdown, boot
 and the state still reads `enabled: true`), so a restart recovers the tree without
 changing whether VoiceOver is on.
 
-Still present in Xcode 27 beta 6 (27A5252f / iOS 27.0 24A5423a). Revisit at GM:
-if OFF-after-ON no longer empties the tree, the setter and the test action can
-come back.
+Still present in Xcode 27.0 RC (27A266a / iOS 27.0 24A434, re-measured
+2026-09-10: same table, 15 / 15 / 15 / **1** / 16 / 15). Revisit at the next iOS
+release: if OFF-after-ON no longer empties the tree, the setter and the test
+action can come back.
 
 ### Taps return `ok` but nothing happens, on EVERY device
 
@@ -151,10 +162,15 @@ For *had no effect* — three measured causes:
    - `sipi set-text` writes the accessibility value directly and needs no
      keyboard at all. Use this whenever the field just has to end up holding a
      value.
-   - Xcode 27's device-interaction service types through a different path the
-     affected device still accepts. `sipi type` retries through it
-     automatically when available, and `--xcode-mcp` / `"input-method":
-     "xcode-mcp"` selects it up front. Enable it once with:
+   - Xcode 27's device-interaction service types through a different path,
+     which the affected device measured on beta 6 still accepted. It is not a
+     guaranteed rescue: on Xcode 27.0 RC a device worn further ignored that path
+     too (`text entry had no effect (xcode-mcp)`), while the same path typed
+     fine into a fresh device — at that point only `set-text` or a replacement
+     device is left. sipi never takes this path on its own: `--xcode-mcp` /
+     `"input-method": "xcode-mcp"` selects it, and one session leaves every app
+     launched afterwards on that device unreadable until it restarts (see the
+     empty-root section above), so use it last. Enable it once with:
 
      ```sh
      sudo xcrun mcp-server enable
@@ -162,11 +178,13 @@ For *had no effect* — three measured causes:
      ```
 
      The grant is tied to the exact binary, so `sipi update` or a rebuild needs
-     the approve step again; `sipi xcode-mcp` reports the current state. A
-     fallback that fires starts the service if it is not already running. While
-     Xcode's approval prompt is on screen the service answers nothing, so the
-     fallback is unavailable until it is accepted or dismissed. `--clear`
-     cannot use this path — select-all and delete are keystrokes too.
+     the approve step again — `sipi xcode-mcp` reports the current state, and
+     on Xcode 27.0 RC it can tell a grant for an earlier build at the same path
+     from one for this binary. sipi starts the service if it is not already
+     running (the bridge does that itself; `mcp-server start` is gone from the
+     RC). While Xcode's approval prompt is on screen the service answers
+     nothing, so the path is unavailable until it is accepted or dismissed.
+     `--clear` cannot use this path — select-all and delete are keystrokes too.
 2. **Non-Latin IME, or simply a different keyboard layout.** `--keyboard` maps
    characters to US-keyboard scancodes, so the guest's active keyboard decides
    what actually appears: under a Japanese keyboard, "hello" arrives as "へっぉ"

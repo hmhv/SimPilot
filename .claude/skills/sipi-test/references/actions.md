@@ -165,9 +165,11 @@ clipboard is transiently replaced too.
 
 `"input-method": "xcode-mcp"` hands the text to Xcode 27's own device-interaction
 service, which types through a path that is neither HID nor layout-dependent. It
-is also what `type` falls back to on its own: when the default keystrokes are
-detected not to have arrived and that service is available, the step retries
-through it instead of failing. Setup is one-time and per-binary — see
+is used only when asked for — never as an automatic fallback — because on iOS 27
+one such session leaves every app launched afterwards on that device with an
+empty accessibility tree until the device restarts (measured on Xcode 27.0 RC /
+iOS 27.0 24A434). Put such a step last in the run, or restart the device before
+the next `launch`. Setup is one-time and per-binary — see
 `../../sipi-common/docs/troubleshooting.md` § `type` failures. It cannot perform
 `"clear": true` (select-all and delete are keystrokes too), so that combination is
 rejected; use `set-text` to replace a value outright.

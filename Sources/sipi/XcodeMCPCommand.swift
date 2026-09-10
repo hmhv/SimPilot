@@ -13,13 +13,20 @@ extension Sipi {
     struct XcodeMCPCommand: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "xcode-mcp",
-            abstract: "Check or obtain access to Xcode's device-interaction service (used as a keyboard fallback).",
+            abstract: "Check or obtain access to Xcode's device-interaction service (behind `sipi type --xcode-mcp`).",
             discussion: """
             sipi drives simulators on its own. This service covers the one case it
             cannot: a simulator that has stopped accepting keyboard HID, where
             paste, per-key typing and select-all all leave the field untouched
-            while this service still types into it. It also ignores the guest
+            while this service may still type into it. It also ignores the guest
             keyboard layout, which per-key HID does not.
+
+            It is only ever used when asked for (`sipi type --xcode-mcp`, or
+            `"input-method": "xcode-mcp"` in a test). On iOS 27 one session
+            leaves every app launched afterwards on that device with an empty
+            accessibility tree until the device restarts, so it is not a
+            fallback sipi reaches for on its own: use it last, or restart the
+            device (`simctl shutdown` + `boot`) before the next launch.
 
             Three things must be true before sipi can use it:
 
@@ -32,7 +39,7 @@ extension Sipi {
 
             Approval is tied to the exact binary, so `sipi update` or a rebuild
             means approving once more. Everything sipi does apart from this
-            keyboard fallback works without any of it.
+            typing path works without any of it.
             """
         )
 
@@ -47,11 +54,19 @@ extension Sipi {
 
             guard let approveWith else {
                 switch XcodeMCP.readiness(developerDir: developerDir) {
+                case .approved:
+                    print("Xcode MCP service: enabled, this binary is approved.")
+                    print("  `sipi type --xcode-mcp` is available. Use it last: on iOS 27 one session leaves")
+                    print("  every app launched afterwards unreadable until the device restarts.")
                 case .likelyApproved:
                     print("Xcode MCP service: enabled, an agent at this path is approved.")
-                    print("  `sipi type --xcode-mcp` and the automatic fallback should work.")
-                    print("  Xcode keys the grant to the exact binary by a digest sipi cannot read back,")
+                    print("  `sipi type --xcode-mcp` should work (use it last; see --help).")
+                    print("  This Xcode's listing gives no digest to check the grant against this exact build,")
                     print("  so if a call is refused the grant belongs to an earlier build — approve again.")
+                case .staleGrant:
+                    print("Xcode MCP service: enabled, but the grant at this path is for an earlier build.")
+                    print("  Run `sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>` again.")
+                    print("  The grant is tied to the exact binary, so every update or rebuild needs it.")
                 case .notApprovedYet:
                     print("Xcode MCP service: enabled, nothing at this path is approved.")
                     print("  Run `sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>` once.")

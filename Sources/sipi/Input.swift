@@ -100,10 +100,12 @@ extension Sipi {
             which replaces the whole value without touching the keyboard.
 
             A simulator can stop delivering keyboard HID entirely — paste, --keyboard
-            and --clear then all leave the field untouched. When Xcode 27's MCP
-            service is enabled, sipi retries such a failure through it
-            automatically (it types through a different, non-HID path); pass
-            --xcode-mcp to use that route from the start. This command DETECTS that:
+            and --clear then all leave the field untouched. --xcode-mcp types through
+            Xcode 27's device-interaction service instead (a different, non-HID
+            path). It is never used unasked: on iOS 27 one such session leaves every
+            app launched afterwards on that device with an empty accessibility tree
+            until the device restarts, so use it last, or restart before the next
+            launch. This command DETECTS the dead-HID state:
             it compares the text fields' contents before and after and fails when
             nothing changed, instead of printing ok over a no-op. Measured: this
             follows DEVICE age, not the iOS version, and neither `simctl erase` nor a
@@ -195,8 +197,7 @@ extension Sipi {
                     clear: clearField,
                     driver: driver,
                     udid: udid,
-                    verifyEffect: !noVerify,
-                    allowXcodeMCPFallback: true
+                    verifyEffect: !noVerify
                 )
             } catch let error as TextInputError {
                 throw ValidationError(error.description)
