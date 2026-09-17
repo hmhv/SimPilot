@@ -88,7 +88,12 @@ substring anywhere in the tree), and `--absent` inverts it. The
 semantics are the verify semantics: absence is judged against the deep tree,
 presence escalates to it on a miss. Reach for it after any action whose result
 lands asynchronously — a navigation, a network round trip, an alert appearing or
-dismissing — instead of a guessed `sleep`.
+dismissing — instead of a guessed `sleep`. **This holds for an ad-hoc Bash session
+as much as for a saved test** — a hand-driven probe built from 5–10s sleeps is
+where the wall clock actually goes, not in sipi. `describe-ui` costs 0.22s, an app
+settles 3.1–3.6s after `simctl launch`, and a warm `shutdown` + `boot` +
+`bootstatus -b` costs 6.8s; `sipi-verify/docs/verify-workflow.md` has the full
+table and the pattern for waiting on a state that must *stay* absent.
 
 `screenshot --max-pixel N` downscales the PNG so its longest side is at most N
 pixels. A device-native capture is 3x and costs a reader far more than the

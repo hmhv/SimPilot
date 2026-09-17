@@ -35,8 +35,9 @@ link here rather than restating them.
 Two different causes. Tell them apart by waiting.
 
 **1. Right after an app launch** — the app has not published its tree yet. Wait and
-re-read (the harness `launch` step and the pre-test launch already wait for the tree
-to be non-degenerate and then to stop changing between two reads, bounded at 3s); measured on iOS 27.0 (24A5423a), three launches in a row read a partial
+re-read (the harness `launch` step and the pre-test launch already wait for the
+foreground to reach an app that is neither the one it replaced nor the home screen,
+and then for that tree to be non-degenerate and to stop changing between two reads); measured on iOS 27.0 (24A5423a), three launches in a row read a partial
 tree at 1s (5 of 11 nodes) and the full tree from 3s on. The 24A5408d and the
 release 24A434 runtimes read a single empty root at 1s instead (24A434: n=3, full
 15-node tree at 3s), so how the early read looks varies by runtime build; the wait
@@ -104,9 +105,24 @@ and the state still reads `enabled: true`), so a restart recovers the tree witho
 changing whether VoiceOver is on.
 
 Still present in Xcode 27.0 RC (27A266a / iOS 27.0 24A434, re-measured
-2026-09-10: same table, 15 / 15 / 15 / **1** / 16 / 15). Revisit at the next iOS
-release: if OFF-after-ON no longer empties the tree, the setter and the test
-action can come back.
+2026-09-10: same table, 15 / 15 / 15 / **1** / 16 / 15) and in Xcode 27.2 beta
+(27B5019j / iOS 27.2 24B5084k, re-measured 2026-09-17 on a fresh iPhone 17:
+control 16, VoiceOver ON 23, ON→OFF then relaunch **1**, a second app **1**,
+SpringBoard 14, restart 16 — the same signature on a new runtime). Revisit at the
+next iOS release: if OFF-after-ON no longer empties the tree, the setter and the
+test action can come back.
+
+**Do not try to recover this with anything short of a device restart.** All three
+lighter resets were measured on iOS 27.2 and none of them works:
+
+| Attempt | Result |
+|---|---|
+| `launchctl kickstart -k system/com.apple.AccessibilityUIServer` | `102: Operation not supported on socket` (`kickstart` is unsupported on the simulator; it also warns about rdar://78126471). `user/foreground/...` fails the same way |
+| `kill -9` the `AccessibilityUIServer` pid | It does not respawn, and the tree stays empty |
+| `launchctl kickstart -k system/com.apple.SpringBoard` | **Bricks the device.** SpringBoard is killed and never comes back, so every `describe-ui` fails with `frontmostApplicationWithDisplayId returned nil` until you restart the device anyway |
+
+A warm `shutdown` + `boot` + `bootstatus -b` costs about 6.8s, which is cheaper
+than any of these is worth. Restart and move on.
 
 ### Taps return `ok` but nothing happens, on EVERY device
 

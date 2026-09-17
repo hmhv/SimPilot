@@ -1155,15 +1155,29 @@ private final class HarnessRunner {
         }
 
         if !failed && options.launch {
+            let targetBundleID = test.app ?? bundleID
+            // The foreground is only guaranteed to move when this launch actually
+            // brings up a new process: after a reset, or when the app was not
+            // running at all. When it is already running it is usually already
+            // frontmost too, and waiting for a change it will never make would
+            // cost the full timeout before every test in the suite.
             if options.resetBetweenTests {
-                try? SimShell.terminate(udid: udid, bundleID: test.app ?? bundleID)
+                try? SimShell.terminate(udid: udid, bundleID: targetBundleID)
             }
-            _ = try SimShell.launch(udid: udid, bundleID: test.app ?? bundleID)
-            usleep(700 * 1000)
-            // The fixed sleep alone is not enough on every runtime (iOS 27.0 keeps
-            // answering with a degenerate tree well past it), so wait for the app
-            // to actually be reachable before the first step runs.
+            let appWasRunning = (try? SimShell.processIdentifier(
+                udid: udid, bundleID: targetBundleID
+            )) ?? nil
+            let foregroundMustMove = appWasRunning == nil
+            let foregroundBeforeLaunch = foregroundMustMove ? currentRootLabelSignature() : []
+            _ = try SimShell.launch(udid: udid, bundleID: targetBundleID)
+            // No fixed sleep: every runtime settles at its own pace (iOS 27.0 keeps
+            // answering with a degenerate tree well past 700ms, iOS 27.2 answers
+            // with the home screen instead), and both are covered by waiting for
+            // the foreground to move and then for the tree to stop changing.
             let launchWaitStarted = Date()
+            if foregroundMustMove {
+                waitForForegroundChange(from: foregroundBeforeLaunch)
+            }
             let roots = waitForSettledTree()
             if ChildTree.isDegenerate(roots) {
                 testTrace.event("launch-tree-unavailable", fields: [
@@ -1886,6 +1900,9 @@ private final class HarnessRunner {
 
         case "launch":
             let targetBundleID = action.bundleID ?? bundleID
+            // Read the foreground before launching, so the wait below can tell the
+            // launched app apart from whatever is on screen now.
+            let foregroundBeforeLaunch = currentRootLabelSignature()
             _ = try SimShell.launch(
                 udid: udid,
                 bundleID: targetBundleID,
@@ -1895,6 +1912,7 @@ private final class HarnessRunner {
             )
             // Same reason as the pre-test launch: don't hand the next step a tree
             // the app has not populated yet.
+            waitForForegroundChange(from: foregroundBeforeLaunch)
             _ = waitForSettledTree()
             return ["method": "simctl", "value": "launch:\(targetBundleID)"]
 
@@ -2462,6 +2480,68 @@ private final class HarnessRunner {
             roots = (try? driver.describe(udid, deep: false)) ?? []
         }
         return roots
+    }
+
+    /// The frontmost app's identity, as far as the tree exposes it: the root
+    /// nodes' labels. `describe-ui` reports whichever app is frontmost and never
+    /// says which one, but the root of an `AXApplication` tree carries that app's
+    /// display name — `" "` for the home screen — so a change here is the signal
+    /// that the foreground actually moved.
+    private func rootLabelSignature(_ roots: [AXNode]) -> [String] {
+        roots.map { $0.AXLabel ?? "" }
+    }
+
+    private func currentRootLabelSignature() -> [String] {
+        rootLabelSignature((try? driver.describe(udid, deep: false)) ?? [])
+    }
+
+    /// Wait until an app other than the one that was frontmost at `baseline` owns
+    /// the screen, before settling on its tree.
+    ///
+    /// Without this, a launch settles on the tree that is already frontmost.
+    /// Measured on iOS 27.2: `simctl launch` returns in 0.19s and the app's
+    /// process is listed immediately, but SpringBoard stays frontmost for about
+    /// 2.3s and answers with a tree that is neither degenerate nor changing — so
+    /// the usable-then-stable test below passes at ~0.9s, on the home screen,
+    /// about 2.6s before the launched app is readable.
+    ///
+    /// Two conditions, and both are needed:
+    ///
+    /// - the foreground has been seen to leave `baseline` at least once, which is
+    ///   what rules out settling on the outgoing app's still-live tree; and
+    /// - no root label is blank, which is what rules out settling on the home
+    ///   screen. SpringBoard's root label is `" "`, and a real app's is its
+    ///   display name.
+    ///
+    /// The second is what makes a relaunch of the already-frontmost app work: it
+    /// goes A -> `" "` -> A, so "changed once" alone would stop on the home
+    /// screen. Measured across both shapes, this settles on the app at ~4.9s.
+    ///
+    /// **Only call this for a launch that is known to replace the foreground.**
+    /// The tree never says which app it belongs to, so "the foreground left the
+    /// baseline" is the only handle on "the launched app is up" — and a launch
+    /// that does not restart an app which is already frontmost produces no change
+    /// at all (measured: the signature was still the baseline after 9s), which
+    /// would burn this whole timeout before every test in a suite. The callers
+    /// pass the cases where the restart is theirs to guarantee.
+    ///
+    /// A launch that still never moves the foreground falls through to the
+    /// timeout rather than failing: this narrows what counts as settled, it does
+    /// not add a new way to give up.
+    private func waitForForegroundChange(from baseline: [String], timeout: TimeInterval = 8.0) {
+        var leftBaseline = baseline.isEmpty
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let signature = currentRootLabelSignature()
+            if !signature.isEmpty {
+                if signature != baseline { leftBaseline = true }
+                if leftBaseline,
+                   signature.allSatisfy({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+                    return
+                }
+            }
+            usleep(150 * 1000)
+        }
     }
 
     private func resolvingRoots(query: AccessibilityQuery, elementType: String?) throws -> [AXNode] {
