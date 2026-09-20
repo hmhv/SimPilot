@@ -247,6 +247,30 @@ real bug in the app, not a screen mix-up.
 To capture the other screen on purpose: `--display inner` / `--display cover`.
 To CHANGE the pose: `sipi fold "$UDID" --open` / `--closed`.
 
+### Every tap on an iPhone Duo is refused, or returns ok and does nothing
+
+Two different things, and `sipi fold-state` tells them apart.
+
+**Open (inner screen lit).** Expected: the inner screen takes no input in Xcode
+27.1 — the hit-test answers nothing anywhere on it and touches are discarded,
+measured on a freshly created device. Reading and capture still work.
+`sipi fold "$UDID" --closed` and drive the app on the cover.
+
+**Shut (cover lit) and taps still do nothing.** Not expected — a healthy Duo taps
+normally on its cover. That device's HID session is wedged: touches never reach
+the guest at all, and a reboot does not clear it. Confirm by comparing with a
+device made from scratch:
+
+```bash
+NEW=$(xcrun simctl create duo-check com.apple.CoreSimulator.SimDeviceType.iPhone-Duo \
+        com.apple.CoreSimulator.SimRuntime.iOS-27-1)
+xcrun simctl boot "$NEW" && xcrun simctl bootstatus "$NEW" -b
+sipi fold "$NEW" --closed && sipi tap "$NEW" --label Safari   # should launch Safari
+```
+
+If the fresh one taps and yours does not, recreate yours — `simctl erase` or a
+new device. Nothing short of that has been found to clear it.
+
 ## Build
 
 | Problem | Solution |

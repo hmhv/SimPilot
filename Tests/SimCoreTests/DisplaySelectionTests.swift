@@ -239,3 +239,64 @@ final class LogicalExtentTests: XCTestCase {
         XCTAssertTrue(UIOrientation.landscapeRight.isLandscape)
     }
 }
+
+/// An open iPhone Duo looks perfectly healthy and refuses every tap. Saying why
+/// is the difference between "this control is clipped" — which sends a reader
+/// hunting a layout bug that is not there — and "this screen takes no input".
+final class UndrivableScreenTests: XCTestCase {
+
+    private func duo(folded: Bool) -> [DeviceDisplay] {
+        [
+            DeviceDisplay(screenID: 1, name: "LCD", pixelWidth: 1398, pixelHeight: 2034,
+                          pointScale: 3, active: folded, primary: true),
+            DeviceDisplay(screenID: 3, name: "LCD-1", pixelWidth: 2007, pixelHeight: 2853,
+                          pointScale: 3, active: !folded, primary: false)
+        ]
+    }
+
+    func testAnOpenDuoNamesTheScreenAndTheWayOut() throws {
+        let reason = try XCTUnwrap(TapTargetCheck.undrivableScreen(displays: duo(folded: false)))
+        XCTAssertTrue(reason.contains("inner screen"), reason)
+        XCTAssertTrue(reason.contains("--closed"), "it must say what to do instead: \(reason)")
+    }
+
+    /// Shut, the same device taps normally — measured — so there is nothing to
+    /// report and the ordinary clipped-control explanation is the right one.
+    func testAShutDuoIsDrivable() {
+        XCTAssertNil(TapTargetCheck.undrivableScreen(displays: duo(folded: true)))
+    }
+
+    func testADeviceWithOneScreenIsNeverBlamedOnItsScreen() {
+        let phone = [DeviceDisplay(screenID: 1, pixelWidth: 1206, pixelHeight: 2622,
+                                   pointScale: 3, active: true, primary: true)]
+        XCTAssertNil(TapTargetCheck.undrivableScreen(displays: phone))
+        XCTAssertNil(TapTargetCheck.undrivableScreen(displays: []))
+    }
+
+    /// Nothing lit means nothing is known, and a guess here would mislabel every
+    /// failure on an asleep device.
+    func testAnAsleepFoldableIsNotBlamed() {
+        let asleep = duo(folded: false).map {
+            DeviceDisplay(screenID: $0.screenID, pixelWidth: $0.pixelWidth,
+                          pixelHeight: $0.pixelHeight, pointScale: $0.pointScale,
+                          active: false, primary: $0.primary)
+        }
+        XCTAssertNil(TapTargetCheck.undrivableScreen(displays: asleep))
+    }
+
+    /// The reason replaces the element-blaming text rather than being appended
+    /// to it, so the message has one explanation, not two.
+    func testTheReasonReplacesTheClippedControlExplanation() {
+        let message = TapTargetCheck.describe(
+            .nothingThere, selector: "This selector",
+            undrivableScreen: TapTargetCheck.undrivableScreen(displays: duo(folded: false)))
+        XCTAssertFalse(message.contains("clipped control"), message)
+        XCTAssertTrue(message.contains("inner screen"), message)
+    }
+
+    func testWithoutAKnownScreenProblemTheOriginalExplanationStands() {
+        let message = TapTargetCheck.describe(
+            .nothingThere, selector: "This selector", undrivableScreen: nil)
+        XCTAssertTrue(message.contains("clipped control"), message)
+    }
+}

@@ -53,12 +53,50 @@ public enum TapTargetCheck {
     }
 
     /// A one-line explanation of why the touch was not sent.
-    public static func describe(_ outcome: Outcome, selector: String) -> String {
+    ///
+    /// `undrivableScreen` names a screen the guest accepts no input on at all,
+    /// when the caller knows of one. Without it the message blames the element,
+    /// which on such a screen is wrong about every element on it — the reader
+    /// goes looking for a clipped control that is not the problem.
+    public static func describe(
+        _ outcome: Outcome,
+        selector: String,
+        undrivableScreen: String? = nil
+    ) -> String {
         switch outcome {
         case .matches:
             return ""
         case .nothingThere:
+            if let undrivableScreen {
+                return "\(selector) cannot be tapped: \(undrivableScreen)"
+            }
             return "\(selector) resolved to a point with nothing behind it — the element is on screen but the part of it that is visible is not touchable (a clipped control, or an accessible frame larger than the control itself). The touch would have been discarded."
         }
+    }
+
+    /// Why the lit screen accepts no touches, or nil when nothing is known to be
+    /// wrong with it.
+    ///
+    /// Measured on iPhone Duo / iOS 27.1, on a device created fresh for the
+    /// test: with the device OPEN, the accessibility hit-test answers nothing at
+    /// any of 49 points across the inner screen, and no touch at any of 70
+    /// normalized points activates anything — while backboardd logs show the
+    /// events arriving, so they are delivered and then discarded. Shut, the same
+    /// device taps normally and a tap on its cover launches apps. The inner
+    /// screen can be read and captured; it cannot be driven.
+    ///
+    /// This reports the pose, not a guess about the element, because on that
+    /// screen every element fails the hit-test and none of them is at fault.
+    public static func undrivableScreen(
+        displays: [DeviceDisplay]
+    ) -> String? {
+        guard displays.count > 1,
+              let lit = DisplaySelection.active(displays),
+              DisplaySelection.roles(displays)[lit.screenID] == .inner
+        else { return nil }
+        return "an iPhone Duo's inner screen takes no input in Xcode 27.1 — the "
+            + "accessibility hit-test answers nothing anywhere on it and touches are "
+            + "discarded. Reading and screenshots work. Run `sipi fold <udid> --closed` "
+            + "to drive the app on the cover screen instead."
     }
 }

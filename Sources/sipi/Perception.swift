@@ -562,7 +562,12 @@ func resolveActivationPoint(
         let hit = try driver.element(at: resolution.point, udid: udid)
         let outcome = TapTargetCheck.evaluate(target: resolution, hit: hit, screen: frame)
         guard outcome.isMatch else {
-            emitError("Error: \(TapTargetCheck.describe(outcome, selector: "This selector")) No \(verb) performed.")
+            let reason = TapTargetCheck.describe(
+                outcome,
+                selector: "This selector",
+                undrivableScreen: TapTargetCheck.undrivableScreen(
+                    displays: DisplayResolver.displays(udid: udid)))
+            emitError("Error: \(reason) No \(verb) performed.")
             throw ExitCode.failure
         }
     } catch let exit as ExitCode {

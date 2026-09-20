@@ -317,6 +317,18 @@ private struct DoctorReport {
                 + "`sipi fold-state` reports the pose, \(folding), and `--display inner|cover` "
                 + "picks a screen to capture. Neither simctl nor devicectl can fold a simulator."
             )
+            // The single most useful thing to know before writing a test against
+            // this device, and nothing else announces it: an open Duo looks
+            // perfectly healthy until every tap is refused.
+            if let undrivable = TapTargetCheck.undrivableScreen(displays: displays) {
+                notes.append("\(udid): \(undrivable)")
+            } else if DisplaySelection.roles(displays)[
+                DisplaySelection.active(displays)?.screenID ?? -1] == .cover {
+                notes.append(
+                    "\(udid) is shut, which is the pose that takes input: an iPhone Duo's INNER "
+                    + "screen accepts no touches in Xcode 27.1 (it can still be read and captured)."
+                )
+            }
         }
 
         return notes

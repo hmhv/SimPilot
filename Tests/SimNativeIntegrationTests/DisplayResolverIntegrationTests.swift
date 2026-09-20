@@ -75,6 +75,10 @@ final class DisplayResolverIntegrationTests: XCTestCase {
         }
         let displays = DisplayResolver.displays(udid: udid)
         try XCTSkipIf(displays.count < 2, "not a foldable; nothing to choose between")
+        // Capturing does not move the device, but assert it so a future edit that
+        // folds here cannot silently leave the pose changed for later tests.
+        let poseBefore = DeviceCtl.hingeAngle(udid: udid)
+        defer { XCTAssertEqual(DeviceCtl.hingeAngle(udid: udid), poseBefore, "pose must not move") }
 
         let roles = DisplaySelection.roles(displays)
         let lit = try XCTUnwrap(DisplaySelection.active(displays), "no screen is lit")
@@ -239,6 +243,12 @@ final class HingeControlIntegrationTests: XCTestCase {
     /// Building twice concurrently must leave one good helper, not a torn one.
     func testConcurrentBuildsPublishAWorkingHelper() throws {
         let udid = try foldableUDID()
+        // Put the pose back. This test ends by folding the device to prove the
+        // rebuilt helper works, and a test that leaves a Duo OPEN breaks every
+        // later test that needs to tap it — the inner screen takes no input.
+        let restore = DeviceCtl.hingeAngle(udid: udid)
+        defer { if let restore { try? HingeControl.setAngle(udid: udid, degrees: restore) } }
+
         let helper = try HingeControl.helperPath()
         try? FileManager.default.removeItem(atPath: helper)
 

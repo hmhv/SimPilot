@@ -2101,7 +2101,11 @@ private final class HarnessRunner {
             let hit = try driver.element(at: resolution.point, udid: udid)
             let outcome = TapTargetCheck.evaluate(target: resolution, hit: hit, screen: frame)
             guard outcome.isMatch else {
-                throw HarnessError(TapTargetCheck.describe(outcome, selector: "\(verb.capitalized) on \(selector.describedTarget)"))
+                throw HarnessError(TapTargetCheck.describe(
+                    outcome,
+                    selector: "\(verb.capitalized) on \(selector.describedTarget)",
+                    undrivableScreen: TapTargetCheck.undrivableScreen(
+                        displays: DisplayResolver.displays(udid: udid))))
             }
         } catch let harness as HarnessError {
             throw harness

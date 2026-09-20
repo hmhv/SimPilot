@@ -228,6 +228,23 @@ accessibility tree describing a screen nobody is looking at. Two habits follow:
   `~/.local/share/simpilot/hinge`). A toolchain with no such SDK cannot fold, and
   `doctor` says so.
 
+**The inner screen takes no input.** Measured on Xcode 27.1 against a device
+created fresh for the test: with the Duo OPEN, the accessibility hit-test answers
+nothing at any of 49 points across the inner screen and no touch at any of 70
+normalized points activates anything — the events reach backboardd and are
+discarded. Shut, the same device taps normally and a tap on its cover launches
+apps. So on a Duo:
+
+| | open (inner) | shut (cover) |
+|---|---|---|
+| `describe-ui`, `screenshot`, `record-video`, `fold-state` | yes | yes |
+| `tap`, `swipe`, `touch`, `describe-point` | **no** | yes |
+
+**Drive it folded.** `sipi fold "$UDID" --closed`, then tap; unfold when you need
+to see or capture the inner layout. A tap attempted on the inner screen is
+refused with that explanation rather than the usual "clipped control" one, and
+`doctor` says which pose a booted Duo is in.
+
 Everything else — `describe-ui`, `tap`, `orientation`, `screenshot` — follows the
 lit screen automatically and needs no flag. A harness run records the pose it
 found in `run.json` under `device-state.fold-state` and puts the device back in
