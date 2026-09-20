@@ -228,22 +228,50 @@ accessibility tree describing a screen nobody is looking at. Two habits follow:
   `~/.local/share/simpilot/hinge`). A toolchain with no such SDK cannot fold, and
   `doctor` says so.
 
-**The inner screen takes no input.** Measured on Xcode 27.1 against a device
-created fresh for the test: with the Duo OPEN, the accessibility hit-test answers
-nothing at any of 49 points across the inner screen and no touch at any of 70
-normalized points activates anything — the events reach backboardd and are
-discarded. Shut, the same device taps normally and a tap on its cover launches
-apps. So on a Duo:
+**Input on a Duo is not dependable in Xcode 27.1.** Reading is:
 
 | | open (inner) | shut (cover) |
 |---|---|---|
 | `describe-ui`, `screenshot`, `record-video`, `fold-state` | yes | yes |
-| `tap`, `swipe`, `touch`, `describe-point` | **no** | yes |
+| `describe-point` (a hit-test, not a touch) | **never** | yes |
+| `tap`, `swipe`, `touch` | **never** | sometimes |
 
-**Drive it folded.** `sipi fold "$UDID" --closed`, then tap; unfold when you need
-to see or capture the inner layout. A tap attempted on the inner screen is
-refused with that explanation rather than the usual "clipped control" one, and
-`doctor` says which pose a booted Duo is in.
+*Open* is settled: measured on freshly created devices, the accessibility
+hit-test answers nothing at any of 49 points across the inner screen and no
+touch at any of 70 normalized points activates anything — the events reach
+backboardd and are discarded. Every attempt reproduced it. A tap there is
+refused with that explanation instead of the usual "clipped control" one.
+
+*Shut* varies by device and the reason is not known. One Duo tapped normally on
+its cover — a tap launched Safari and the whole live suite passed against it —
+and four created afterwards did not, with no difference found: not uptime, not a
+fold transition, not the device's own data. An iPhone 17 taps correctly
+throughout, so it is not the host and not sipi.
+
+**So check before you rely on it**, once per device:
+
+```bash
+sipi fold "$UDID" --closed
+# From the HOME SCREEN, with the Safari icon actually in the tree. With an app
+# foregrounded the selector matches nothing, no touch is sent at all, and the
+# check below reports "broken" on a device whose input is fine.
+xcrun simctl terminate "$UDID" com.apple.mobilesafari
+# Resolve the same way the tap will — by LABEL. Exits non-zero if the icon is
+# not there, which is the case the check must not mistake for broken input.
+sipi wait-for "$UDID" --label Safari --timeout 5 >/dev/null || echo "not on the home screen" 
+sipi tap "$UDID" --label Safari          # prints ok either way
+for _ in $(seq 10); do
+  xcrun simctl spawn "$UDID" launchctl list | grep -q mobilesafari && break
+  sleep 1
+done
+xcrun simctl spawn "$UDID" launchctl list | grep -c mobilesafari   # 1 = input works
+```
+
+`tap` returns `ok` when the event was sent, which is not the same as landing, so
+the check has to look at an effect — and poll for it, because `tap` returns
+before the app has launched. If input does not work, the Duo is still
+useful for layout: capture both poses and read the tree. `doctor` reports the
+pose and this caveat for any booted Duo.
 
 Everything else — `describe-ui`, `tap`, `orientation`, `screenshot` — follows the
 lit screen automatically and needs no flag. A harness run records the pose it

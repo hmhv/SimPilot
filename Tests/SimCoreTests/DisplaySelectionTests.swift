@@ -260,9 +260,12 @@ final class UndrivableScreenTests: XCTestCase {
         XCTAssertTrue(reason.contains("--closed"), "it must say what to do instead: \(reason)")
     }
 
-    /// Shut, the same device taps normally — measured — so there is nothing to
-    /// report and the ordinary clipped-control explanation is the right one.
-    func testAShutDuoIsDrivable() {
+    /// Shut, nothing is KNOWN to be wrong with the screen, so there is nothing to
+    /// report and the ordinary clipped-control explanation stands. That is not a
+    /// claim that a shut Duo takes input — measured, one device of five did and
+    /// the rest did not — only that the failure would not be the screen's pose,
+    /// which is all this function is entitled to say.
+    func testAShutDuoHasNoKnownScreenProblem() {
         XCTAssertNil(TapTargetCheck.undrivableScreen(displays: duo(folded: true)))
     }
 

@@ -325,8 +325,10 @@ private struct DoctorReport {
             } else if DisplaySelection.roles(displays)[
                 DisplaySelection.active(displays)?.screenID ?? -1] == .cover {
                 notes.append(
-                    "\(udid) is shut, which is the pose that takes input: an iPhone Duo's INNER "
-                    + "screen accepts no touches in Xcode 27.1 (it can still be read and captured)."
+                    "\(udid) is shut, which is the better pose for input: an iPhone Duo's INNER "
+                    + "screen accepts no touches at all in Xcode 27.1 (reading and capture still "
+                    + "work), and the cover accepts them on some Duo devices and not others. "
+                    + "Check before relying on it — tap something and confirm it happened."
                 )
             }
         }

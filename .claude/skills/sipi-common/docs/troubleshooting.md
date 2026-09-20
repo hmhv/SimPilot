@@ -254,22 +254,44 @@ Two different things, and `sipi fold-state` tells them apart.
 **Open (inner screen lit).** Expected: the inner screen takes no input in Xcode
 27.1 — the hit-test answers nothing anywhere on it and touches are discarded,
 measured on a freshly created device. Reading and capture still work.
-`sipi fold "$UDID" --closed` and drive the app on the cover.
+`sipi fold "$UDID" --closed` and try the cover — see below, it works on some
+Duo devices and not others, so check the effect rather than assuming.
 
-**Shut (cover lit) and taps still do nothing.** Not expected — a healthy Duo taps
-normally on its cover. That device's HID session is wedged: touches never reach
-the guest at all, and a reboot does not clear it. Confirm by comparing with a
-device made from scratch:
+**Shut (cover lit) and taps still do nothing.** Known, and not yet explained.
+One Duo accepted input on its cover; four created afterwards did not, with no
+difference found between them — not uptime, not a fold transition, not the
+device's own data, and `simctl erase`, recreating the device and restarting
+CoreSimulatorService all failed to change it either way. An iPhone 17 taps
+correctly throughout, so the host and sipi are fine.
+
+Since all three of those failed here, there is nothing left to suggest trying
+first. Check the effect once (below); if input does not work, treat that Duo as
+read-only — capture, `describe-ui` and `describe-point` all work — and drive the
+same app on a non-foldable device.
+
+Note that `tap` printing `ok` only means the event was sent. Confirm with an
+effect:
 
 ```bash
-NEW=$(xcrun simctl create duo-check com.apple.CoreSimulator.SimDeviceType.iPhone-Duo \
-        com.apple.CoreSimulator.SimRuntime.iOS-27-1)
-xcrun simctl boot "$NEW" && xcrun simctl bootstatus "$NEW" -b
-sipi fold "$NEW" --closed && sipi tap "$NEW" --label Safari   # should launch Safari
+# From the HOME SCREEN: with an app foregrounded the selector matches nothing,
+# no touch is sent, and this reports "broken" on a device whose input is fine.
+xcrun simctl terminate "$UDID" com.apple.mobilesafari
+# Resolve the same way the tap will — by LABEL. Exits non-zero if the icon is
+# not there, which is the case the check must not mistake for broken input.
+sipi wait-for "$UDID" --label Safari --timeout 5 >/dev/null || echo "not on the home screen"
+sipi tap "$UDID" --label Safari
+# tap returns as soon as the event is sent, so poll for the launch rather than
+# reading once — checking immediately reports 0 on a device where input works.
+for _ in $(seq 10); do
+  xcrun simctl spawn "$UDID" launchctl list | grep -q mobilesafari && break
+  sleep 1
+done
+xcrun simctl spawn "$UDID" launchctl list | grep -c mobilesafari   # 1 = input works
 ```
 
-If the fresh one taps and yours does not, recreate yours — `simctl erase` or a
-new device. Nothing short of that has been found to clear it.
+Heavy touch traffic has also been seen to kill a Duo's accessibility bridge
+outright — `describe-ui` then fails with `frontmostApplicationWithDisplayId
+returned nil` and only recreating the device brought it back.
 
 ## Build
 
