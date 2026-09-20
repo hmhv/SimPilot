@@ -37,6 +37,22 @@ public enum HitPoints {
         return frame
     }
 
+    /// Replace the root node's frame with the screen rectangle.
+    ///
+    /// The root IS the screen — an AXApplication's frame is its full-screen
+    /// window — so where the two disagree the screen is right and the root is
+    /// reporting a rectangle its own children do not fit in. A nil screen (the
+    /// screens could not be read) leaves the tree exactly as it came.
+    public static func withScreenFrame(_ roots: [AXNode], screen: AXNode.Frame?) -> [AXNode] {
+        guard let screen, screen.width > 0, screen.height > 0 else { return roots }
+        guard let index = roots.firstIndex(where: { $0.type == "Application" })
+            ?? (roots.isEmpty ? nil : roots.startIndex) else { return roots }
+        guard roots[index].frame != screen else { return roots }
+        var corrected = roots
+        corrected[index].frame = screen
+        return corrected
+    }
+
     private static func annotate(_ node: AXNode, screen: AXNode.Frame) -> AXNode {
         var copy = node
         if let children = node.children {

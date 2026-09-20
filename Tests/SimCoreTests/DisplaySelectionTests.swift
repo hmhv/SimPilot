@@ -186,3 +186,56 @@ final class DisplaySelectionTests: XCTestCase {
         }
     }
 }
+
+/// The space `describe-ui` frames live in is the SCREEN's, rotated — not
+/// whatever the accessibility root happens to report.
+///
+/// Every gesture is rotated by these two numbers. Swapped, each touch lands
+/// where the element is not.
+final class LogicalExtentTests: XCTestCase {
+
+    /// iPhone 17 / iOS 27.0, measured: a 402x874 panel reports a 402x874
+    /// accessibility root in portrait and an 874x402 root in landscape-left.
+    /// The screen-derived rule must produce the same numbers, or this change
+    /// would move every rotated device rather than only the Duo.
+    private let phone = DeviceDisplay(
+        screenID: 1, name: "LCD", pixelWidth: 1206, pixelHeight: 2622, pointScale: 3)
+
+    func testPortraitIsTheScreenAsItIs() {
+        let extent = phone.logicalExtent(in: .portrait)
+        XCTAssertEqual(extent.width, 402)
+        XCTAssertEqual(extent.height, 874)
+    }
+
+    func testUpsideDownIsAlsoUpright() {
+        let extent = phone.logicalExtent(in: .portraitUpsideDown)
+        XCTAssertEqual(extent.width, 402)
+        XCTAssertEqual(extent.height, 874)
+    }
+
+    func testBothLandscapesSwap() {
+        for orientation in [UIOrientation.landscapeLeft, .landscapeRight] {
+            let extent = phone.logicalExtent(in: orientation)
+            XCTAssertEqual(extent.width, 874, "\(orientation)")
+            XCTAssertEqual(extent.height, 402, "\(orientation)")
+        }
+    }
+
+    /// iPhone Duo inner screen, measured: 2007x2853 pixels at scale 3, sitting
+    /// in landscape-left, with elements laid out to x=844 — which fits 951 and
+    /// not 669. The accessibility root claims 669x951 there.
+    func testTheDuoInnerScreenInLandscape() {
+        let inner = DeviceDisplay(
+            screenID: 3, name: "LCD-1", pixelWidth: 2007, pixelHeight: 2853, pointScale: 3)
+        let extent = inner.logicalExtent(in: .landscapeLeft)
+        XCTAssertEqual(extent.width, 951)
+        XCTAssertEqual(extent.height, 669)
+    }
+
+    func testIsLandscapeCoversExactlyTheTwoSideways() {
+        XCTAssertFalse(UIOrientation.portrait.isLandscape)
+        XCTAssertFalse(UIOrientation.portraitUpsideDown.isLandscape)
+        XCTAssertTrue(UIOrientation.landscapeLeft.isLandscape)
+        XCTAssertTrue(UIOrientation.landscapeRight.isLandscape)
+    }
+}

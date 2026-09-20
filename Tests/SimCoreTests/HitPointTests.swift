@@ -203,3 +203,80 @@ final class HitPointTests: XCTestCase {
         XCTAssertFalse(resolution.isOnScreen)
     }
 }
+
+/// The root node's frame is what every caller reads as "the screen": HitPoints
+/// clips with it, `describe-point` and `--pixel` convert through it, and the
+/// harness sizes pixel-unit steps by it. Where it disagrees with the screen it
+/// has to be corrected at the source, or those consumers end up with two
+/// different ideas of how big the screen is.
+final class ScreenFrameCorrectionTests: XCTestCase {
+
+    private func node(
+        _ type: String, _ frame: AXNode.Frame, children: [AXNode]? = nil
+    ) -> AXNode {
+        AXNode(role: "AX" + type, type: type, frame: frame, children: children)
+    }
+
+    private let screen = AXNode.Frame(x: 0, y: 0, width: 951, height: 669)
+
+    /// iPhone Duo inner screen: the root reports the unrotated panel while its
+    /// own child spans to x=844, which does not fit inside it.
+    func testTheRootTakesTheScreensRectangle() {
+        let tree = [node("Application", .init(x: 0, y: 0, width: 669, height: 951), children: [
+            node("Button", .init(x: 24, y: 521, width: 820, height: 52))
+        ])]
+        let corrected = HitPoints.withScreenFrame(tree, screen: screen)
+        XCTAssertEqual(corrected[0].frame, screen)
+        XCTAssertEqual(corrected[0].children?[0].frame?.x, 24, "children are left alone")
+        XCTAssertEqual(corrected[0].children?[0].frame?.width, 820)
+    }
+
+    /// The overwhelmingly common case: they already agree, and nothing moves.
+    func testAnAgreeingRootIsUntouched() {
+        let tree = [node("Application", screen)]
+        XCTAssertEqual(HitPoints.withScreenFrame(tree, screen: screen), tree)
+    }
+
+    /// No screen reading (Xcode 26, a device still coming up) leaves the tree
+    /// exactly as it arrived rather than inventing a rectangle.
+    func testAnUnknownScreenChangesNothing() {
+        let tree = [node("Application", .init(x: 0, y: 0, width: 669, height: 951))]
+        XCTAssertEqual(HitPoints.withScreenFrame(tree, screen: nil), tree)
+        XCTAssertEqual(
+            HitPoints.withScreenFrame(tree, screen: .init(x: 0, y: 0, width: 0, height: 0)), tree)
+    }
+
+    /// The Application root is the screen even when it is not first.
+    func testTheApplicationRootIsPreferredOverTheFirstRoot() {
+        let tree = [
+            node("Window", .init(x: 0, y: 0, width: 10, height: 10)),
+            node("Application", .init(x: 0, y: 0, width: 669, height: 951))
+        ]
+        let corrected = HitPoints.withScreenFrame(tree, screen: screen)
+        XCTAssertEqual(corrected[0].frame?.width, 10, "the non-Application root is left alone")
+        XCTAssertEqual(corrected[1].frame, screen)
+    }
+
+    /// With no Application node the first root stands in, matching
+    /// `screenFrame(of:)`'s own rule so the two never pick different nodes.
+    func testTheFirstRootStandsInWhenThereIsNoApplication() {
+        let tree = [node("Window", .init(x: 0, y: 0, width: 669, height: 951))]
+        XCTAssertEqual(HitPoints.withScreenFrame(tree, screen: screen)[0].frame, screen)
+    }
+
+    func testAnEmptyTreeIsNotACrash() {
+        XCTAssertEqual(HitPoints.withScreenFrame([], screen: screen), [])
+    }
+}
+
+/// A nil screen must be inert, because `describe` passes nil precisely when it
+/// could not read the orientation — and an unreadable orientation is not
+/// evidence of portrait. Assuming it was would overwrite a correct landscape
+/// root with the unswapped panel size on an ordinary single-screen device.
+extension ScreenFrameCorrectionTests {
+    func testAnUnreadableOrientationLeavesALandscapeRootAlone() {
+        let landscapeRoot = AXNode.Frame(x: 0, y: 0, width: 874, height: 402)
+        let tree = [AXNode(role: "AXApplication", type: "Application", frame: landscapeRoot)]
+        XCTAssertEqual(HitPoints.withScreenFrame(tree, screen: nil)[0].frame, landscapeRoot)
+    }
+}

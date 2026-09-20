@@ -265,3 +265,44 @@ final class HingeControlIntegrationTests: XCTestCase {
         XCTAssertNoThrow(try HingeControl.setAngle(udid: udid, degrees: 180))
     }
 }
+
+/// Gated integration test for the logical extent every gesture is rotated by.
+///
+/// The extent used to come from the accessibility root's frame. Taking it from
+/// the screen instead is only safe if the two agree wherever the root was
+/// right — which is every device with one screen. That is what this pins: a
+/// silent disagreement here would move every rotated device.
+final class LogicalExtentIntegrationTests: XCTestCase {
+
+    private var udid: String? {
+        let value = ProcessInfo.processInfo.environment["SIPI_TEST_UDID"]
+        return (value?.isEmpty == false) ? value : nil
+    }
+
+    func testTheScreenAgreesWithTheAccessibilityRootOnASingleScreenDevice() throws {
+        guard let udid else {
+            throw XCTSkip("SIPI_TEST_UDID not set; skipping live extent test")
+        }
+        let displays = DisplayResolver.displays(udid: udid)
+        try XCTSkipIf(displays.isEmpty, "devicectl cannot read this device's screens")
+        try XCTSkipIf(
+            displays.count > 1,
+            "a foldable's inner screen is the case where they DISAGREE; this pins the agreement")
+
+        let driver = NativeDriver()
+        let orientation = try driver.uiOrientation(udid)
+        let screen = try XCTUnwrap(DisplaySelection.active(displays))
+        let expected = screen.logicalExtent(in: orientation)
+
+        let roots = try driver.describe(udid, deep: false)
+        let root = try XCTUnwrap(roots.first { $0.type == "Application" } ?? roots.first)
+        let frame = try XCTUnwrap(root.frame)
+
+        XCTAssertEqual(
+            Int(frame.width.rounded()), expected.width,
+            "screen-derived width disagrees with the accessibility root in \(orientation)")
+        XCTAssertEqual(
+            Int(frame.height.rounded()), expected.height,
+            "screen-derived height disagrees with the accessibility root in \(orientation)")
+    }
+}

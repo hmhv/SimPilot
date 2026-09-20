@@ -64,12 +64,40 @@ public final class NativeDriver: SimDriver {
         // and must not be presented as hit points. (Grid discovery on a rotated
         // device is unreliable for the same reason — a pre-existing limit this
         // only declines to make worse.)
-        let portrait = ((try? uiOrientation(udid)) ?? .portrait) == .portrait
+        // nil means the orientation could not be READ, which is not the same as
+        // portrait — and the difference decides whether the root's frame may be
+        // rewritten below.
+        let orientation = try? uiOrientation(udid)
+        let portrait = (orientation ?? .portrait) == .portrait
         let nodes = raw.map { Self.node(from: $0, trustProbeHitPoints: portrait) }
         // Every node leaves the driver with a hitPoint it is safe to touch and an
         // honest onscreen flag; without this a caller has only frames, which are
         // not tap targets (see HitPoints.swift).
-        return HitPoints.annotate(nodes, screen: HitPoints.screenFrame(of: nodes))
+        //
+        // Correct the ROOT's frame rather than only clipping against the right
+        // rectangle, because the root's frame is what every caller reads as "the
+        // screen": HitPoints clips with it, `describe-point` and `--pixel`
+        // convert through it, and the harness sizes pixel-unit steps by it.
+        // Fixing one consumer and not the others would leave two disagreeing
+        // ideas of how big the screen is, which is worse than one wrong one.
+        //
+        // They are the same rectangle on every device with one screen. They
+        // differ on an iPhone Duo's inner screen, where the root reports the
+        // unrotated panel (669x951) while its own children are laid out in the
+        // rotated space around it — a button spanning to x=844 inside a root
+        // claiming to be 669 wide, which then read as off-screen and had its tap
+        // point clipped to the wrong place.
+        //
+        // Only when the orientation is actually KNOWN. Assuming portrait and
+        // rewriting anyway would overwrite a correct landscape root (874x402 on
+        // an iPhone 17) with the unswapped panel size, producing on a perfectly
+        // ordinary device the exact contradiction this exists to remove. The
+        // tree came from a separate read that a failed orientation read says
+        // nothing about, so leaving it alone is the honest answer.
+        let corrected = HitPoints.withScreenFrame(
+            nodes,
+            screen: orientation.flatMap { screenFrame(udid: udid, orientation: $0) })
+        return HitPoints.annotate(corrected, screen: HitPoints.screenFrame(of: corrected))
     }
 
     public func element(at point: Point, udid: String) throws -> AXNode? {
@@ -234,7 +262,7 @@ public final class NativeDriver: SimDriver {
     private func physicalNormalized(_ point: Point, udid: String) throws -> Point {
         let orientation = try currentOrientation(udid)
         guard orientation != .portrait else { return point }
-        guard let extent = logicalExtent(udid: udid) else { return point }
+        guard let extent = logicalExtent(udid: udid, orientation: orientation) else { return point }
         return physicalNormalized(point, orientation: orientation, extent: extent)
     }
 
@@ -270,7 +298,7 @@ public final class NativeDriver: SimDriver {
         _physicalContextResolveHook?()
         let orientation = try currentOrientation(udid)
         guard orientation != .portrait else { return (.portrait, nil) }
-        return (orientation, logicalExtent(udid: udid))
+        return (orientation, logicalExtent(udid: udid, orientation: orientation))
     }
 
     /// Map a gesture-step point using a pre-resolved context (no IPC / AX fetch).
@@ -290,7 +318,7 @@ public final class NativeDriver: SimDriver {
     private func physicalPoint(_ point: Point, udid: String) throws -> Point {
         let orientation = try currentOrientation(udid)
         guard orientation != .portrait else { return point }
-        guard let extent = logicalExtent(udid: udid) else { return point }
+        guard let extent = logicalExtent(udid: udid, orientation: orientation) else { return point }
         let physical = OrientationMath.physicalExtent(
             logicalWidth: extent.width,
             logicalHeight: extent.height,
@@ -317,7 +345,50 @@ public final class NativeDriver: SimDriver {
     /// application root, used to scale normalized points to/from logical points
     /// when rotating. Returns nil when no usable frame is available (the caller
     /// then leaves the point untransformed). Only called off the portrait path.
-    private func logicalExtent(udid: String) -> (width: Double, height: Double)? {
+    /// The screen as a frame at the origin, or nil when the screens cannot be
+    /// read. Deliberately does NOT fall back to the accessibility root the way
+    /// `logicalExtent` does: `describe` already has the root to hand and falls
+    /// back to it itself, and going through the fallback here would re-enter
+    /// `describe`.
+    private func screenFrame(udid: String, orientation: UIOrientation) -> AXNode.Frame? {
+        guard let extent = screenExtent(udid: udid, orientation: orientation) else { return nil }
+        return AXNode.Frame(x: 0, y: 0, width: extent.width, height: extent.height)
+    }
+
+    /// The lit screen's point size, swapped when the UI is on its side.
+    private func screenExtent(
+        udid: String,
+        orientation: UIOrientation
+    ) -> (width: Double, height: Double)? {
+        guard let screen = (try? DisplayResolver.resolve(.active, udid: udid)) ?? nil,
+              screen.pointWidth > 0, screen.pointHeight > 0
+        else { return nil }
+        let extent = screen.logicalExtent(in: orientation)
+        return (Double(extent.width), Double(extent.height))
+    }
+
+    /// The size of the space `describe-ui` frames live in, in points.
+    ///
+    /// Taken from the SCREEN — a fact about the device — rotated by the current
+    /// orientation, rather than from the accessibility root's frame, which is
+    /// only a proxy for it.
+    ///
+    /// The proxy is right on every device with one screen: measured on iPhone 17
+    /// / iOS 27.0, a 402x874 panel reports a 402x874 root in portrait and an
+    /// 874x402 root in landscape-left — exactly what swapping the screen size
+    /// gives. It is wrong on an iPhone Duo's INNER screen, which sits in
+    /// landscape-left and reports a 669x951 root (the unrotated panel) while its
+    /// elements are laid out in the 951x669 space around it. Every gesture is
+    /// rotated by these two numbers, so swapped they put each touch somewhere
+    /// the element is not: on that screen no tap landed at all.
+    ///
+    /// Falls back to the root's frame when the screens cannot be read — Xcode 26
+    /// and earlier, where no device has two screens anyway.
+    private func logicalExtent(
+        udid: String,
+        orientation: UIOrientation
+    ) -> (width: Double, height: Double)? {
+        if let extent = screenExtent(udid: udid, orientation: orientation) { return extent }
         guard let roots = try? describe(udid, deep: false) else { return nil }
         let root = roots.first { $0.type == "Application" } ?? roots.first
         guard let frame = root?.frame, frame.width > 0, frame.height > 0 else { return nil }

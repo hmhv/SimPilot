@@ -75,6 +75,12 @@ public enum UIOrientation: Int, Codable, Sendable {
     case landscapeLeft = 3
     case landscapeRight = 4
 
+    /// Whether the UI is on its side, and the screen's point size therefore
+    /// reads width-for-height against the unrotated panel.
+    public var isLandscape: Bool {
+        self == .landscapeLeft || self == .landscapeRight
+    }
+
     /// Stable lowercase name. The same spelling the SimBridge READ emits, the
     /// orientation SET path accepts, and every command that reports an
     /// orientation prints — so a caller can round-trip what it read.

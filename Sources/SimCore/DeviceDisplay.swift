@@ -75,6 +75,24 @@ public struct DeviceDisplay: Equatable, Sendable {
     public var pointHeight: Int { pixelHeight / max(pointScale, 1) }
 
     public var pixelArea: Int { pixelWidth * pixelHeight }
+
+    /// The size of the space `describe-ui` frames and tap coordinates live in,
+    /// for a device held in `orientation`: this screen's point size, read
+    /// width-for-height when the UI is on its side.
+    ///
+    /// This is the screen's own geometry, which is a fact. The accessibility
+    /// root's frame is the usual proxy for it and agrees exactly on a device
+    /// with one screen — measured on iPhone 17 / iOS 27.0, a 402x874 panel
+    /// reports a 402x874 root in portrait and an 874x402 root in landscape-left.
+    /// It does NOT agree on an iPhone Duo's inner screen, which sits in
+    /// landscape and reports the unrotated 669x951 panel as its root while its
+    /// elements are laid out in the 951x669 space around it — a button spanning
+    /// to x=844 on a root that claims to be 669 wide.
+    public func logicalExtent(in orientation: UIOrientation) -> (width: Int, height: Int) {
+        orientation.isLandscape
+            ? (pointHeight, pointWidth)
+            : (pointWidth, pointHeight)
+    }
 }
 
 /// What a screen is for, on the device it belongs to.
