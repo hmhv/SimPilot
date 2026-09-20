@@ -102,7 +102,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 
 **simulator を直接操作する:**
 
-`sipi` は、エージェントが 1 ステップずつ呼べる素の CLI でもあります。`describe-ui --format compact` はアクセシビリティツリーを 1 要素 1 行（種類・ラベル・id・値・frame・タップ座標）で出力し、JSON の数分の一のサイズで済みます。`wait-for` は sleep の代わりに、ラベル・id・値・テキストが現れる（または消える）までポーリングします。`screenshot --max-pixel 600` は目で確認するのに十分な小さいキャプチャを返します。`memory-warning` は Simulator.app の Debug メニューにあったメモリ警告を送ります（Xcode 27 以降）。全コマンドは `sipi --help` を参照してください。
+`sipi` は、エージェントが 1 ステップずつ呼べる素の CLI でもあります。`describe-ui --format compact` はアクセシビリティツリーを 1 要素 1 行（種類・ラベル・id・値・frame・タップ座標）で出力し、JSON の数分の一のサイズで済みます。`wait-for` は sleep の代わりに、ラベル・id・値・テキストが現れる（または消える）までポーリングします。`screenshot --max-pixel 600` は目で確認するのに十分な小さいキャプチャを返します。`memory-warning` は Simulator.app の Debug メニューにあったメモリ警告を送ります（Xcode 27 以降）。`fold-state` は iPhone Duo の 2 画面のうちどちらが点いているかを報告し、`fold --closed|--open|--angle` で実際に折りたたみ／展開できます（simctl にも devicectl にもできません）。`--display inner|cover` で消灯側の画面もキャプチャできます。全コマンドは `sipi --help` を参照してください。
 
 **スイート管理:**
 ```text

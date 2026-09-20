@@ -111,7 +111,7 @@ let package = Package(
         // pure SimCoreTests target so that stays simulator-free.
         .testTarget(
             name: "SimNativeIntegrationTests",
-            dependencies: ["SimNative", "SimCore"],
+            dependencies: ["SimNative", "SimCore", "SimShell"],
             path: "Tests/SimNativeIntegrationTests",
             linkerSettings: [
                 .linkedFramework("AppKit"),

@@ -50,6 +50,8 @@ struct Sipi: ParsableCommand {
             Crown.self,
             Screenshot.self,
             RecordVideo.self,
+            FoldState.self,
+            Fold.self,
             ContainerCommand.self,
             FilesAppCommand.self,
             XCAppDataCommand.self,
@@ -148,16 +150,32 @@ extension Sipi {
         @Option(name: .customLong("max-pixel"), help: "Downscale so the longest side is at most this many pixels (a capture already within the limit is left as is). For a reader that pays per image token; omit for evidence.")
         var maxPixel: Int?
 
+        @Option(
+            name: .long,
+            help: """
+            Which built-in screen to capture: \(DisplaySelection.selectorSyntax). \
+            Defaults to whichever screen the device is lighting, which is the only \
+            one with anything on it. Only a foldable — iPhone Duo, with an inner \
+            screen and a cover — has more than one, and the dark one captures black.
+            """
+        )
+        var display: String = "active"
+
         func validate() throws {
             if let maxPixel, maxPixel < 1 {
                 throw ValidationError("--max-pixel must be a positive pixel count")
+            }
+            if DisplaySelection.parseSelector(display) == nil {
+                throw ValidationError("Unknown --display '\(display)'. Valid: \(DisplaySelection.selectorSyntax).")
             }
         }
 
         func run() throws {
             let driver = NativeDriver()
             let url = URL(fileURLWithPath: path)
-            try driver.screenshot(to: url, udid: udid)
+            // validate() has already rejected anything unparsable.
+            let selector = DisplaySelection.parseSelector(display) ?? .active
+            try driver.screenshot(to: url, udid: udid, display: selector)
             if let maxPixel {
                 let original = try Data(contentsOf: url)
                 if let shrunk = PNGDownscale.resized(original, maxPixel: maxPixel) {

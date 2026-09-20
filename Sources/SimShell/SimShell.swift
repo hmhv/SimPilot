@@ -459,19 +459,37 @@ public enum SimShell {
                     .trimmingCharacters(in: CharacterSet(charactersIn: "- "))
                 continue
             }
-            // Expect: <name> (<udid>) (Booted)
-            guard let last = line.range(of: " (", options: .backwards) else { continue }
-            guard let open = line.range(of: " (", range: line.startIndex..<last.lowerBound)
-                ?? line.range(of: "(", range: line.startIndex..<last.lowerBound) else { continue }
-            let name = String(line[line.startIndex..<open.lowerBound])
-                .trimmingCharacters(in: .whitespaces)
-            let afterOpen = line[open.upperBound...]
-            guard let close = afterOpen.range(of: ")") else { continue }
-            let udid = String(afterOpen[afterOpen.startIndex..<close.lowerBound])
-            guard !udid.isEmpty, !name.isEmpty else { continue }
-            devices.append(BootedDevice(udid: udid, name: name, runtime: runtime))
+            devices.append(contentsOf: parseBootedDeviceLine(line, runtime: runtime))
         }
         return devices
+    }
+
+    /// One `    <name> (<udid>) (Booted)` line, or nothing when it is not one.
+    ///
+    /// Parsed from the RIGHT. A device NAME can itself contain parentheses:
+    /// simctl names the iPhone Duo "iPhone Duo (27.1)" when the plain name is
+    /// already taken on another runtime. Reading left to right took `27.1` as
+    /// the UDID, so `isBooted` answered false for a device that was booted, and
+    /// the harness then tried to boot it and failed with "Unable to boot device
+    /// in current state: Booted" — on every run against that device.
+    ///
+    /// Returns an array so the caller can `append(contentsOf:)` a non-match
+    /// without a branch; it is never more than one element.
+    static func parseBootedDeviceLine(_ line: String, runtime: String) -> [BootedDevice] {
+        // The rightmost group is the state; the one before it is the UDID.
+        guard let stateOpen = line.range(of: " (", options: .backwards) else { return [] }
+        let beforeState = line[line.startIndex..<stateOpen.lowerBound]
+        guard let udidOpen = beforeState.range(of: " (", options: .backwards)
+            ?? beforeState.range(of: "(", options: .backwards) else { return [] }
+
+        let name = String(beforeState[beforeState.startIndex..<udidOpen.lowerBound])
+            .trimmingCharacters(in: .whitespaces)
+        let udidField = beforeState[udidOpen.upperBound...]
+        guard udidField.hasSuffix(")") else { return [] }
+        let udid = String(udidField.dropLast())
+
+        guard !udid.isEmpty, !name.isEmpty else { return [] }
+        return [BootedDevice(udid: udid, name: name, runtime: runtime)]
     }
 
     // MARK: - Background processes (record-video, log stream)
@@ -542,14 +560,38 @@ public enum SimShell {
     /// `axe record-video … &; kill -INT` pattern (run.md:193). The output is
     /// written to `path` as requested; note simctl writes a QuickTime-branded
     /// container even for a `.mp4` name (acceptable — §6.8).
+    /// The simctl command line for a recording.
+    ///
+    /// Split out because the position of `--display` is a contract with simctl
+    /// that is invisible at the call site: simctl documents it under "Common
+    /// arguments", but it belongs to the OPERATION. Passed before `recordVideo`
+    /// it makes simctl print its usage and exit 117, recording nothing — which
+    /// surfaces only as a missing video file at the end of a run.
+    static func recordVideoArguments(
+        udid: String,
+        outputPath: String,
+        screenID: Int?
+    ) -> [String] {
+        var args = ["simctl", "io", udid, "recordVideo", "--codec", "h264", "--force"]
+        if let screenID { args.append("--display=\(screenID)") }
+        args.append(outputPath)
+        return args
+    }
+
+    /// `screenID` records that screen instead of the one simctl picks by
+    /// default. Only a foldable has more than one to choose from, and simctl
+    /// defaults to the screen it calls primary — which on iPhone Duo is the
+    /// COVER, so a recording of an open device would be a black rectangle
+    /// unless the caller names the inner screen.
     public static func recordVideo(
         udid: String,
         outputPath: String,
+        screenID: Int? = nil,
         startTimeout: TimeInterval = 10
     ) throws -> BackgroundProcess {
         try requireBooted(udid)
 
-        let args = ["simctl", "io", udid, "recordVideo", "--codec", "h264", "--force", outputPath]
+        let args = recordVideoArguments(udid: udid, outputPath: outputPath, screenID: screenID)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = args

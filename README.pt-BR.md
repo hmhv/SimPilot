@@ -102,7 +102,7 @@ Cada execução grava `summary.json` — status, contagens e o primeiro passo qu
 
 **Controlar o simulador diretamente:**
 
-`sipi` também é uma CLI comum que um agente pode chamar passo a passo. `describe-ui --format compact` imprime a árvore de acessibilidade com um elemento por linha — tipo, rótulo, id, valor, frame, ponto de toque — numa fração do tamanho do JSON; `wait-for` faz polling até que um rótulo, id, valor ou texto apareça (ou desapareça) em vez de dormir; `screenshot --max-pixel 600` devolve uma captura pequena o bastante para olhar com baixo custo; `memory-warning` envia o aviso de pressão de memória que o menu Debug do Simulator.app oferecia (Xcode 27+). Execute `sipi --help` para ver todos os comandos.
+`sipi` também é uma CLI comum que um agente pode chamar passo a passo. `describe-ui --format compact` imprime a árvore de acessibilidade com um elemento por linha — tipo, rótulo, id, valor, frame, ponto de toque — numa fração do tamanho do JSON; `wait-for` faz polling até que um rótulo, id, valor ou texto apareça (ou desapareça) em vez de dormir; `screenshot --max-pixel 600` devolve uma captura pequena o bastante para olhar com baixo custo; `memory-warning` envia o aviso de pressão de memória que o menu Debug do Simulator.app oferecia (Xcode 27+); `fold-state` informa qual das duas telas de um iPhone Duo está acesa, `fold --closed|--open|--angle` realmente dobra e desdobra o aparelho — algo que nem simctl nem devicectl fazem — e `--display inner|cover` captura a tela apagada. Execute `sipi --help` para ver todos os comandos.
 
 **Gerenciar suítes:**
 ```text

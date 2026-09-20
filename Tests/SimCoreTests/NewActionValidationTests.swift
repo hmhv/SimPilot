@@ -537,4 +537,172 @@ extension NewActionValidationTests {
         XCTAssertFalse(outcome.isValid)
         XCTAssertTrue(outcome.errors.contains { $0.contains("bundle-id must be a string") }, "\(outcome.errors)")
     }
+
+    // MARK: - fold
+
+    /// The two poses a test actually wants, by name.
+    func testFoldAcceptsPoseNames() throws {
+        for pose in ["closed", "open"] {
+            let outcome = try validate(id: "fold-\(pose)", steps: action(["type": "fold", "pose": pose]))
+            XCTAssertTrue(outcome.isValid, "\(pose): \(outcome.errors)")
+        }
+    }
+
+    func testFoldAcceptsAnAngleAndASweep() throws {
+        let outcome = try validate(
+            id: "fold-angle", steps: action(["type": "fold", "angle": 90, "duration": 1.5]))
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    func testFoldAcceptsBothEndsOfTheRange() throws {
+        for angle in [0, 180] {
+            let outcome = try validate(id: "fold-\(angle)", steps: action(["type": "fold", "angle": angle]))
+            XCTAssertTrue(outcome.isValid, "\(angle): \(outcome.errors)")
+        }
+    }
+
+    /// Saying nothing about where the hinge should end up is not a default; it
+    /// is a spec that forgot to say.
+    func testFoldRequiresAnAngleOrAPose() throws {
+        let outcome = try validate(id: "fold-empty", steps: action(["type": "fold"]))
+        XCTAssertTrue(
+            outcome.errors.contains { $0.contains("angle 0...180 or pose") },
+            "\(outcome.errors)")
+    }
+
+    /// Both would leave the spec ambiguous about which wins, and a reader of the
+    /// test could not tell either.
+    func testFoldRejectsAngleAndPoseTogether() throws {
+        let outcome = try validate(
+            id: "fold-both", steps: action(["type": "fold", "angle": 90, "pose": "open"]))
+        XCTAssertTrue(
+            outcome.errors.contains { $0.contains("not both") },
+            "\(outcome.errors)")
+    }
+
+    func testFoldRejectsAnAngleOutsideTheHinge() throws {
+        for angle in [-1, 181, 360] {
+            let outcome = try validate(id: "fold-oob-\(angle)", steps: action(["type": "fold", "angle": angle]))
+            XCTAssertTrue(
+                outcome.errors.contains { $0.contains("between 0 and 180") },
+                "\(angle): \(outcome.errors)")
+        }
+    }
+
+    func testFoldRejectsAnUnknownPose() throws {
+        let outcome = try validate(id: "fold-pose", steps: action(["type": "fold", "pose": "tent"]))
+        XCTAssertTrue(
+            outcome.errors.contains { $0.contains("must be closed or open") },
+            "\(outcome.errors)")
+    }
+
+    /// A wrong-typed field must be an error, not a field the validator reads as
+    /// absent. Reading it as absent made `{"pose": "open", "angle": "90"}` look
+    /// like a clean pose-only step: `sipi validate` said OK and the harness then
+    /// threw DecodingError.typeMismatch on the same file.
+    func testFoldRejectsAWrongTypedAngle() throws {
+        let outcome = try validate(
+            id: "fold-str-angle", steps: action(["type": "fold", "pose": "open", "angle": "90"]))
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(
+            outcome.errors.contains { $0.contains("angle must be number") },
+            "\(outcome.errors)")
+    }
+
+    func testFoldRejectsAWrongTypedPose() throws {
+        let outcome = try validate(
+            id: "fold-num-pose", steps: action(["type": "fold", "angle": 90, "pose": 1]))
+        XCTAssertFalse(outcome.isValid)
+        XCTAssertTrue(
+            outcome.errors.contains { $0.contains("pose must be a string") },
+            "\(outcome.errors)")
+    }
+
+    /// Both present is still "not both", whatever their types — the exclusivity
+    /// rule is about what the spec MEANT, not about what parsed.
+    func testFoldStillRejectsBothWhenOneIsWrongTyped() throws {
+        let outcome = try validate(
+            id: "fold-both-bad", steps: action(["type": "fold", "pose": "open", "angle": "90"]))
+        XCTAssertTrue(outcome.errors.contains { $0.contains("not both") }, "\(outcome.errors)")
+    }
+
+    /// A wrong type is reported once, not also as a range violation it cannot
+    /// have been checked for.
+    func testFoldDoesNotAlsoRangeCheckAValueThatIsNotANumber() throws {
+        let outcome = try validate(id: "fold-str-only", steps: action(["type": "fold", "angle": "x"]))
+        XCTAssertFalse(outcome.errors.contains { $0.contains("between 0 and 180") }, "\(outcome.errors)")
+    }
+
+    func testFoldRejectsANegativeSweep() throws {
+        let outcome = try validate(
+            id: "fold-sweep", steps: action(["type": "fold", "pose": "open", "duration": -1]))
+        XCTAssertTrue(
+            outcome.errors.contains { $0.contains("must not be negative") },
+            "\(outcome.errors)")
+    }
+
+
+    // MARK: - the harness's own output must validate
+
+    /// `sipi validate` must accept a run the harness just produced. Two things
+    /// the fold work added were missing from the allowed sets and made validate
+    /// reject its own output: the `hid` method a fold step writes, and the
+    /// `fold-state` facet DeviceStateRecord records at run start.
+    private func validateWorkspaceWithRun(
+        deviceState: [String: Any],
+        method: String
+    ) throws -> ResultValidator.ValidationOutcome {
+        let workspace = tempDir.appendingPathComponent("ws-\(UUID().uuidString)", isDirectory: true)
+        let testDir = workspace.appendingPathComponent("runs/r1/folds", isDirectory: true)
+        try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: workspace.appendingPathComponent("tests", isDirectory: true),
+            withIntermediateDirectories: true)
+
+        try JSONSerialization.data(withJSONObject: ["app": "com.example.app"])
+            .write(to: workspace.appendingPathComponent("config.json"))
+
+        let run: [String: Any] = [
+            "started": "2026-09-20T09:00:00+09:00",
+            "device": "UDID",
+            "tests": [["id": "folds", "passed": true, "duration": 1.0]],
+            "summary": ["total": 1, "passed": 1, "failed": 0],
+            "device-state": deviceState
+        ]
+        try JSONSerialization.data(withJSONObject: run)
+            .write(to: workspace.appendingPathComponent("runs/r1/run.json"))
+
+        let result: [String: Any] = [
+            "id": "folds", "passed": true, "duration": 1.0,
+            "steps": [["passed": true, "attempted-methods": [["method": method, "value": "fold:0"]]]]
+        ]
+        try JSONSerialization.data(withJSONObject: result)
+            .write(to: testDir.appendingPathComponent("result.json"))
+
+        return try ResultValidator.validate(workspace: workspace.path)
+    }
+
+    func testAFoldStepsMethodAndFacetValidate() throws {
+        let outcome = try validateWorkspaceWithRun(
+            deviceState: [
+                "appearance": "light",
+                "content-size": "large",
+                "increase-contrast": "disabled",
+                "fold-state": "open (inner 669x951pt)"
+            ],
+            method: "hid")
+        XCTAssertTrue(outcome.isValid, "\(outcome.errors)")
+    }
+
+    /// The allowed sets are still closed — an unknown facet or method is an
+    /// error, not something this widening let through.
+    func testAnUnknownFacetOrMethodIsStillRejected() throws {
+        let badFacet = try validateWorkspaceWithRun(
+            deviceState: ["appearance": "light", "hinge-colour": "blue"], method: "hid")
+        XCTAssertFalse(badFacet.isValid)
+        let badMethod = try validateWorkspaceWithRun(
+            deviceState: ["appearance": "light"], method: "telepathy")
+        XCTAssertFalse(badMethod.isValid)
+    }
+
 }

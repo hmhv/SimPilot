@@ -90,6 +90,54 @@ there is limited to the underlying Apple private-API mechanics.
 
 ---
 
+## hinge
+
+The guest-side helper that sets a foldable simulator's hinge angle —
+`Sources/SimShell/HingeHelperSource.swift`, compiled on first use by
+`Sources/SimShell/HingeControl.swift` — is **derived from hinge**
+(https://github.com/artemnovichkov/hinge, Copyright (c) 2026 Artem Novichkov),
+specifically `skills/hinge/scripts/hinge_helper.c`, under the MIT License.
+
+What comes from hinge is the mechanism, which is undocumented and not
+discoverable from Apple's headers: the vendor-defined HID usage page `0xFF61`
+and usage `0x5B`, the four-key payload dictionary
+(`provider` / `source` / `type` / `value`), the use of `IOCFSerialize`'s binary
+format rather than a property list, and HID client **type 4** — the one
+`backboardd` accepts from a process without the
+`com.apple.private.hid.client.admin` entitlement, which is what makes the helper
+runnable under `simctl spawn` at all.
+
+SimPilot's copy is restructured and re-commented, and the surrounding build,
+caching, pose/angle resolution, screen-handover waiting, harness action and
+restore behaviour are its own. The dispatch sequence itself is hinge's
+expression and is used under its license, reproduced below.
+
+```
+MIT License
+
+Copyright (c) 2026 Artem Novichkov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
 ## swift-argument-parser
 
 The `sipi` CLI parses its command line with **swift-argument-parser**

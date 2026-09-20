@@ -62,6 +62,7 @@ the top-left corner. Nothing warns you. Confirm a computed coordinate with
 | Put text in a field | `"$SIPI" set-text "$UDID" "text" --id <id>` |
 | Press a key | `"$SIPI" key 40 "$UDID"` |
 | Capture the screen | `"$SIPI" screenshot "$UDID" out.png` — add `--max-pixel 600` when you are going to look at it yourself |
+| Which screen a foldable is showing | `"$SIPI" fold-state "$UDID"` — read only; see § Foldables |
 
 `describe-ui` reads the frontmost app tree. Pass `--expect "Text"` when a later
 grep is looking for specific text: on a miss it auto-escalates to the deeper grid
@@ -99,6 +100,10 @@ table and the pattern for waiting on a state that must *stay* absent.
 pixels. A device-native capture is 3x and costs a reader far more than the
 detail is worth; 600 is plenty to judge a layout. Evidence captures (the harness,
 `verify-session capture`) stay full size.
+
+`screenshot` and `record-video` both capture whichever screen the device is
+lighting. On a device with one screen — every device but iPhone Duo — there is
+nothing to choose and `--display` never needs mentioning.
 
 ## Input and gestures
 
@@ -168,3 +173,62 @@ inspects without failing, `--json` gives structured output, `--rules` runs a
 subset, `--min-touch-target` changes the 44pt threshold. An empty accessibility
 tree is a hard error rather than a clean report, so "no findings" always means
 the screen was actually inspected.
+
+## Foldables (iPhone Duo)
+
+An iPhone Duo has **two** built-in screens and lights exactly one at a time:
+
+| Role | Screen ID | Points | Lit when |
+|---|---|---|---|
+| `cover` | 1 | 466x678 | shut |
+| `inner` | 3 | 669x951 | open |
+
+The dark one is not absent. It keeps vending a live, solid-black framebuffer, so
+reading the wrong screen is never an error — it is a black PNG, or an
+accessibility tree describing a screen nobody is looking at. Two habits follow:
+
+- **Check the pose before trusting a size.** A 466x678 tree where you expected
+  669x951 is a shut device, not a layout bug. `fold-state` says which it is:
+
+  ```bash
+  "$SIPI" fold-state "$UDID"
+  # { "foldable": true, "folded": false, "hingeAngle": 180,
+  #   "activeDisplay": 3, "orientation": "landscape-left", "displays": [ … ] }
+  ```
+
+- **Name the screen when you mean a specific one.** `--display active` (the
+  default), `inner`, `cover`, or a screen ID, on both `screenshot` and
+  `record-video`:
+
+  ```bash
+  "$SIPI" screenshot "$UDID" inner.png --display inner
+  "$SIPI" screenshot "$UDID" cover.png --display cover
+  ```
+
+  Naming a screen the device does not have is an error, not a silent fallback to
+  the other one.
+
+- **Fold it yourself when you need the other pose.**
+
+  ```bash
+  "$SIPI" fold "$UDID" --closed          # 0° — the cover takes over
+  "$SIPI" fold "$UDID" --open            # 180° — the inner screen takes over
+  "$SIPI" fold "$UDID" --angle 90
+  "$SIPI" fold "$UDID" --open --over 1.5 # sweep, for an app that animates on the fold
+  ```
+
+  It prints the pose the device actually reached (`180° inner 669x951pt`), not
+  the one asked for, and does not return until the screen handover has landed —
+  so the next command sees the new screen. The handover sits between 80° and 85°
+  in both directions.
+
+  Apple exposes no way to do this: simctl has no verb and devicectl's
+  `motion hinge-angle` only reads. `fold` builds a small helper with the active
+  Xcode's iPhoneSimulator SDK the first time it runs (~1s, then cached under
+  `~/.local/share/simpilot/hinge`). A toolchain with no such SDK cannot fold, and
+  `doctor` says so.
+
+Everything else — `describe-ui`, `tap`, `orientation`, `screenshot` — follows the
+lit screen automatically and needs no flag. A harness run records the pose it
+found in `run.json` under `device-state.fold-state` and puts the device back in
+it afterwards, so a suite that folds never hands the device on shut.

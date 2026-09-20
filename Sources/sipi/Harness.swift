@@ -252,12 +252,15 @@ private struct HarnessAction: Decodable {
     var phase: Int?               // multitouch: 1 = begin/move, 2 = end
     // Device state reached through devicectl.
     var settings: HarnessDisplaySettings? // display-state facets
+    // Foldables.
+    var angle: Double?            // fold: hinge angle 0...180
+    var pose: String?             // fold: closed | open
 
     enum CodingKeys: String, CodingKey {
         case type, selector, point, text, usage, button, start, end, duration
         case value, tolerance, preset, modifiers, key, keycodes, delay, steps, orientation, delta
         case url, operation, service, latitude, longitude, appearance, enabled, payload, profile, arguments, environment, clear
-        case direction, separation, points, phase, settings
+        case direction, separation, points, phase, settings, angle, pose
         case bundleID = "bundle-id"
         case contentSize = "content-size"
         case inputMethod = "input-method"
@@ -536,6 +539,10 @@ private final class HarnessRunner {
     private var initialIncreaseContrast: String?
     private var initialDisplayState: AppearanceState?
     private var initialBiometricsEnrolled: Bool?
+    /// The hinge angle read right before the run's first `fold`, so the device
+    /// is handed back in the pose it was found in. Whoever left an iPhone Duo
+    /// open did not consent to it being shut by a test suite.
+    private var initialHingeAngle: Double?
     private var locationWasModified = false
     private var statusBarWasModified = false
     private var activeNetworkConditionBundleID: String?
@@ -578,7 +585,8 @@ private final class HarnessRunner {
         let deviceState = DeviceStateRecord.capture(
             appearance: { try SimShell.appearance(udid: resolvedUDID) },
             contentSize: { try SimShell.contentSize(udid: resolvedUDID) },
-            increaseContrast: { try SimShell.increaseContrast(udid: resolvedUDID) }
+            increaseContrast: { try SimShell.increaseContrast(udid: resolvedUDID) },
+            foldState: { Self.foldStateNote(udid: resolvedUDID) }
         )
         self.runStartDeviceState = deviceState.state
         self.evidenceWarnings.append(contentsOf: deviceState.warnings)
@@ -900,6 +908,18 @@ private final class HarnessRunner {
                 failures.append("biometrics enrollment: \(error)")
             }
         }
+        if let initialHingeAngle {
+            do {
+                try HingeControl.setAngle(udid: udid, degrees: initialHingeAngle)
+                // Wait for the screen to follow. The restore also runs BETWEEN
+                // tests, and returning mid-handover would start the next test on
+                // the screen that is about to go dark.
+                waitForFoldToSettle(target: initialHingeAngle)
+                self.initialHingeAngle = nil
+            } catch {
+                failures.append("hinge angle: \(error)")
+            }
+        }
 
         return failures
     }
@@ -1082,7 +1102,22 @@ private final class HarnessRunner {
         defer { finishRecording() }
         if options.recordVideo ?? config.recordVideo ?? false {
             do {
-                recording = try SimShell.recordVideo(udid: udid, outputPath: testDir + "/recording.mp4")
+                // Name the screen. simctl's own default is the display it calls
+                // primary, which on an iPhone Duo is the COVER whichever way the
+                // device is folded — so an open device would record a black
+                // rectangle for the whole test. nil elsewhere, where there is
+                // nothing to choose and simctl's default is right.
+                //
+                // Resolved once, at the start: a `fold` step later in the test
+                // moves the UI to the other screen and the recording does not
+                // follow it. The step screenshots do, so the evidence is there;
+                // the video is of the pose the test started in.
+                let screen = (try? DisplayResolver.resolve(.active, udid: udid)) ?? nil
+                recording = try SimShell.recordVideo(
+                    udid: udid,
+                    outputPath: testDir + "/recording.mp4",
+                    screenID: screen?.screenID
+                )
                 testTrace.event("recording-start", fields: ["path": "recording.mp4"])
             } catch {
                 evidenceWarnings.append("video recording for \(test.id) could not start: \(error)")
@@ -1921,6 +1956,46 @@ private final class HarnessRunner {
             try SimShell.terminate(udid: udid, bundleID: targetBundleID)
             return ["method": "simctl", "value": "terminate:\(targetBundleID)"]
 
+        case "fold":
+            // Only iPhone Duo has a hinge, and a phone swallows the event without
+            // complaint — so a spec that folds a non-foldable must fail loudly
+            // here rather than pass having changed nothing.
+            let displays = (try? DeviceCtl.displays(udid: udid)) ?? []
+            guard displays.count > 1 else {
+                throw HarnessError(
+                    displays.isEmpty
+                        ? "fold: cannot read this device's screens, so sipi cannot tell whether it folds."
+                        : "fold: this device has one built-in screen and does not fold."
+                )
+            }
+            let target: Double
+            if let angle = action.angle {
+                target = angle
+            } else {
+                switch action.pose {
+                case "closed": target = HingeControl.range.lowerBound
+                case "open": target = HingeControl.range.upperBound
+                default:
+                    throw HarnessError("fold action requires angle 0...180 or pose closed|open.")
+                }
+            }
+            // Capture the pose the device was found in before the FIRST fold, so
+            // the end-of-run restore puts it back.
+            if initialHingeAngle == nil {
+                initialHingeAngle = try captureBaseline("fold") {
+                    guard let reading = DeviceCtl.hingeAngle(udid: udid) else {
+                        throw HarnessError("the hinge angle stream reported nothing")
+                    }
+                    return reading
+                }
+            }
+            try HingeControl.setAngle(udid: udid, degrees: target, over: action.duration)
+            // The screen handover follows the angle asynchronously; returning
+            // before it lands would hand the next step the screen that was just
+            // switched off.
+            waitForFoldToSettle(target: target)
+            return ["method": "hid", "value": "fold:\(Int(target))"]
+
         case "memory-warning":
             // Transient: the process handles the warning and nothing is left to
             // restore, so this needs no baseline and no cleanup tier.
@@ -2495,6 +2570,32 @@ private final class HarnessRunner {
         rootLabelSignature((try? driver.describe(udid, deep: false)) ?? [])
     }
 
+    /// Block until the screen the new hinge angle implies is the lit one.
+    ///
+    /// Waiting for "some screen is lit" would return immediately: the outgoing
+    /// screen stays lit for a moment after the angle changes, so the first
+    /// reading after a fold still describes the pose that just ended — and every
+    /// screenshot and accessibility read in the next step would be of a screen
+    /// that is about to go dark.
+    ///
+    /// Between the two measured handover points the angle implies neither
+    /// screen, so there is nothing to wait for. Times out rather than failing: a
+    /// fold that did not
+    /// take shows up in the step's own verification, and a hung wait would cost
+    /// the whole run.
+    private func waitForFoldToSettle(target: Double, timeout: TimeInterval = 3.0) {
+        guard let expected = HingeControl.impliedRole(atAngle: target) else { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let displays = (try? DeviceCtl.displays(udid: udid)) ?? []
+            if let lit = DisplaySelection.active(displays),
+               DisplaySelection.roles(displays)[lit.screenID] == expected {
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        } while Date() < deadline
+    }
+
     /// Wait until an app other than the one that was frontmost at `baseline` owns
     /// the screen, before settling on its tree.
     ///
@@ -2684,6 +2785,10 @@ private final class HarnessRunner {
             return "launch \(action.bundleID ?? bundleID)"
         case "terminate":
             return "terminate \(action.bundleID ?? bundleID)"
+        case "fold":
+            if let angle = action.angle { return "fold \(Int(angle))°" }
+            return "fold \(action.pose ?? "?")"
+
         case "memory-warning":
             return "memory-warning \(action.bundleID ?? bundleID)"
         case "network-condition":
@@ -2801,6 +2906,29 @@ private final class HarnessRunner {
             return booted.udid
         }
         throw HarnessError("No booted simulator found. Pass --device or boot a simulator.")
+    }
+
+    /// The fold pose to record in `run.json`, or nil for a device that cannot
+    /// fold — which is every device but iPhone Duo, and the only reason this is
+    /// not simply always recorded.
+    ///
+    /// Reads as `"folded (cover 466x678pt)"` / `"open (inner 669x951pt)"`: the
+    /// pose plus the screen size it implies, because the size is what makes a
+    /// surprising screenshot or accessibility tree make sense at a glance.
+    ///
+    /// Best-effort by design. A device whose screens cannot be read records
+    /// nothing rather than failing the run — this is evidence, and evidence must
+    /// never abort the run it describes.
+    private static func foldStateNote(udid: String) -> String? {
+        let displays = DisplayResolver.displays(udid: udid)
+        guard displays.count > 1 else { return nil }
+        let roles = DisplaySelection.roles(displays)
+        guard let lit = DisplaySelection.active(displays) else {
+            return "no screen lit (device asleep)"
+        }
+        let role = roles[lit.screenID] ?? .screen
+        let pose = role == .cover ? "folded" : "open"
+        return "\(pose) (\(role.rawValue) \(lit.pointWidth)x\(lit.pointHeight)pt)"
     }
 
     private static func defaultRunDir(workspace: String, device: Device?) -> String {

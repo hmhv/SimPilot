@@ -74,6 +74,18 @@ public enum UIOrientation: Int, Codable, Sendable {
     case portraitUpsideDown = 2
     case landscapeLeft = 3
     case landscapeRight = 4
+
+    /// Stable lowercase name. The same spelling the SimBridge READ emits, the
+    /// orientation SET path accepts, and every command that reports an
+    /// orientation prints — so a caller can round-trip what it read.
+    public var name: String {
+        switch self {
+        case .portrait: return "portrait"
+        case .portraitUpsideDown: return "portrait-upside-down"
+        case .landscapeLeft: return "landscape-left"
+        case .landscapeRight: return "landscape-right"
+        }
+    }
 }
 
 /// How to locate an element for an action like tap. The CLI composes higher

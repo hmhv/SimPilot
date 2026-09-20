@@ -55,7 +55,8 @@ public enum ResultValidator {
         "value", "tolerance", "preset", "modifiers", "key", "keycodes", "delay", "steps", "orientation", "delta",
         "url", "operation", "service", "bundle-id", "latitude", "longitude", "appearance", "content-size",
         "enabled", "payload", "profile", "arguments", "environment", "input-method", "clear",
-        "verify-value", "verify-effect", "direction", "separation", "points", "phase", "settings"
+        "verify-value", "verify-effect", "direction", "separation", "points", "phase", "settings",
+        "angle", "pose"
     ]
     private static let testSelectorOptional: Set<String> = ["id", "label", "value", "element-type"]
     private static let testPointOptional: Set<String> = ["x", "y", "unit"]
@@ -94,7 +95,7 @@ public enum ResultValidator {
         "pinch", "multitouch",
         "open-url", "privacy", "push", "location", "appearance", "content-size", "increase-contrast",
         "status-bar", "launch", "terminate", "network-condition",
-        "display-state", "biometrics", "memory-warning"
+        "display-state", "biometrics", "memory-warning", "fold"
     ]
 
     /// Actions that used to validate and no longer do. Kept separate from the
@@ -122,9 +123,11 @@ public enum ResultValidator {
         "finished", "device-name", "device-runtime", "suite", "profile", "commit", "session",
         "build-error", "artifacts", "evidence-warnings", "device-state"
     ]
-    /// The facets `device-state` may carry: what `simctl ui` can read back.
+    /// The facets `device-state` may carry: what `simctl ui` can read back, plus
+    /// `fold-state` on a foldable. Every facet DeviceStateRecord can write must
+    /// be here, or `sipi validate` rejects the harness's own `run.json`.
     private static let runDeviceStateOptional: Set<String> = [
-        "appearance", "content-size", "increase-contrast"
+        "appearance", "content-size", "increase-contrast", "fold-state"
     ]
     private static let runTestRequired: Set<String> = ["id", "passed", "duration"]
     private static let runTestOptional: Set<String> = ["review", "skipped"]
@@ -149,7 +152,7 @@ public enum ResultValidator {
     /// `devicectl` covers the device-state actions.
     private static let attemptedMethodTypes: Set<String> = [
         "tap-label", "tap-id", "tap-value", "touch-coordinate", "input", "simctl",
-        "network-condition", "multitouch", "devicectl"
+        "network-condition", "multitouch", "devicectl", "hid"
     ]
     private static let screenshotsOptional: Set<String> = ["before", "after"]
     private static let verifyRequired: Set<String> = ["check", "found"]
@@ -634,9 +637,10 @@ public enum ResultValidator {
         for stringField in ["url", "operation", "service", "bundle-id", "appearance", "content-size", "profile", "input-method"] {
             checkString(path, a, stringField, prefix: ordinal + ".", diag)
         }
-        for numField in ["duration", "delay", "value", "tolerance", "delta", "latitude", "longitude"] {
+        for numField in ["duration", "delay", "value", "tolerance", "delta", "latitude", "longitude", "angle"] {
             checkNumber(path, a, numField, prefix: ordinal + ".", diag)
         }
+        checkString(path, a, "pose", prefix: ordinal + ".", diag)
         checkBool(path, a, "enabled", prefix: ordinal + ".", diag)
         checkBool(path, a, "clear", prefix: ordinal + ".", diag)
         checkBool(path, a, "verify-value", prefix: ordinal + ".", diag)
@@ -1040,6 +1044,43 @@ public enum ResultValidator {
             break
         case "memory-warning":
             checkString(path, a, "bundle-id", prefix: ordinal + ".", diag)
+        case "fold":
+            // Exactly one way to say where the hinge should end up. Accepting
+            // both would leave the spec ambiguous about which wins, and a reader
+            // of the test could not tell either.
+            //
+            // Keyed on PRESENCE, not on whether the value parsed. Asking
+            // `numberValue(a["angle"]) != nil` reads a wrong-typed angle as an
+            // absent one, so `{"pose": "open", "angle": "90"}` looked like a
+            // clean pose-only step and validated — then failed to decode at run
+            // time, which is the gap this file exists to close. The value's TYPE
+            // is the generic checks' job; this switch only decides which field
+            // the spec meant to use.
+            let hasAngle = a["angle"] != nil
+            let hasPose = a["pose"] != nil
+            switch (hasAngle, hasPose) {
+            case (false, false):
+                diag.errors.append(
+                    "\(path): \(ordinal) (fold) requires an angle 0...180 or pose closed|open")
+            case (true, true):
+                diag.errors.append(
+                    "\(path): \(ordinal) (fold) takes angle or pose, not both")
+            case (true, false):
+                // Only range-check a value that IS a number; a wrong type has
+                // already been reported, and saying both would be noise.
+                if let degrees = numberValue(a["angle"]), !(0...180).contains(degrees) {
+                    diag.errors.append(
+                        "\(path): \(ordinal).angle (fold) must be between 0 and 180 degrees")
+                }
+            case (false, true):
+                if let named = a["pose"] as? String, !["closed", "open"].contains(named) {
+                    diag.errors.append(
+                        "\(path): \(ordinal).pose (fold) must be closed or open")
+                }
+            }
+            if let duration = numberValue(a["duration"]), duration < 0 {
+                diag.errors.append("\(path): \(ordinal).duration (fold) must not be negative")
+            }
         case "network-condition":
             guard let operation = a["operation"] as? String,
                   ["apply", "clear"].contains(operation) else {

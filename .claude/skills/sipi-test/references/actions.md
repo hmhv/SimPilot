@@ -350,6 +350,29 @@ not on the warning itself, which leaves no trace in the tree:
 { "type": "memory-warning", "bundle-id": "com.example.helper" }
 ```
 
+`fold` — set a foldable's hinge angle. iPhone Duo only; a device with one screen
+fails the step rather than quietly accepting an event it ignores. Takes `angle`
+(0…180) **or** `pose` (`closed` / `open`), never both, and optionally `duration`
+to sweep to the angle over that many seconds instead of jumping — which matters
+for an app that animates on the fold, because a jump can skip what it was meant
+to react to:
+
+```json
+{ "type": "fold", "pose": "closed" }
+{ "type": "fold", "pose": "open" }
+{ "type": "fold", "angle": 90 }
+{ "type": "fold", "angle": 0, "duration": 1.5 }
+```
+
+The step does not finish until the screen handover has landed, so the next step's
+screenshot and tree are of the new screen. The handover sits between 80° and 85°;
+`angle` inside that band is accepted and lands on whichever screen the system
+picks.
+
+This is what makes one suite cover both poses. The pose the device was found in
+is captured before the first `fold` and restored at the end of the run, so a
+suite never hands the device on shut.
+
 `display-state` — every key is optional, at least one is required, and an unknown
 key is a validation error rather than a silently ignored setting:
 

@@ -28,6 +28,7 @@ covers what each one actually changes and how to test with it.
 | `biometrics` | Enrolls/unenrolls Face ID / Touch ID and delivers match / no-match to a live prompt (Xcode 27+) |
 | `display-state` | Sets the accessibility appearance facets simctl cannot reach (Xcode 27+) |
 | `memory-warning` | Delivers a memory-pressure warning to the running app, so cache eviction and low-memory recovery run on demand (Xcode 27+) |
+| `fold` | Folds or unfolds an iPhone Duo, so one suite covers both the inner screen and the cover (Xcode 27.1+) |
 
 ## What cleanup actually covers
 
@@ -36,7 +37,7 @@ Cleanup runs at the end of the run, and between tests in a suite with
 
 | Tier | Controls | Behavior |
 |---|---|---|
-| Restored to the captured prior value | `appearance`, `content-size`, `increase-contrast`, `display-state`*, `biometrics` enrollment | Baseline captured before the first write, written back afterward |
+| Restored to the captured prior value | `appearance`, `content-size`, `increase-contrast`, `display-state`*, `biometrics` enrollment, `fold` | Baseline captured before the first write, written back afterward |
 | **Cleared, not restored** | `location`, `status-bar`, `network-condition` | Reset to "no override". A value the device already had before the run is NOT put back |
 | **Not touched at all** | `privacy`, `open-url`, `push`, `launch`, `terminate` | No cleanup whatsoever |
 | Nothing to clean | `memory-warning` | A one-off event the app handles as it arrives; the device holds no state for it |

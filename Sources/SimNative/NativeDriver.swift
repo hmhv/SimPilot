@@ -341,10 +341,45 @@ public final class NativeDriver: SimDriver {
         )
     }
 
+    /// Capture what is on screen, whatever that turns out to be.
+    ///
+    /// Deliberately NOT `screenshot(to:udid:display: .active)`. Naming a screen
+    /// is strict — asking for one the device cannot give you is an error — but a
+    /// caller who named nothing asked for a picture, and refusing to produce one
+    /// because the screens could not be told apart would be a worse answer than
+    /// the bridge's own single-screen reading. The harness captures after every
+    /// step through this path; a step that produces no image at all is a bigger
+    /// loss than a step whose image came from the fallback.
     public func screenshot(to url: URL, udid: String) throws {
+        let resolved = try? DisplayResolver.resolve(.active, udid: udid)
+        try capture(to: url, udid: udid, display: resolved ?? nil)
+    }
+
+    /// Captures the screen `display` names, resolved to the pixel size the
+    /// bridge matches surfaces by.
+    ///
+    /// Passing the size down rather than letting the bridge work it out is what
+    /// makes a foldable capturable at all: the bridge sees several live
+    /// framebuffers and, on iPhone Duo, both built-in ones are live whichever
+    /// way the device is folded — the dark one solid black. Only the resolved
+    /// screen tells them apart.
+    ///
+    /// When the screens cannot be read (Xcode 26, a device still coming up) the
+    /// bridge falls back to its own single-screen reading, which is right for
+    /// every device that has one screen and is all those toolchains can boot.
+    public func screenshot(to url: URL, udid: String, display: DisplaySelection.Selector) throws {
+        try capture(to: url, udid: udid, display: try DisplayResolver.resolve(display, udid: udid))
+    }
+
+    /// nil means "the bridge decides": its own reading is right for every device
+    /// with one screen, and is all a toolchain that cannot read the screen list
+    /// has to offer.
+    private func capture(to url: URL, udid: String, display: DeviceDisplay?) throws {
         try SPSimBridge.writeFramebufferPNG(
             forUDID: udid,
             developerDir: developerDir,
+            displayPixelWidth: display?.pixelWidth ?? 0,
+            displayPixelHeight: display?.pixelHeight ?? 0,
             toPath: url.path
         )
     }
@@ -353,10 +388,18 @@ public final class NativeDriver: SimDriver {
         // Native READ via SimulatorKit.SimDeviceScreen.uiOrientation (UInt32
         // 1...4) — no FB frameworks, no osascript. The bridge maps the raw value
         // to the same 1...4 enum SimCore uses.
+        //
+        // The screen has to be named. Every gesture this driver sends is rotated
+        // by this value, and on iPhone Duo the bridge's default — screen 1 — is
+        // the COVER: while the device is open that reports the orientation of a
+        // screen that is switched off, and every tap lands somewhere else. 0
+        // keeps the screen-1 reading for when the screens cannot be read.
+        let active = (try? DisplayResolver.resolve(.active, udid: udid)) ?? nil
         var raw: UInt32 = 0
         try SPSimBridge.uiOrientation(
             forUDID: udid,
             developerDir: developerDir,
+            screenID: active.map { $0.screenID } ?? 0,
             rawOut: &raw,
             nameOut: nil
         )

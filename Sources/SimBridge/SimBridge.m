@@ -82,6 +82,13 @@ static NSString *const kBridgeErrorDomain = @"SPSimBridge";
 // orientation READ (uiOrientationForUDID:) can walk the SimDeviceScreen chain.
 static id SPPerformNoArg(id target, NSString *selectorName);
 
+// Which screen a capture is for, as a pixel size the surface list can be matched
+// against. Internal: the public entry point takes the size as an argument, and
+// nothing outside this file constructs an SPFrameCapture.
+@interface SPFrameCapture ()
+- (void)setRequestedDisplayPixelSize:(CGSize)size;
+@end
+
 static BOOL SPDlopen(NSString *path, NSString *label, NSError **error) {
     if (dlopen(path.fileSystemRepresentation, RTLD_NOW) != NULL) {
         return YES;
@@ -369,7 +376,22 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
 }
 
 + (BOOL)writeFramebufferPNGForUDID:(NSString *)udid developerDir:(NSString *)developerDir toPath:(NSString *)path error:(NSError **)error {
+    return [self writeFramebufferPNGForUDID:udid
+                               developerDir:developerDir
+                          displayPixelWidth:0
+                         displayPixelHeight:0
+                                     toPath:path
+                                      error:error];
+}
+
++ (BOOL)writeFramebufferPNGForUDID:(NSString *)udid
+                      developerDir:(NSString *)developerDir
+                 displayPixelWidth:(NSInteger)displayPixelWidth
+                displayPixelHeight:(NSInteger)displayPixelHeight
+                            toPath:(NSString *)path
+                             error:(NSError **)error {
     SPFrameCapture *capture = [SPFrameCapture new];
+    [capture setRequestedDisplayPixelSize:CGSizeMake(displayPixelWidth, displayPixelHeight)];
     if (![capture wireUpForUDID:udid developerDir:developerDir error:error]) return NO;
     CGImageRef image = [capture copyCurrentCGImage];
     if (image == NULL) {
@@ -391,12 +413,32 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
                       rawOut:(uint32_t *)rawOut
                      nameOut:(NSString *_Nullable *)nameOut
                        error:(NSError **)error {
+    return [self uiOrientationForUDID:udid
+                         developerDir:developerDir
+                             screenID:0
+                               rawOut:rawOut
+                              nameOut:nameOut
+                                error:error];
+}
+
++ (BOOL)uiOrientationForUDID:(NSString *)udid
+                developerDir:(NSString *)developerDir
+                    screenID:(NSInteger)requestedScreenID
+                      rawOut:(uint32_t *)rawOut
+                     nameOut:(NSString *_Nullable *)nameOut
+                       error:(NSError **)error {
     // Native, FB-free orientation READ via SimulatorKit. Recipe (matches AXe's
     // SimulatorOrientationReader against the same Apple private API):
-    //   screen = [[SimDeviceScreen alloc] initWithDevice:<SimDevice> screenID:1];
+    //   screen = [[SimDeviceScreen alloc] initWithDevice:<SimDevice> screenID:N];
     //   raw    = (UInt32)[[[screen screen] screenProperties] uiOrientation];
     // Every step is respondsToSelector-guarded so a churned private symbol
     // surfaces as an actionable NSError, not a crash.
+    //
+    // screenID 1 used to be hard-coded, which was the only built-in screen a
+    // simulator had. On iPhone Duo screen 1 is the COVER: reading it while the
+    // device is open reports the orientation of a screen that is switched off,
+    // and NativeDriver's tap math rotates every gesture by it. Resolve the lit
+    // screen instead, and keep 1 as the fallback for when that cannot be read.
     NSError *e = nil;
     if (![self loadCoreSimulator:&e]) { if (error) *error = e; return NO; }
     NSString *simKitPath = [self simulatorKitPathForDeveloperDir:developerDir];
@@ -418,8 +460,12 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
             NSLocalizedDescriptionKey: @"SimDeviceScreen lacks initWithDevice:screenID:"}];
         return NO;
     }
+    // 0 means the caller resolved no screen. Screen 1 is the only built-in screen
+    // on every device but iPhone Duo, where it is the cover — the same reading
+    // this call made unconditionally before `screenID:` existed.
+    NSInteger screenID = requestedScreenID > 0 ? requestedScreenID : 1;
     id allocated = ((id (*)(id, SEL))objc_msgSend)(screenClass, @selector(alloc));
-    id screenDevice = ((id (*)(id, SEL, id, NSInteger))objc_msgSend)(allocated, initSel, device, 1);
+    id screenDevice = ((id (*)(id, SEL, id, NSInteger))objc_msgSend)(allocated, initSel, device, screenID);
     if (screenDevice == nil) {
         if (error) *error = [NSError errorWithDomain:kBridgeErrorDomain code:52 userInfo:@{
             NSLocalizedDescriptionKey: @"SimDeviceScreen initWithDevice:screenID: returned nil"}];
@@ -1747,7 +1793,13 @@ static id SPPerformNoArg(id target, NSString *selectorName) {
     uint32_t _lastSeed;
     BOOL _hasSeed;
     BOOL _running;                  // mutated only on _queue
+    /// The pixel size of the screen the caller named (`--display`), or
+    /// CGSizeZero to capture whichever built-in screen is lit. Set once before
+    /// the first capture; never mutated afterwards.
+    CGSize _requestedSize;
 }
+
+- (void)setRequestedDisplayPixelSize:(CGSize)size { _requestedSize = size; }
 
 - (instancetype)init {
     if ((self = [super init])) {
@@ -1803,43 +1855,42 @@ static id SPPerformNoArg(id target, NSString *selectorName) {
     return YES;
 }
 
-/// Whether a framebuffer descriptor describes the built-in device screen.
-///
-/// CoreSimulator tags each display with a class: 0 is the device's own LCD, 1 is
-/// a secondary display (external, CarPlay, the Xcode 27 "Resizable" surface).
-/// `simctl io <udid> enumerate` prints the same value as "Display class".
-///
-/// The descriptor is a remote proxy that answers neither the property nor KVC,
-/// so the class is read off its `state` snapshot — an immutable proxy that does
-/// respond to KVC. Both hops are guarded; an unreadable class yields NO, which
-/// falls back to the previous largest-area behavior rather than failing the
-/// capture.
-/// The built-in screen's pixel size for `udid`, or CGSizeZero when it cannot be
-/// determined.
-///
-/// Read from `simctl io <udid> enumerate`, which prints each display's class
-/// alongside its default size. The obvious in-process route — the descriptor's
-/// `state` snapshot — is not usable: it is a `ROCKImmutableProxy` that answers
-/// neither the property nor KVC, and its backing `properties` map crashes the
-/// process on `objectForKey:` (SIGTRAP) and on `dictionaryRepresentation`
-/// (SIGSEGV), both measured on Xcode 27. A short-lived subprocess is the only
-/// safe way to read it, so the result is cached per UDID for the life of the
-/// process — the harness screenshots every step from one process, so the cost is
-/// paid once per run, not once per capture.
-static CGSize SPBuiltInDisplaySizeForUDID(NSString *udid) {
-    static NSMutableDictionary<NSString *, NSValue *> *cache;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+#pragma mark - Which built-in screen is lit
+//
+// CoreSimulator tags each display with a class: 0 is a screen built into the
+// device, 1 is a secondary surface (external, CarPlay, the Xcode 27 "Resizable"
+// display). Every phone before iPhone Duo vended exactly one class-0 screen, so
+// "the built-in screen" was a static property of the device and one reading of
+// it lasted a whole run.
+//
+// iPhone Duo (Xcode 27.1) vends TWO: the 1398x2034 cover and the 2007x2853
+// inner screen, both class 0, and `simctl io <udid> enumerate` reports BOTH as
+// "Power state: On" whichever way the device is folded. Only one of them is lit
+// at a time, and which one that is changes when someone folds the device in
+// Device Hub. Capturing the dark one yields an all-black PNG, so the question
+// "which screen is the device's screen" now has to be asked again each time.
+//
+// Which screen is lit is therefore a QUESTION, not a property of the device, and
+// answering it is policy — so it lives in Swift (SimCore's DisplaySelection over
+// SimShell's `devicectl device info displays`), where it is testable, and
+// reaches this file as an explicit pixel size on the capture call. What stays
+// here is the fallback for a caller that names no screen: the pre-Duo reading,
+// "the first class-0 screen simctl lists", which is right for every device that
+// has only one.
 
-    // Only a successful probe is cached. Caching a failure would pin the process
-    // to the largest-area fallback — i.e. black captures on Xcode 27 — for its
-    // whole life over one transient simctl hiccup (a device still coming up, a
-    // busy machine). A retry costs one subprocess; a stuck fallback costs the run.
-    @synchronized (cache) {
-        NSValue *cached = cache[udid];
-        if (cached != nil) return cached.sizeValue;
-    }
-
+/// The first "Display class: 0" size `simctl io <udid> enumerate` prints, or
+/// CGSizeZero.
+///
+/// The pre-devicectl route, kept for Xcode 26 and earlier. It cannot tell two
+/// built-in screens apart — it takes whichever the port enumeration happens to
+/// list first — but no runtime those toolchains can boot has two.
+///
+/// The obvious in-process route is not usable: the descriptor's `state` snapshot
+/// is a `ROCKImmutableProxy` that answers neither the property nor KVC, and its
+/// backing `properties` map crashes the process on `objectForKey:` (SIGTRAP) and
+/// on `dictionaryRepresentation` (SIGSEGV), both measured on Xcode 27. A
+/// short-lived subprocess is the only safe way to read it.
+static CGSize SPEnumeratedBuiltInDisplaySize(NSString *udid) {
     CGSize size = CGSizeZero;
     NSTask *task = [[NSTask alloc] init];
     task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/xcrun"];
@@ -1873,7 +1924,28 @@ static CGSize SPBuiltInDisplaySizeForUDID(NSString *udid) {
             }
         }
     } @catch (__unused NSException *ex) {}
+    return size;
+}
 
+/// `SPEnumeratedBuiltInDisplaySize`, cached per UDID for the life of the
+/// process — the harness screenshots every step from one process, so the cost is
+/// paid once per run, not once per capture.
+///
+/// Only a successful probe is cached. Caching a failure would pin the process to
+/// the largest-area fallback — i.e. black captures on Xcode 27 — for its whole
+/// life over one transient hiccup (a device still coming up, a busy machine).
+/// A retry costs one subprocess; a stuck fallback costs the run.
+static CGSize SPFallbackBuiltInDisplaySizeForUDID(NSString *udid) {
+    static NSMutableDictionary<NSString *, NSValue *> *cache;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+
+    if (udid.length == 0) return CGSizeZero;
+    @synchronized (cache) {
+        NSValue *cached = cache[udid];
+        if (cached != nil) return cached.sizeValue;
+    }
+    CGSize size = SPEnumeratedBuiltInDisplaySize(udid);
     if (size.width > 0 && size.height > 0) {
         @synchronized (cache) { cache[udid] = [NSValue valueWithSize:NSSizeFromCGSize(size)]; }
     }
@@ -1882,9 +1954,10 @@ static CGSize SPBuiltInDisplaySizeForUDID(NSString *udid) {
 
 /// The live IOSurface for the device's own screen.
 ///
-/// Selects the surface whose dimensions match the built-in display reported by
-/// `SPBuiltInDisplaySizeForUDID`, and falls back to "largest live surface" only
-/// when that size cannot be determined.
+/// Selects the surface whose dimensions match the screen the caller asked for —
+/// `_requestedSize` when a caller named one (`--display`), otherwise whichever
+/// built-in screen is currently lit — and falls back to "largest live surface"
+/// only when no size can be determined.
 ///
 /// The fallback used to be the whole rule, which was correct while a simulator
 /// vended exactly one live framebuffer. Xcode 27 vends several: alongside the
@@ -1893,9 +1966,16 @@ static CGSize SPBuiltInDisplaySizeForUDID(NSString *udid) {
 /// blank display instead of the screen — and because `screenshot`, the harness's
 /// per-step images, `verify-session` captures, and the mirror view all share
 /// this one selector, every visual artifact on an iOS 27 run came back black.
+///
+/// On iPhone Duo both built-in screens are live at once and the dark one is
+/// black, so largest-area would pick the inner screen even while the device is
+/// folded shut, so a Duo caller must name the screen it means.
 - (IOSurfaceRef)currentSurface {
     SEL sel = NSSelectorFromString(@"framebufferSurface");
-    CGSize builtInSize = _udid != nil ? SPBuiltInDisplaySizeForUDID(_udid) : CGSizeZero;
+    CGSize builtInSize = _requestedSize;
+    if (builtInSize.width <= 0 || builtInSize.height <= 0) {
+        builtInSize = _udid != nil ? SPFallbackBuiltInDisplaySizeForUDID(_udid) : CGSizeZero;
+    }
     IOSurfaceRef builtIn = NULL;
     IOSurfaceRef largest = NULL;
     size_t largestArea = 0;
@@ -1911,6 +1991,10 @@ static CGSize SPBuiltInDisplaySizeForUDID(NSString *udid) {
             builtIn = surface;
         }
     }
+    // A caller who NAMED a screen gets that screen or nothing. Falling back to
+    // the largest live surface there would hand back a different screen than the
+    // one asked for, and silently — the very failure `--display` exists to avoid.
+    if (_requestedSize.width > 0 && _requestedSize.height > 0) return builtIn;
     return builtIn ?: largest;
 }
 

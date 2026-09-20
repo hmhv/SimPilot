@@ -31,19 +31,25 @@ enum DeviceStateRecord {
         var warnings: [String]
     }
 
-    /// Read the three simctl-exposed appearance facets. Each read is independent:
-    /// one failing does not hide the other two, and a failure becomes a warning
-    /// rather than an error because evidence must never abort the run it
-    /// describes.
+    /// Read the appearance facets, plus the fold pose on a device that has one.
+    /// Each read is independent: one failing does not hide the others, and a
+    /// failure becomes a warning rather than an error because evidence must
+    /// never abort the run it describes.
+    ///
+    /// `foldState` returns nil for a device with one screen — the overwhelming
+    /// majority — and that is not a failed read: there is no pose, so no facet
+    /// is recorded and no warning is raised.
     static func capture(
         appearance: () throws -> String,
         contentSize: () throws -> String,
-        increaseContrast: () throws -> String
+        increaseContrast: () throws -> String,
+        foldState: () throws -> String? = { nil }
     ) -> Outcome {
         var outcome = Outcome(state: [:], warnings: [])
-        func record(_ facet: String, _ read: () throws -> String) {
+        func record(_ facet: String, _ read: () throws -> String?) {
             do {
-                let value = try read().trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let raw = try read() else { return }
+                let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !value.isEmpty else {
                     outcome.warnings.append("device state at run start: \(facet) read back empty")
                     return
@@ -56,6 +62,11 @@ enum DeviceStateRecord {
         record("appearance", appearance)
         record("content-size", contentSize)
         record("increase-contrast", increaseContrast)
+        // Which screen a foldable is showing decides what every screenshot and
+        // accessibility tree in this run is OF. Nothing in the run can set it,
+        // and nobody watching the results can tell a shut device from a layout
+        // that came out the wrong size — unless it is written down here.
+        record("fold-state", foldState)
         return outcome
     }
 }

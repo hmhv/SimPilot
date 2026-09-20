@@ -65,4 +65,61 @@ final class DeviceStateRecordTests: XCTestCase {
         XCTAssertEqual(outcome.state, [:], "nothing is invented when nothing could be read")
         XCTAssertEqual(outcome.warnings.count, 3)
     }
+
+    // MARK: - Fold state
+
+    /// Which screen a foldable is showing decides what every screenshot in the
+    /// run is OF, and nothing in the run can set it — so it is recorded next to
+    /// the appearance facets.
+    func testFoldPoseIsRecordedForAFoldable() {
+        let outcome = DeviceStateRecord.capture(
+            appearance: { "light" },
+            contentSize: { "medium" },
+            increaseContrast: { "disabled" },
+            foldState: { "folded (cover 466x678pt)" }
+        )
+        XCTAssertEqual(outcome.state["fold-state"], "folded (cover 466x678pt)")
+        XCTAssertEqual(outcome.warnings, [])
+    }
+
+    /// Almost every device has one screen and therefore no pose. That is not a
+    /// failed read: no facet, and no warning either.
+    func testADeviceThatCannotFoldRecordsNoFacetAndNoWarning() {
+        let outcome = DeviceStateRecord.capture(
+            appearance: { "light" },
+            contentSize: { "medium" },
+            increaseContrast: { "disabled" },
+            foldState: { nil }
+        )
+        XCTAssertNil(outcome.state["fold-state"])
+        XCTAssertEqual(outcome.warnings, [])
+        XCTAssertEqual(outcome.state.count, 3)
+    }
+
+    /// Callers written before the facet existed keep working, and keep recording
+    /// exactly the three facets they always did.
+    func testOmittingTheFoldReadIsTheSameAsHavingNone() {
+        let outcome = DeviceStateRecord.capture(
+            appearance: { "dark" },
+            contentSize: { "large" },
+            increaseContrast: { "enabled" }
+        )
+        XCTAssertEqual(outcome.state, [
+            "appearance": "dark",
+            "content-size": "large",
+            "increase-contrast": "enabled"
+        ])
+    }
+
+    func testAFailedFoldReadWarnsWithoutHidingTheOtherFacets() {
+        let outcome = DeviceStateRecord.capture(
+            appearance: { "light" },
+            contentSize: { "medium" },
+            increaseContrast: { "disabled" },
+            foldState: { throw ReadFailed() }
+        )
+        XCTAssertEqual(outcome.state.count, 3)
+        XCTAssertEqual(outcome.warnings.count, 1)
+        XCTAssertTrue(outcome.warnings[0].contains("fold-state"))
+    }
 }

@@ -16,6 +16,7 @@
 // instead of treating a missing subcommand as a hard failure.
 
 import Foundation
+import SimCore
 
 public enum DeviceCtlError: Error, CustomStringConvertible {
     case launchFailed(String)
@@ -423,6 +424,126 @@ public enum DeviceCtl {
             ["device", "process", "sendMemoryWarning", "--device", udid, "--pid", String(pid)],
             timeout: 30
         )
+    }
+
+    // MARK: - Displays
+
+    /// The device's built-in screens, newest reading.
+    ///
+    /// Measured at ~0.07s, so a caller that needs to know which screen is lit
+    /// right now can afford to ask every time — which it must on a foldable,
+    /// where the answer changes the moment someone folds the device in Device
+    /// Hub, and nothing notifies anyone that it did.
+    ///
+    /// Returns an empty array rather than throwing when devicectl answers with a
+    /// document this build cannot read, so a caller can fall back to the
+    /// single-screen assumption instead of failing a capture over a changed key.
+    public static func displays(udid: String) throws -> [DeviceDisplay] {
+        let result = try runJSON(["device", "info", "displays", "--device", udid], timeout: 30)
+        guard let entries = result["displays"] as? [[String: Any]] else { return [] }
+        return entries.compactMap { entry in
+            // A `type` this build does not recognise must not be taken for a
+            // screen built into the device. devicectl lists only integrated
+            // screens today — no CarPlay, no TVOut, no Resizable surface — but
+            // this key is where an external one would appear.
+            guard let type = entry["type"] as? [String: Any], type["integrated"] != nil else { return nil }
+            guard let screenID = entry["displayId"] as? Int,
+                  let size = entry["nativeSize"] as? [Int], size.count == 2,
+                  size[0] > 0, size[1] > 0
+            else { return nil }
+            return DeviceDisplay(
+                screenID: screenID,
+                name: entry["name"] as? String ?? "",
+                pixelWidth: size[0],
+                pixelHeight: size[1],
+                pointScale: entry["pointScale"] as? Int ?? 1,
+                // Absent on a device with one screen; see DeviceDisplay.active.
+                active: entry["active"] as? Bool,
+                primary: entry["primary"] as? Bool ?? false,
+                rotation: entry["currentOrientation"] as? String
+            )
+        }
+    }
+
+    // MARK: - Hinge
+
+    /// The hinge angle in degrees for a foldable, or nil for a device with no
+    /// hinge — and nil, rather than a hang, when the stream says nothing at all.
+    ///
+    /// devicectl only STREAMS this: `motion hinge-angle` monitors for 60s, has no
+    /// one-shot mode, and `--session-timeout` does not end the session early
+    /// enough to produce a JSON document. So this takes the first sample off the
+    /// stream (it arrives at +0.000s) and stops the process.
+    ///
+    /// The read has to be bounded by KILLING the child, not by checking a clock
+    /// between reads: `availableData` blocks until bytes arrive, so a stream that
+    /// never emits — a device still coming up, a devicectl that answers nothing —
+    /// parks the caller forever with the deadline never evaluated. Measured: a
+    /// Duo mid-boot hung `sipi fold-state` indefinitely this way. A watchdog that
+    /// terminates the child turns that into EOF, which the loop already handles.
+    public static func hingeAngle(udid: String, timeout: TimeInterval = 10) -> Double? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["devicectl", "device", "motion", "hinge-angle", "--device", udid]
+        let outPipe = Pipe()
+        process.standardOutput = outPipe
+        // /dev/null, not a Pipe. Nothing here reads stderr, and an unread pipe
+        // blocks the child once the OS buffer fills — the child would stop
+        // writing stdout, the sample would never arrive, and the call would sit
+        // until the watchdog killed it and returned nil, which this function's
+        // own contract reads as "this device has no hinge".
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+
+        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+        defer {
+            watchdog.cancel()
+            if process.isRunning { process.terminate() }
+            process.waitUntilExit()
+        }
+
+        // Read until the first sample line rather than to EOF: the stream does
+        // not end on its own for a minute.
+        //   • +0.000s : Angle:130.0°  Mech:130.0°  Velocity:+0.0°/s  ...
+        let handle = outPipe.fileHandleForReading
+        var buffer = ""
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty { return nil }   // EOF, including the watchdog's kill
+            buffer += String(decoding: chunk, as: UTF8.self)
+            if let angle = parseHingeAngle(buffer) { return angle }
+            // "Hinge angle monitoring is not available on this device." — a
+            // device with no hinge, which is not an error worth throwing over.
+            if buffer.contains("not available on this device") { return nil }
+        }
+    }
+
+    /// The first `Angle:<degrees>` reading in a hinge-angle stream, or nil while
+    /// no COMPLETE line carrying one has arrived yet.
+    ///
+    /// Complete is the operative word. The caller feeds this a buffer that grows
+    /// one `availableData` chunk at a time and stops at the first reading it
+    /// gets, so a half-arrived line is never revisited: reading `Angle:13` out
+    /// of a chunk that was about to continue `0.0°` reports 13°, and the harness
+    /// then stores 13 as the pose to restore the device to. Only text before the
+    /// last newline can be trusted to be whole.
+    ///
+    /// devicectl right-aligns the number in a fixed column, so a shut device
+    /// prints `Angle:  0.0°` with padding an open one (`Angle:130.0°`) does not
+    /// have. Skipping that whitespace is load-bearing: without it every angle
+    /// under 100° parsed as nothing at all, and only the wide values worked.
+    static func parseHingeAngle(_ text: String) -> Double? {
+        guard let lastNewline = text.lastIndex(of: "\n") else { return nil }
+        let complete = text[text.startIndex..<lastNewline]
+        for line in complete.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let range = line.range(of: "Angle:") else { continue }
+            // "Mech:" carries the same number; take the first, which is "Angle:".
+            let field = line[range.upperBound...].drop { $0 == " " }
+            let digits = field.prefix { $0.isNumber || $0 == "." || $0 == "-" }
+            if !digits.isEmpty, let value = Double(digits) { return value }
+        }
+        return nil
     }
 
     // MARK: - VoiceOver

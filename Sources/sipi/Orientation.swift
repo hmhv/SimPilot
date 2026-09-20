@@ -60,7 +60,7 @@ extension Sipi {
             }
 
             let orientation = try driver.uiOrientation(udid)
-            let name = orientationName(orientation)
+            let name = orientation.name
 
             // The plain (non-JSON) READ contract stays exactly the four upright
             // names — NativeDriver's coordinate math and the skills both parse it.
@@ -93,15 +93,5 @@ extension Sipi {
             }
         }
 
-        /// Stable lowercase name for an orientation. Matches the names the
-        /// SimBridge READ emits and the orientation SET path accepts.
-        private func orientationName(_ orientation: UIOrientation) -> String {
-            switch orientation {
-            case .portrait: return "portrait"
-            case .portraitUpsideDown: return "portrait-upside-down"
-            case .landscapeLeft: return "landscape-left"
-            case .landscapeRight: return "landscape-right"
-            }
-        }
     }
 }

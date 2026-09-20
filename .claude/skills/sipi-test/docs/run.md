@@ -87,7 +87,15 @@ its dark mode or accessibility text size behind and every later run adopts it as
 the baseline without failing. When a screenshot looks dark or oversized and no
 step asked for it, this is where to look. The record is evidence only: the
 harness does not decide whether the state is a leftover or intended, and a facet
-it could not read is missing from the record and named in `evidence-warnings`. Configure `log-predicate` when the app logs under a different
+it could not read is missing from the record and named in `evidence-warnings`.
+
+On a foldable the record carries a fourth facet, `fold-state` — `open (inner
+669x951pt)` or `folded (cover 466x678pt)`. It is there for the same reason as the
+others: nothing in the run sets it, no step can, and without it a whole run
+captured at 466x678 looks like a layout regression rather than a device someone
+left shut. A device with one screen has no pose and no facet.
+
+Configure `log-predicate` when the app logs under a different
 subsystem/process identity.
 
 The harness also cleans up simulator state it owns, at the end of the run and —

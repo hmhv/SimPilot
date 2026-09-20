@@ -191,6 +191,7 @@ Full JSON shapes and constraints: `actions.md`.
 | `wait` | — | `duration`, default 1s |
 | `open-url`, `privacy`, `push`, `location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`, `launch`, `terminate`, `network-condition` | varies | Simulator controls |
 | `biometrics`, `display-state`, `memory-warning` | varies | Device state, Xcode 27+ |
+| `fold` | `angle` 0…180 **or** `pose` `closed`/`open` | `duration` sweeps instead of jumping. iPhone Duo only |
 
 ## Selector
 
@@ -414,7 +415,7 @@ The harness may add these run-level fields:
 |---|---|---|
 | `artifacts` | object | Relative links such as `logs.ndjson`, `logs.stderr.txt`, or `crash-reports.json` |
 | `evidence-warnings` | string[] | Best-effort capture problems that do not alter the test verdict |
-| `device-state` | object | `appearance`, `content-size`, `increase-contrast` as read at run start, before any step; a facet that could not be read is omitted and named in `evidence-warnings`. Evidence of what the run inherited, not a verdict (see `../docs/run.md`) |
+| `device-state` | object | `appearance`, `content-size`, `increase-contrast` as read at run start, before any step — plus `fold-state` on a foldable (`open (inner 669x951pt)` / `folded (cover 466x678pt)`), which no step can set. A facet that could not be read is omitted and named in `evidence-warnings`. Evidence of what the run inherited, not a verdict (see `../docs/run.md`) |
 
 `logs.ndjson` contains JSON-object records only; the `log` command's filter
 banner and completion footer are removed. Unless `log-predicate` replaces it,

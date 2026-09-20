@@ -232,6 +232,21 @@ only speaks to simulators from Xcode 27 on. Check with
 Xcode 27 or later with `xcode-select`, or use the simctl-backed actions
 (`appearance`, `content-size`, `increase-contrast`) instead.
 
+### A screenshot comes back black, or the tree is 466x678 instead of 669x951
+
+An iPhone Duo has two built-in screens and lights one at a time; the dark one
+keeps vending a live, solid-black framebuffer. Both symptoms are the same fact:
+you are looking at the screen the device is not using.
+
+Run `sipi fold-state "$UDID"`. `"folded": true` means the cover (466x678pt) is
+the lit screen and the inner screen (669x951pt) is off — the sizes and the pose
+explain each other. `sipi screenshot` and `describe-ui` follow the lit screen on
+their own, so a black capture with `"folded"` matching what you expected is a
+real bug in the app, not a screen mix-up.
+
+To capture the other screen on purpose: `--display inner` / `--display cover`.
+To CHANGE the pose: `sipi fold "$UDID" --open` / `--closed`.
+
 ## Build
 
 | Problem | Solution |

@@ -57,8 +57,16 @@ public protocol SimDriver {
     func key(usage: Int, down: Bool, udid: String) throws
     /// Press a hardware button.
     func button(_ button: HardwareButton, udid: String) throws
-    /// Capture a single framebuffer frame to a PNG file.
+    /// Capture a single framebuffer frame to a PNG file — whichever screen the
+    /// device is currently lighting.
     func screenshot(to url: URL, udid: String) throws
+    /// Capture the screen `display` names.
+    ///
+    /// Separate from `screenshot(to:udid:)` because on a foldable the two are
+    /// different questions: the plain call asks for "what the user is looking
+    /// at", which changes when the device is folded, while this one can pin a
+    /// capture to the inner screen or the cover regardless.
+    func screenshot(to url: URL, udid: String, display: DisplaySelection.Selector) throws
     /// Native READ of the current physical UI orientation.
     func uiOrientation(_ udid: String) throws -> UIOrientation
     /// SET the device orientation: native PurpleEvent SET first, then devicectl
@@ -90,6 +98,13 @@ public protocol SimDriver {
 }
 
 extension SimDriver {
+    /// A driver that cannot address individual screens captures the one it has.
+    /// Correct for every device but a foldable, where it silently ignores the
+    /// selector — so a driver that can tell the screens apart must override it.
+    public func screenshot(to url: URL, udid: String, display: DisplaySelection.Selector) throws {
+        try screenshot(to: url, udid: udid)
+    }
+
     /// Frame-by-frame fallback over `multiTouch`.
     ///
     /// Correct but slower than a native implementation: each frame re-resolves

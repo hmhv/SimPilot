@@ -188,11 +188,12 @@ private struct DoctorReport {
 
         // Booted devices via native CoreSimulator enumeration.
         var bootedDevices: [String] = []
+        var bootedUDIDs: [String] = []
         do {
             let driver = NativeDriver(developerDir: developerDir)
-            bootedDevices = try driver.devices()
-                .filter { $0.booted }
-                .map { "\($0.name) (\($0.udid))" }
+            let booted = try driver.devices().filter { $0.booted }
+            bootedDevices = booted.map { "\($0.name) (\($0.udid))" }
+            bootedUDIDs = booted.map { $0.udid }
         } catch {
             // Surface the failure as a non-core informational note; core dlopen
             // checks above already gate the exit code.
@@ -203,7 +204,7 @@ private struct DoctorReport {
             developerDir: developerDir,
             checks: checks,
             bootedDevices: bootedDevices,
-            notes: notes(developerDir: developerDir)
+            notes: notes(developerDir: developerDir, bootedUDIDs: bootedUDIDs)
         )
     }
 
@@ -216,7 +217,7 @@ private struct DoctorReport {
     /// devicectl is deliberately a NOTE, not a core check: it is not required to
     /// drive a simulator, and gating the exit code on it would make `sipi doctor`
     /// fail on a perfectly working Xcode 26 setup.
-    private static func notes(developerDir: String) -> [String] {
+    private static func notes(developerDir: String, bootedUDIDs: [String] = []) -> [String] {
         var notes: [String] = []
 
         let build = BuildInfo.probe()
@@ -287,6 +288,34 @@ private struct DoctorReport {
             notes.append(
                 "sipi drives simulators headlessly (no window needed); "
                 + "this Xcode ships no Device Hub / Simulator app to open."
+            )
+        }
+
+        // A booted foldable, if one is here. Everything the rest of sipi does
+        // depends on which of its screens is lit, and nothing in Xcode 27.1 can
+        // change that from a command line, so say both plainly rather than let a
+        // black capture or a 466x678 accessibility tree be the first hint.
+        for udid in bootedUDIDs {
+            let displays = DisplayResolver.displays(udid: udid)
+            guard displays.count > 1 else { continue }
+            let roles = DisplaySelection.roles(displays)
+            let inventory = displays
+                .map { "\(roles[$0.screenID]?.rawValue ?? "screen") \($0.pointWidth)x\($0.pointHeight)pt" }
+                .joined(separator: ", ")
+            let lit = DisplaySelection.active(displays).map {
+                "\(roles[$0.screenID]?.rawValue ?? "screen") screen is lit"
+            } ?? "no screen is lit (the device is asleep)"
+            // Folding needs the iPhoneSimulator SDK to build its guest helper, so
+            // say up front whether this toolchain can, rather than let the first
+            // `fold` in a suite be what discovers it cannot.
+            let folding = HingeControl.canBuildHelper()
+                ? "`sipi fold --closed|--open|--angle` changes it"
+                : "`sipi fold` is UNAVAILABLE here: it builds a small guest helper with the "
+                  + "iPhoneSimulator SDK on first use, and this toolchain has no such SDK"
+            notes.append(
+                "\(udid) has two built-in screens (\(inventory)) and the \(lit). "
+                + "`sipi fold-state` reports the pose, \(folding), and `--display inner|cover` "
+                + "picks a screen to capture. Neither simctl nor devicectl can fold a simulator."
             )
         }
 

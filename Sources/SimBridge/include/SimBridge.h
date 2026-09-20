@@ -199,8 +199,27 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Capture a single framebuffer frame to a PNG file (headless utility / capture
 /// verification). Uses the zero-copy IOSurface path. Returns NO + error on failure.
+///
+/// Captures whichever built-in screen `simctl io <udid> enumerate` lists first.
+/// On a device with two built-in screens — iPhone Duo — that is a coin toss, and
+/// the dark one is solid black, so such a caller must use the variant below.
 + (BOOL)writeFramebufferPNGForUDID:(NSString *)udid
                       developerDir:(NSString *)developerDir
+                            toPath:(NSString *)path
+                             error:(NSError **)error;
+
+/// Capture the screen whose framebuffer is `displayPixelWidth` x
+/// `displayPixelHeight` pixels (its UNROTATED native size, as
+/// `devicectl device info displays` reports in `nativeSize`).
+///
+/// Pass 0 x 0 for the enumerate-order reading above. With a size, the capture is
+/// strict: if no live surface has those dimensions it fails rather than falling
+/// back to another screen, because silently capturing a screen other than the
+/// one asked for is the exact failure naming a screen is meant to prevent.
++ (BOOL)writeFramebufferPNGForUDID:(NSString *)udid
+                      developerDir:(NSString *)developerDir
+                 displayPixelWidth:(NSInteger)displayPixelWidth
+                displayPixelHeight:(NSInteger)displayPixelHeight
                             toPath:(NSString *)path
                              error:(NSError **)error;
 
@@ -208,7 +227,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Read the current physical UI orientation natively, with no FB frameworks and
 /// no osascript: SimulatorKit's `SimDeviceScreen.uiOrientation`. Wire-up:
-///   screen = [[SimDeviceScreen alloc] initWithDevice:<SimDevice> screenID:1];
+///   screen = [[SimDeviceScreen alloc] initWithDevice:<SimDevice> screenID:N];
 ///   props  = [[screen screen] screenProperties];
 ///   raw    = (UInt32)[props uiOrientation];
 /// The raw value is a `UIInterfaceOrientation`-style enum, 1...4:
@@ -223,6 +242,20 @@ NS_ASSUME_NONNULL_BEGIN
 /// lands in M4.
 + (BOOL)uiOrientationForUDID:(NSString *)udid
                 developerDir:(NSString *)developerDir
+                      rawOut:(nullable uint32_t *)rawOut
+                     nameOut:(NSString *_Nullable *_Nullable)nameOut
+                       error:(NSError **)error;
+
+/// As above, reading `screenID` instead of screen 1.
+///
+/// Screen 1 is the only built-in screen on every device except iPhone Duo, where
+/// it is the COVER. Reading it while the device is open reports the orientation
+/// of a switched-off screen — and NativeDriver rotates every gesture by this
+/// value, so the wrong screen here misplaces every tap. Pass 0 to keep the
+/// screen-1 reading.
++ (BOOL)uiOrientationForUDID:(NSString *)udid
+                developerDir:(NSString *)developerDir
+                    screenID:(NSInteger)screenID
                       rawOut:(nullable uint32_t *)rawOut
                      nameOut:(NSString *_Nullable *_Nullable)nameOut
                        error:(NSError **)error;

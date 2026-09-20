@@ -102,7 +102,7 @@ Use the sipi-verify skill to verify the dark mode fix looks correct
 
 **直接驱动 simulator:**
 
-`sipi` 也是一个可由 agent 逐步调用的普通 CLI。`describe-ui --format compact` 以每个元素一行（类型、标签、id、值、frame、点击坐标）输出无障碍树，体积只有 JSON 的几分之一；`wait-for` 会轮询直到某个标签、id、值或文本出现（或消失），替代 sleep；`screenshot --max-pixel 600` 返回足够小、便于查看的截图；`memory-warning` 发送 Simulator.app Debug 菜单曾提供的内存警告（Xcode 27 及以上）。完整命令见 `sipi --help`。
+`sipi` 也是一个可由 agent 逐步调用的普通 CLI。`describe-ui --format compact` 以每个元素一行（类型、标签、id、值、frame、点击坐标）输出无障碍树，体积只有 JSON 的几分之一；`wait-for` 会轮询直到某个标签、id、值或文本出现（或消失），替代 sleep；`screenshot --max-pixel 600` 返回足够小、便于查看的截图；`memory-warning` 发送 Simulator.app Debug 菜单曾提供的内存警告（Xcode 27 及以上）；`fold-state` 报告 iPhone Duo 的两块屏幕中哪一块是点亮的，`fold --closed|--open|--angle` 可以真正折叠／展开它（simctl 和 devicectl 都做不到），`--display inner|cover` 可以截取熄灭的那一块。完整命令见 `sipi --help`。
 
 **管理套件:**
 ```text

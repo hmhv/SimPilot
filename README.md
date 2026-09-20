@@ -109,7 +109,7 @@ Each run writes `summary.json` — status, counts, and the first failing step of
 
 **Drive the simulator directly:**
 
-`sipi` is also a plain CLI an agent can call one step at a time. `describe-ui --format compact` prints the accessibility tree as one line per element — type, label, id, value, frame, tap point — at a fraction of the JSON size; `wait-for` polls until a label, id, value, or text appears (or disappears) instead of sleeping; `screenshot --max-pixel 600` returns a capture small enough to look at cheaply; `memory-warning` sends the memory-pressure warning that Simulator.app's Debug menu used to (Xcode 27+). Run `sipi --help` for the full command set.
+`sipi` is also a plain CLI an agent can call one step at a time. `describe-ui --format compact` prints the accessibility tree as one line per element — type, label, id, value, frame, tap point — at a fraction of the JSON size; `wait-for` polls until a label, id, value, or text appears (or disappears) instead of sleeping; `screenshot --max-pixel 600` returns a capture small enough to look at cheaply; `memory-warning` sends the memory-pressure warning that Simulator.app's Debug menu used to (Xcode 27+); `fold-state` reports which of an iPhone Duo's two screens is lit, `fold --closed|--open|--angle` folds it — something neither simctl nor devicectl can do — and `--display inner|cover` captures the screen that is dark. Run `sipi --help` for the full command set.
 
 **Manage suites:**
 ```text

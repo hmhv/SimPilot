@@ -42,6 +42,22 @@ captures share an appearance setting, and interleaving them would race.
 Use the same `--index` and check name across variants so the report grid aligns.
 Additional checks take the next index.
 
+**On an iPhone Duo, capture both poses and name the variant for each.** It has
+two screens — inner 669x951pt when open, cover 466x678pt when shut — and captures
+follow whichever is lit, so `duo-light` means nothing on its own. Set the pose,
+then capture under a name that says which it is:
+
+```bash
+sipi fold "$UDID" --open
+sipi verify-session capture "$VERIFY_DIR" duo-open-light "settings-screen" --index 1 --device "$UDID" --appearance light
+sipi fold "$UDID" --closed
+sipi verify-session capture "$VERIFY_DIR" duo-cover-light "settings-screen" --index 1 --device "$UDID" --appearance light
+```
+
+The two poses share one UDID, so unlike the iPhone/iPad chains they must run
+sequentially. Put the device back the way you found it when the chain ends —
+`sipi fold-state` before the first fold tells you what that was.
+
 ### Waiting for a state
 
 Between driving an action and capturing its result, wait for the state rather
