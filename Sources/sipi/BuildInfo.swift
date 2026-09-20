@@ -5,7 +5,7 @@
 //
 // `sipi version` prints the semver only, so a source fix that does not bump
 // VERSION leaves a stale install indistinguishable from a current one: the
-// binary answers "1.1.0", the checkout says "1.1.0", and the behavior everyone
+// binary answers "2.0.0", the checkout says "2.0.0", and the behavior everyone
 // is looking at is the old one. `doctor` therefore reports the binary path and
 // install time, and — only when the process is running inside a SimPilot
 // checkout, where the comparison is meaningful — warns when the checkout has
