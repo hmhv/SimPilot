@@ -258,6 +258,7 @@ final class UndrivableScreenTests: XCTestCase {
         let reason = try XCTUnwrap(TapTargetCheck.undrivableScreen(displays: duo(folded: false)))
         XCTAssertTrue(reason.contains("inner screen"), reason)
         XCTAssertTrue(reason.contains("--closed"), "it must say what to do instead: \(reason)")
+        XCTAssertTrue(reason.contains("tap --xcode-mcp"), "it must name the route that reached the cover: \(reason)")
     }
 
     /// Shut, nothing is KNOWN to be wrong with the screen, so there is nothing to

@@ -15,6 +15,26 @@ commands — the foundation `sipi-test` and `sipi-verify` both build on.
 composition, and coordinate bounds checking. You own intent — what to tap, what
 counts as the right screen, and when the observed state contradicts the request.
 
+## sipi or Xcode's MCP tools
+
+When Xcode's MCP server is also connected, split the work like this:
+
+- **Simulators: sipi.** Reading the tree, tapping by selector, typing, folding
+  an iPhone Duo, capturing either screen, saved tests. It is headless, needs no
+  open Xcode workspace, and leaves the device as it found it.
+- **Do not call Xcode's `DeviceInteraction*` tools on a simulator yourself.** Any
+  such session — taps alone included — leaves every app launched afterwards with
+  an empty accessibility tree until the device restarts. The tools also take
+  coordinates only, and on an iPhone Duo they drive the cover even while the
+  inner screen is lit.
+- **Reach Xcode's service only through sipi's opt-in routes**, last in the
+  session or followed by `xcrun simctl shutdown` + `boot`:
+  `sipi type --xcode-mcp` for a simulator that stopped accepting keyboard HID,
+  `sipi tap --xcode-mcp` for a Duo cover that ignores sipi's taps.
+- **Physical devices: Xcode.** sipi drives simulators only.
+- **Neither** can tap a Duo's inner screen or rotate a Duo; rotation is Device
+  Hub's rotate button.
+
 ## When to use
 
 - Ad-hoc driving that is neither a regression test (`sipi-test`) nor a feature

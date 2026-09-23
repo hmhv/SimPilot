@@ -183,6 +183,7 @@ Recommend adding `.simpilot/runs/` and `.simpilot/verify/` to the project's `.gi
 - A tap that resolves to an element the accessibility tree claims is present, but whose visible area is not actually touchable, still reports success. `describe-point` returns the element, so nothing in the stack can tell the difference; Xcode's own tooling behaves the same way
 - Face ID / Touch ID and the accessibility appearance facets beyond light/dark need Xcode 27 — they go through `xcrun devicectl`, which only targets simulators from that release on
 - Contrast ratios and clipped text are out of scope for `sipi a11y-audit`; both need pixel analysis of the rendered frame
+- **iPhone Duo input is limited in Xcode 27.1**: the inner screen takes no touches at all, and the cover takes sipi's taps on some devices and not others (a restart brought one back). `tap --xcode-mcp` reached a cover that ignored sipi's taps — with the same cost as `type --xcode-mcp`, see below. Nothing can rotate a Duo simulator from a script; use Device Hub's rotate button
 - Simulator only — physical devices are not supported
 
 ## Typing on a simulator that stopped accepting keystrokes
@@ -220,6 +221,8 @@ including a grant that belongs to an earlier build at the same path — and
 `--clear` cannot use this path: select-all and delete are keystrokes too, and
 the service types but cannot empty a field. Use `sipi set-text` to replace a
 value outright.
+
+The same approval enables `sipi tap --xcode-mcp`, for an iPhone Duo whose cover screen ignores sipi's taps: on the device measured, Xcode's service landed taps that sipi's did not, by label and by coordinates. It cannot reach a Duo's inner screen — the service drives the cover even while the device is open — so sipi refuses that combination. The cost is the same and belongs to the session, not the typing: re-measured on iOS 27.1 with taps alone, every app launched afterwards read an empty accessibility tree until the device restarted.
 
 ## Note
 

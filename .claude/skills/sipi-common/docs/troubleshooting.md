@@ -81,8 +81,10 @@ on iOS 27.0 24A5423a — the key-sorted JSON matches exactly with VoiceOver on a
 off).
 
 So case 2 now only happens when VoiceOver was switched by hand, in Settings or on
-another tool's behalf — **or after a `type --xcode-mcp`** (Xcode's
-device-interaction service; sipi never takes that path unasked). Measured on
+another tool's behalf — **or after any Xcode device-interaction session**:
+`type --xcode-mcp`, `tap --xcode-mcp`, or an agent calling Xcode's MCP
+`DeviceInteraction*` tools directly (sipi never takes that path unasked; on iOS
+27.1 a session of taps and `orientation` alone did it). Measured on
 Xcode 27.0 RC / iOS 27.0 24A434 with a
 control: one such session typed fine and left the running app readable (16 nodes),
 and every app launched afterwards read a single empty root (5s and 10s) while
@@ -253,7 +255,9 @@ Two different things, and `sipi fold-state` tells them apart.
 
 **Open (inner screen lit).** Expected: the inner screen takes no input in Xcode
 27.1 — the hit-test answers nothing anywhere on it and touches are discarded,
-measured on a freshly created device. Reading and capture still work.
+measured on a freshly created device. Xcode's device-interaction service cannot
+reach it either (it drives the cover even while the device is open), so
+`tap --xcode-mcp` is refused here. Reading and capture still work.
 `sipi fold "$UDID" --closed` and try the cover — see below, it works on some
 Duo devices and not others, so check the effect rather than assuming.
 
@@ -262,12 +266,21 @@ One Duo accepted input on its cover; four created afterwards did not, with no
 difference found between them — not uptime, not a fold transition, not the
 device's own data, and `simctl erase`, recreating the device and restarting
 CoreSimulatorService all failed to change it either way. An iPhone 17 taps
-correctly throughout, so the host and sipi are fine.
+correctly throughout. Later (2026-09-23) one Duo that ignored sipi's cover taps
+took them after `xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"`.
 
-Since all three of those failed here, there is nothing left to suggest trying
-first. Check the effect once (below); if input does not work, treat that Duo as
-read-only — capture, `describe-ui` and `describe-point` all work — and drive the
-same app on a non-foldable device.
+In order:
+
+1. Check the effect once (below).
+2. If nothing happened, restart the device and check again — no side effect.
+3. Still nothing: send the taps that matter with `sipi tap "$UDID" --xcode-mcp
+   --label …` (or `-x/-y`). Xcode's device-interaction service landed where
+   sipi's tap did not, on the same device and state. Every app launched after it
+   reads an empty tree until the device restarts, so do it last or restart
+   before the next launch; setup is the one-time approval under § `type`
+   failures. It does not exist for `double-tap`, `swipe` or saved tests.
+4. Otherwise treat that Duo as read-only — capture, `describe-ui` and
+   `describe-point` all work — and drive the same app on a non-foldable device.
 
 Note that `tap` printing `ok` only means the event was sent. Confirm with an
 effect:

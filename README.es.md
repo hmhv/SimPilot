@@ -172,6 +172,7 @@ Se recomienda añadir `.simpilot/runs/` y `.simpilot/verify/` al `.gitignore` de
 - Un toque sobre un elemento que el árbol de accesibilidad declara presente pero cuya área visible no es realmente táctil sigue informando éxito. `describe-point` también devuelve ese elemento, así que ninguna capa puede distinguirlo; las herramientas del propio Xcode se comportan igual
 - Face ID / Touch ID y las facetas de apariencia de accesibilidad más allá de light/dark necesitan Xcode 27: pasan por `xcrun devicectl`, que solo apunta a simuladores de esa versión en adelante
 - Las relaciones de contraste y el texto recortado quedan fuera del alcance de `sipi a11y-audit`; ambos requieren un análisis de píxeles del fotograma renderizado
+- **La entrada en iPhone Duo es limitada en Xcode 27.1**: la pantalla interior no acepta ningún toque, y la exterior acepta los toques de sipi en algunos dispositivos y en otros no (en uno volvieron tras reiniciar). `tap --xcode-mcp` llegó a una pantalla exterior que ignoraba los toques de sipi, con el mismo coste que `type --xcode-mcp` (ver más abajo). Nada puede girar un simulador Duo desde un script; usa el botón de rotación de Device Hub
 - Solo simulador: los dispositivos físicos no son compatibles
 
 ## Escribir en un simulador que dejó de aceptar pulsaciones
@@ -191,6 +192,8 @@ sipi xcode-mcp --approve <ruta a un .xcodeproj o .xcworkspace>
 El proyecto se abre solo para provocar el diálogo de aprobación de Xcode y se cierra de inmediato. Una vez configurado, sipi inicia el servicio si no está en marcha. Xcode vincula la concesión al binario exacto, así que `sipi update` o una recompilación obligan a repetir el paso de aprobación. `sipi xcode-mcp` informa del estado actual y `sipi doctor` indica si esa vía está disponible.
 
 `--clear` no puede usar esta vía: seleccionar todo y borrar también son pulsaciones, y el servicio escribe pero no puede vaciar un campo. Use `sipi set-text` para reemplazar un valor por completo.
+
+La misma aprobación habilita `sipi tap --xcode-mcp`, para un iPhone Duo cuya pantalla exterior ignora los toques de sipi: en el dispositivo medido, el servicio de Xcode entregó toques que los de sipi no, tanto por etiqueta como por coordenadas. No llega a la pantalla interior del Duo —el servicio controla la exterior incluso con el dispositivo abierto—, así que sipi rechaza esa combinación. El coste es el mismo y viene de la sesión, no de la escritura: medido de nuevo en iOS 27.1 solo con toques, todas las apps abiertas después leyeron un árbol de accesibilidad vacío hasta reiniciar el dispositivo.
 
 
 ## Note

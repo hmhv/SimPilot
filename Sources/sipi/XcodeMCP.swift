@@ -1,8 +1,9 @@
 // XcodeMCP.swift
 //
 // A narrow client for Xcode's own MCP device-interaction service, used only
-// where a caller asks for it (`sipi type --xcode-mcp`), for the one thing
-// sipi's driver cannot always do: deliver real keystrokes.
+// where a caller asks for it (`sipi type --xcode-mcp`, `sipi tap --xcode-mcp`),
+// for the two things sipi's driver cannot always do: deliver real keystrokes,
+// and deliver a tap to an iPhone Duo's cover screen.
 //
 // A simulator can stop accepting the Indigo HID keyboard messages sipi injects.
 // Measured on Xcode 27.0 beta 6: on such a device sipi builds and sends exactly
@@ -18,9 +19,15 @@
 // per-key HID does: with a Japanese keyboard active, typing "hello" produces
 // "へっぉ" and reports success.
 //
+// The Duo cover is the same shape of problem: on Xcode 27.1 beta a Duo whose
+// cover ignored sipi's taps took Xcode's `t x y` on the same device and state.
+// Xcode's route cannot help with the inner screen — it drives the cover even
+// while the device is open — and a session that lived through a fold stopped
+// delivering, which is one more reason every call opens a session of its own.
+//
 // This is deliberately not a general wrapper. sipi keeps its own implementation
-// of everything it already does; this covers only text entry, only when asked
-// for, and its absence is never an error — the driver's own paths remain the
+// of everything it already does; this covers only text entry and that one tap,
+// only when asked for, and its absence is never an error — the driver's own paths remain the
 // default and `set-text` still needs no keyboard at all. It is not used as an
 // automatic fallback either: measured on Xcode 27.0 RC / iOS 27.0 24A434, one
 // device-interaction session leaves every app launched afterwards on that
@@ -468,13 +475,45 @@ enum XcodeMCP {
         return false
     }
 
-    /// Type `text` into whatever currently has keyboard focus on `udid`.
-    ///
-    /// Opens a device-interaction session, sends one keyboard command, and
-    /// closes it. A session that is not bound to a workspace does not touch the
-    /// running app — verified by process id across a start/end pair — so this is
-    /// safe to call in the middle of a test.
+    /// Type `text` into whatever currently has keyboard focus on `udid`, in one
+    /// session of its own (see `synthesize`).
     static func typeText(_ text: String, udid: String, developerDir: String) throws {
+        // `kbd` takes the rest of the command verbatim, so it must come last and
+        // the text needs no escaping — but a newline would end the JSON-RPC line
+        // and a control character would not survive, so those go through the
+        // documented \u{XXXX} form.
+        try synthesize("sender keyboard kbd " + escaped(text), label: "type",
+                       udid: udid, developerDir: developerDir)
+    }
+
+    /// Tap at (`x`, `y`) in POINTS, in the coordinate space `describe-ui` reports.
+    ///
+    /// On an iPhone Duo this reaches the cover screen where sipi's own HID tap
+    /// sometimes does not (measured on Xcode 27.1 beta, 2026-09-23: same device,
+    /// same state, sipi's tap sent and nothing fired, this one fired). It never
+    /// reaches the inner screen: the service captures and drives the cover even
+    /// while the device is open. Callers refuse the open pose before getting here.
+    ///
+    /// The command grammar takes whole points; a hit target is never smaller
+    /// than one, so rounding cannot move a tap off its element.
+    static func tap(x: Double, y: Double, udid: String, developerDir: String) throws {
+        try synthesize(tapCommand(x: x, y: y), label: "tap", udid: udid, developerDir: developerDir)
+    }
+
+    /// `t <x> <y>` — the grammar Xcode's device-interaction skill documents, with
+    /// the points measured on a Duo cover (describe-ui's hit point, unchanged).
+    static func tapCommand(x: Double, y: Double) -> String {
+        "t \(Int(x.rounded())) \(Int(y.rounded()))"
+    }
+
+    /// Open a device-interaction session, send one command, and close it.
+    ///
+    /// A session that is not bound to a workspace does not touch the running
+    /// app — verified by process id across a start/end pair — but it does leave
+    /// every app LAUNCHED afterwards with an empty accessibility tree until the
+    /// device restarts (iOS 27.0 with typing; iOS 27.1 with taps alone). Every
+    /// caller is opt-in for that reason.
+    private static func synthesize(_ command: String, label: String, udid: String, developerDir: String) throws {
         if case .failure(let reason) = availability(developerDir: developerDir) { throw reason }
         guard let bridge = bridgePath(developerDir: developerDir) else { throw Unavailable.toolMissing }
 
@@ -485,8 +524,10 @@ enum XcodeMCP {
         // headless mode was on.
 
         // Session identifiers are rejected while a previous one with the same
-        // name is still settling, so make each call's name unique.
-        let session = "sipi-type-\(UInt32.random(in: 0..<UInt32.max))"
+        // name is still settling, so make each call's name unique. A fresh
+        // session per command also matters on a Duo: a session that lived
+        // through a fold stopped delivering taps, and a new one delivered again.
+        let session = "sipi-\(label)-\(UInt32.random(in: 0..<UInt32.max))"
 
         let client = try Client(bridgePath: bridge, developerDir: developerDir)
         // Declared first so it runs LAST: `defer` unwinds in reverse, and the
@@ -503,15 +544,11 @@ enum XcodeMCP {
                                  ["interactionSessionKey": session], timeout: 20)
         }
 
-        // `kbd` takes the rest of the command verbatim, so it must come last and
-        // the text needs no escaping — but a newline would end the JSON-RPC line
-        // and a control character would not survive, so those go through the
-        // documented \u{XXXX} form.
         _ = try client.call("DeviceInteractionSynthesize", [
             // NOTE: this parameter is `interactSessionKey` while EndSession's is
             // `interactionSessionKey`. That inconsistency is Xcode's, not a typo.
             "interactSessionKey": session,
-            "interactionCommand": "sender keyboard kbd " + escaped(text),
+            "interactionCommand": command,
         ])
     }
 

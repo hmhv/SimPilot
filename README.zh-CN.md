@@ -172,6 +172,7 @@ SimPilot 在 `.simpilot/` 下使用如下目录结构:
 - 无障碍树声称存在、但实际无法触摸的元素，点击后仍会报告成功。`describe-point` 同样会返回该元素，因此任何一层都无法区分；Xcode 自身的工具也是同样的行为
 - Face ID / Touch ID，以及 light/dark 之外的无障碍外观项需要 Xcode 27——它们通过 `xcrun devicectl` 实现，而 devicectl 只能作用于该版本及之后的 simulator
 - 对比度和文字截断不在 `sipi a11y-audit` 的范围内；两者都需要对渲染帧做像素分析
+- **Xcode 27.1 中 iPhone Duo 的输入受限**：内屏完全不接受触摸，外屏则因设备而异，有的接受 sipi 的点击，有的不接受（有一台重启后恢复）。对忽略 sipi 点击的外屏，`tap --xcode-mcp` 可以送达，代价与 `type --xcode-mcp` 相同（见下文）。无法通过脚本旋转 Duo simulator，请使用 Device Hub 的旋转按钮
 - 仅支持 simulator，不支持真机
 
 ## 向不再接受按键输入的 simulator 输入文本
@@ -191,6 +192,8 @@ sipi xcode-mcp --approve <.xcodeproj 或 .xcworkspace 的路径>
 打开该项目只是为了弹出 Xcode 的授权对话框，随后会立即关闭。配置完成后，若服务尚未运行，sipi 会将其启动。Xcode 将授权绑定到具体的二进制文件，因此每次 `sipi update` 或重新构建后都需要再次执行授权步骤。当前状态可用 `sipi xcode-mcp` 查看，该路径是否可用可用 `sipi doctor` 确认。
 
 `--clear` 无法使用该路径：全选和删除同样是按键输入，而该服务只能输入文本、无法清空字段。需要整体替换值时请使用 `sipi set-text`。
+
+同一个授权也会启用 `sipi tap --xcode-mcp`，用于外屏忽略 sipi 点击的 iPhone Duo：在实测设备上，sipi 的点击无效时，经由 Xcode 服务的点击无论按标签还是按坐标都能送达。它无法到达 Duo 的内屏——即使设备处于展开状态，该服务操作的仍是外屏——因此 sipi 会拒绝这种组合。代价相同，且来自会话本身而非输入：在 iOS 27.1 上仅使用点击重新测量，之后启动的 App 的无障碍树在设备重启前都是空的。
 
 
 ## Note

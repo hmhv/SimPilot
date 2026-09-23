@@ -21,6 +21,7 @@
 
 import ArgumentParser
 import Foundation
+import SimBridge
 import SimCore
 import SimNative
 
@@ -369,6 +370,19 @@ extension Sipi {
             Coordinates and a selector are mutually exclusive: passing both is an
             error rather than a silent preference for the coordinates, so a typo'd
             selector cannot look like it resolved.
+
+            --xcode-mcp sends the tap through Xcode 27's device-interaction service
+            instead of sipi's own HID path. It exists for one case: an iPhone Duo
+            whose cover screen ignores sipi's taps (measured on Xcode 27.1 beta: on
+            the same device and state sipi's tap was sent and nothing fired, while
+            this one fired). It cannot reach a Duo's inner screen — the service
+            drives the cover even while the device is open — so an open Duo is
+            refused. It is never used unasked: every app launched afterwards on the
+            device has an empty accessibility tree until the device restarts
+            (`xcrun simctl shutdown` + `boot`), so tap last, or restart before the
+            next launch. Selectors still resolve through sipi's own tree first.
+            Needs Xcode 27, `sudo xcrun mcp-server enable`, and
+            `sipi xcode-mcp --approve` once.
             """
         )
 
@@ -376,6 +390,9 @@ extension Sipi {
 
         @Argument(help: "Simulator UDID.")
         var udid: String
+
+        @Flag(name: .customLong("xcode-mcp"), help: "Tap through Xcode's device-interaction service instead. For an iPhone Duo cover that ignores sipi's taps; never the inner screen. Apps launched afterwards read an empty tree until the device restarts.")
+        var useXcodeMCP: Bool = false
 
         @Option(name: .customShort("x"), help: "X (normalized 0...1, or pixels with --pixel). Use with -y for a direct tap.")
         var x: Double?
@@ -406,6 +423,10 @@ extension Sipi {
 
         func run() throws {
             let driver = NativeDriver()
+            if useXcodeMCP {
+                try tapThroughXcode(driver: driver)
+                return
+            }
 
             // Direct point — standardize to internal normalized 0...1 (Gate 4).
             if let x, let y {
@@ -423,6 +444,49 @@ extension Sipi {
                 driver: driver, udid: udid, query: query, elementType: elementType, verb: "tap"
             )
             try driver.tap(point, udid: udid)
+            print("ok")
+        }
+
+        /// The `--xcode-mcp` route: resolve where to tap exactly as the HID route
+        /// does, then hand Xcode the point in the describe-ui coordinate space.
+        private func tapThroughXcode(driver: NativeDriver) throws {
+            // Refused before anything is resolved: on an open Duo the selector
+            // path would fail on the hit-test with the HID explanation, and a
+            // coordinate tap would be sent to the dark cover and report ok.
+            if TapTargetCheck.undrivableScreen(displays: DisplayResolver.displays(udid: udid)) != nil {
+                emitError("Error: --xcode-mcp cannot reach an iPhone Duo's inner screen either: "
+                    + "Xcode's device-interaction service drives the cover even while the device is "
+                    + "open (its capture of an open Duo is the dark cover). Shut it first with "
+                    + "`sipi fold \(udid) --closed`. No tap performed.")
+                throw ExitCode.failure
+            }
+
+            let normalizedPoint: Point
+            if let x, let y {
+                let screen = coordinate.unit == .pixel ? tapScreenSize(udid: udid) : nil
+                normalizedPoint = try CoordinateConverter.normalize(x: x, y: y, unit: coordinate.unit, screen: screen)
+            } else {
+                let query = try selectorQuery(id: id, label: label, value: value)
+                normalizedPoint = try resolveActivationPoint(
+                    driver: driver, udid: udid, query: query, elementType: elementType, verb: "tap")
+            }
+            guard let screen = tapScreenSize(udid: udid) else {
+                emitError("Error: could not read the screen size to give Xcode the tap in points. No tap performed.")
+                throw ExitCode.failure
+            }
+
+            do {
+                try XcodeMCP.tap(
+                    x: normalizedPoint.x * screen.width,
+                    y: normalizedPoint.y * screen.height,
+                    udid: udid,
+                    developerDir: SPSimBridge.defaultDeveloperDir())
+            } catch let reason as XcodeMCP.Unavailable {
+                throw ValidationError(reason.description)
+            }
+            emitError("Note: this Xcode device-interaction session leaves every app launched afterwards "
+                + "on the device with an empty accessibility tree until it restarts: "
+                + "xcrun simctl shutdown \(udid) && xcrun simctl boot \(udid)")
             print("ok")
         }
     }

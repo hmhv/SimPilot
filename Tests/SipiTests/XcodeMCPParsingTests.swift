@@ -273,4 +273,11 @@ final class XcodeMCPParsingTests: XCTestCase {
         XCTAssertTrue(XcodeMCP.isBeforeTyping(.failed("DeviceInteractionStartSession: busy")))
         XCTAssertFalse(XcodeMCP.isBeforeTyping(.failed("DeviceInteractionSynthesize: timed out")))
     }
+
+    // The tap is sent in whole points in describe-ui's space: on a Duo cover the
+    // button at hit point (191.2, 322.0) fired with `t 191 322`.
+    func testATapIsSentInWholePoints() {
+        XCTAssertEqual(XcodeMCP.tapCommand(x: 191.2, y: 322.0), "t 191 322")
+        XCTAssertEqual(XcodeMCP.tapCommand(x: 433.5, y: 317.7), "t 434 318")
+    }
 }

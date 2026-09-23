@@ -172,7 +172,9 @@ iOS 27.0 24A434). Put such a step last in the run, or restart the device before
 the next `launch`. Setup is one-time and per-binary — see
 `../../sipi-common/docs/troubleshooting.md` § `type` failures. It cannot perform
 `"clear": true` (select-all and delete are keystrokes too), so that combination is
-rejected; use `set-text` to replace a value outright.
+rejected; use `set-text` to replace a value outright. The iOS 27.1 re-measurement
+found the empty-tree breakage comes from the session itself, not the typing: a
+session of taps alone did the same.
 
 Both methods insert at the caret, so a field that already holds text ends up with
 both strings. `"clear": true` selects all (Cmd+A) and deletes first.

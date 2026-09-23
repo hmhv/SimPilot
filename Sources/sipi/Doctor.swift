@@ -260,14 +260,14 @@ private struct DoctorReport {
         case .staleGrant:
             notes.append(
                 "Xcode's MCP device-interaction service is enabled, but the grant at this sipi's path "
-                + "belongs to an earlier build, so `sipi type --xcode-mcp` would be refused. "
+                + "belongs to an earlier build, so `sipi type --xcode-mcp` and `sipi tap --xcode-mcp` would be refused. "
                 + "Run `sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>` again — "
                 + "the grant is tied to the exact binary, so every update or rebuild needs it."
             )
         case .notApprovedYet:
             notes.append(
                 "Xcode's MCP device-interaction service is enabled but nothing at this sipi's path is "
-                + "approved, so `sipi type --xcode-mcp` would be refused. Run `sipi xcode-mcp --approve "
+                + "approved, so `sipi type --xcode-mcp` and `sipi tap --xcode-mcp` would be refused. Run `sipi xcode-mcp --approve "
                 + "<path to an .xcodeproj or .xcworkspace>` once — the grant is tied to this exact "
                 + "binary, so an update or rebuild needs it again."
             )
@@ -327,8 +327,10 @@ private struct DoctorReport {
                 notes.append(
                     "\(udid) is shut, which is the better pose for input: an iPhone Duo's INNER "
                     + "screen accepts no touches at all in Xcode 27.1 (reading and capture still "
-                    + "work), and the cover accepts them on some Duo devices and not others. "
-                    + "Check before relying on it — tap something and confirm it happened."
+                    + "work), and the cover accepts sipi's taps on some Duo devices and not others. "
+                    + "Check before relying on it — tap something and confirm it happened. Where "
+                    + "it does not, `sipi tap --xcode-mcp` reached the cover; restart the device "
+                    + "afterwards, since every app launched after it reads an empty tree."
                 )
             }
         }

@@ -103,8 +103,9 @@ public enum TapTargetCheck {
         else { return nil }
         return "an iPhone Duo's inner screen takes no input in Xcode 27.1 — the "
             + "accessibility hit-test answers nothing anywhere on it and touches are "
-            + "discarded. Reading and screenshots work. Try `sipi fold <udid> --closed`: "
-            + "the cover screen accepts input on some Duo devices and not others, for "
-            + "reasons not yet found."
+            + "discarded, and Xcode's device-interaction service cannot reach it either. "
+            + "Reading and screenshots work. Try `sipi fold <udid> --closed`: the cover "
+            + "screen accepts sipi's taps on some Duo devices and not others; where it "
+            + "does not, `sipi tap --xcode-mcp` reached it (restart the device afterwards)."
     }
 }

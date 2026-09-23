@@ -235,6 +235,8 @@ accessibility tree describing a screen nobody is looking at. Two habits follow:
 | `describe-ui`, `screenshot`, `record-video`, `fold-state` | yes | yes |
 | `describe-point` (a hit-test, not a touch) | **never** | yes |
 | `tap`, `swipe`, `touch` | **never** | sometimes |
+| `tap --xcode-mcp` (Xcode's device-interaction service) | **never** — refused | yes, measured |
+| rotation (`orientation --set`, devicectl, Xcode MCP) | **never** | **never** |
 
 *Open* is settled: measured on freshly created devices, the accessibility
 hit-test answers nothing at any of 49 points across the inner screen and no
@@ -246,7 +248,24 @@ refused with that explanation instead of the usual "clipped control" one.
 its cover — a tap launched Safari and the whole live suite passed against it —
 and four created afterwards did not, with no difference found: not uptime, not a
 fold transition, not the device's own data. An iPhone 17 taps correctly
-throughout, so it is not the host and not sipi.
+throughout. On 2026-09-23 one Duo ignored sipi's cover taps, took them again after
+`xcrun simctl shutdown` + `boot`, and kept taking them through an open/close
+cycle — so restart first; it is cheap and has no side effect.
+
+Where the cover still ignores sipi, `sipi tap --xcode-mcp` sends the tap through
+Xcode's device-interaction service instead, and it landed on that same device in
+the same state (by label and by coordinates). It is never used unasked, because
+any such session leaves every app LAUNCHED afterwards with an empty
+accessibility tree until the device restarts (measured with taps alone on iOS
+27.1) — tap last, or restart before the next launch. It cannot help an open Duo:
+the service drives the cover even while the inner screen is lit, so sipi refuses
+the combination. Setup is the same one-time, per-binary approval as
+`type --xcode-mcp` (see `troubleshooting.md` § `type` failures).
+
+Rotation has no scripted route on a Duo at all: `sipi orientation --set`,
+`xcrun devicectl device orientation set` and Xcode MCP's `orientation` each
+report success and leave both screens as they were. The inner screen in portrait
+and the cover in landscape are reachable only with Device Hub's rotate button.
 
 **So check before you rely on it**, once per device:
 
@@ -269,9 +288,10 @@ xcrun simctl spawn "$UDID" launchctl list | grep -c mobilesafari   # 1 = input w
 
 `tap` returns `ok` when the event was sent, which is not the same as landing, so
 the check has to look at an effect — and poll for it, because `tap` returns
-before the app has launched. If input does not work, the Duo is still
-useful for layout: capture both poses and read the tree. `doctor` reports the
-pose and this caveat for any booted Duo.
+before the app has launched. If input does not work, restart the device and
+check again, then fall back to `tap --xcode-mcp` for the taps that matter. The
+Duo is still useful for layout either way: capture both poses and read the tree.
+`doctor` reports the pose and this caveat for any booted Duo.
 
 Everything else — `describe-ui`, `tap`, `orientation`, `screenshot` — follows the
 lit screen automatically and needs no flag. A harness run records the pose it
