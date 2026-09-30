@@ -75,7 +75,7 @@ extension Sipi {
         static let configuration = CommandConfiguration(
             commandName: "verify-session",
             abstract: "Create and finalize deterministic verification artifacts.",
-            subcommands: [Init.self, Capture.self, Finding.self, Finalize.self]
+            subcommands: [Init.self, Capture.self, Sheet.self, Finding.self, Finalize.self]
         )
 
         struct Init: ParsableCommand {
@@ -181,6 +181,78 @@ extension Sipi {
                     }
                 }
                 print(outDir + "/" + filename)
+            }
+        }
+
+        struct Sheet: ParsableCommand {
+            static let configuration = CommandConfiguration(
+                commandName: "sheet",
+                abstract: "Lay the captures out as grids (a row per check, a column per variant) to look at in a few reads.",
+                discussion: """
+                Prints the absolute path of each sheet. Sheets are for looking, not \
+                evidence: every run writes them to a new temporary directory, never into \
+                the verification directory, so the report never reads them.
+                """
+            )
+
+            @Argument(help: "Verification directory.")
+            var verifyDir: String
+
+            @Option(name: .long, help: "Only this device's variants: iphone, ipad, duo-open, or duo-cover.")
+            var device: String?
+
+            @Option(name: .long, help: "Checks per sheet.")
+            var rows: Int = 3
+
+            @Option(name: .long, help: "Height in pixels of each capture on the sheet.")
+            var height: Int = 560
+
+            func validate() throws {
+                guard (1...100).contains(rows) else { throw ValidationError("--rows must be between 1 and 100") }
+                guard (1...4000).contains(height) else { throw ValidationError("--height must be between 1 and 4000 pixels") }
+            }
+
+            func run() throws {
+                let variants = ReportGenerator.verifyVariants.filter { variant in
+                    device.map { variant == $0 + "-light" || variant == $0 + "-dark" } ?? true
+                }
+                guard !variants.isEmpty else {
+                    throw ValidationError("--device must be one of iphone, ipad, duo-open, duo-cover")
+                }
+                let fm = FileManager.default
+                var present: [String] = []
+                var checks = Set<String>()
+                for variant in variants {
+                    guard let items = try? fm.contentsOfDirectory(atPath: verifyDir + "/" + variant) else { continue }
+                    let pngs = items.filter { $0.hasSuffix(".png") }
+                    if pngs.isEmpty { continue }
+                    present.append(variant)
+                    checks.formUnion(pngs)
+                }
+                guard !checks.isEmpty else { throw VerifySessionError("\(verifyDir): no captures to lay out") }
+
+                let dir = (NSTemporaryDirectory() as NSString)
+                    .appendingPathComponent("sipi-sheet-" + UUID().uuidString.prefix(8))
+                try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                let sorted = checks.sorted()
+                let prefix = device.map { $0 + "_" } ?? ""
+                for start in stride(from: 0, to: sorted.count, by: rows) {
+                    let names = sorted[start..<min(start + rows, sorted.count)]
+                    let grid: [[ContactSheet.Cell?]] = names.map { name in
+                        present.map { variant in
+                            fm.contents(atPath: verifyDir + "/" + variant + "/" + name).map {
+                                ContactSheet.Cell(caption: [variant, String(name.dropLast(4))], png: $0)
+                            }
+                        }
+                    }
+                    guard let png = ContactSheet.compose(grid, height: height) else {
+                        throw VerifySessionError("cannot compose a sheet from \(names.joined(separator: ", "))")
+                    }
+                    let path = (dir as NSString).appendingPathComponent(
+                        String(format: "%@sheet-%02d.png", prefix, start / rows + 1))
+                    try png.write(to: URL(fileURLWithPath: path))
+                    print(path)
+                }
             }
         }
 

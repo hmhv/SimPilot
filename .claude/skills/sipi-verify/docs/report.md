@@ -22,6 +22,10 @@ their folders appear on first capture, and the report gives each pose its own
 column group. A capture follows the screen the Duo is lighting, so set the pose
 before capturing under the name that says which it is.
 
+`sipi verify-session sheet` reads these folders to lay the captures out as
+grids for looking; it always writes to a temporary directory, so nothing it
+produces is part of the layout above.
+
 - Directory name: `YYYY-MM-DD_HHmmss` + kebab-case summary, e.g.
   `2026-03-21_143022_add-settings-toggle`.
 - Screenshot name: zero-padded 3-digit index + kebab-case check, e.g.

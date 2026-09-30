@@ -152,10 +152,16 @@ with these polls brought it to 26.5s for the same conclusions.
 
 ### Looking at the screen yourself
 
-`verify-session capture` writes full-size evidence. For a capture you are only
-going to read, `sipi screenshot "$UDID" look.png --max-pixel 600` is a fraction
-of the size, and `sipi describe-ui "$UDID" --format compact` gives the tree as
-one line per element. Neither replaces the evidence captures.
+`verify-session capture` writes full-size evidence. To look at what a session
+captured, `sipi verify-session sheet "$VERIFY_DIR" --device iphone` lays the
+captures out as a grid — a row per check, up to three per sheet, light and dark
+side by side — and prints each sheet's path, so a whole device is one or two
+Reads instead of one per capture. Without `--device` a sheet holds every variant.
+Sheets are written to a new temporary directory on every run and never become
+part of the verification. For a single screen you are only going to read,
+`sipi screenshot "$UDID" look.png --max-pixel 600` is a fraction of the size, and
+`sipi describe-ui "$UDID" --format compact` gives the tree as one line per
+element. None of these replaces the evidence captures.
 
 ### Recording motion (optional)
 

@@ -168,7 +168,7 @@ sipi list-simulators                 # device list for skills
 ```sh
 sipi run-test <test-json> [--html] [--junit] [--record-video]   # deterministic v2 test harness
 sipi run-suite <suite-json> [--html] [--junit] [--record-video] # deterministic v2 suite harness
-sipi verify-session ...               # init/capture/finding/finalize verification artifacts
+sipi verify-session ...               # init/capture/sheet/finding/finalize verification artifacts
 sipi report <run-dir> [--junit]      # generate report.html (and junit.xml) for a sipi-test run
 sipi verify-report <verify-dir>      # generate report.html for a sipi-verify run
 sipi validate <workspace>            # validate the JSON files in a .simpilot workspace
