@@ -42,6 +42,7 @@ The v2 file schema under `.simpilot/`. Per-action JSON shapes live in
     checks.json
     findings.json
     <variant>/NNN_<check>.png    # iphone-light / iphone-dark / ipad-light / ipad-dark
+                                 # (iPhone Duo: duo-open-* / duo-cover-*, created on first capture)
     report.html                  # only with `finalize --html`, or `sipi verify-report`
 ```
 

@@ -8,13 +8,19 @@
   iphone-dark/    001_<check-name>.png  002_<check-name>.png  …
   ipad-light/     001_<check-name>.png  002_<check-name>.png  …
   ipad-dark/      001_<check-name>.png  002_<check-name>.png  …
+  duo-open-dark/  …   # iPhone Duo only: created by the first capture into it
+  duo-cover-dark/ …   # (duo-open-light / duo-cover-light likewise)
   summary.json
   checks.json
   findings.json
   report.html     # only with `finalize --html`, or `sipi verify-report`
 ```
 
-`sipi verify-session init "<kebab-case-summary>"` creates it.
+`sipi verify-session init "<kebab-case-summary>"` creates it with the four
+iPhone/iPad folders. The `duo-open-*` and `duo-cover-*` variants are also accepted;
+their folders appear on first capture, and the report gives each pose its own
+column group. A capture follows the screen the Duo is lighting, so set the pose
+before capturing under the name that says which it is.
 
 - Directory name: `YYYY-MM-DD_HHmmss` + kebab-case summary, e.g.
   `2026-03-21_143022_add-settings-toggle`.

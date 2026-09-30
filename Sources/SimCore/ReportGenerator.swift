@@ -688,13 +688,24 @@ public enum ReportGenerator {
     /// The capture matrix, split into its two axes so the header can group the
     /// appearance columns under their device. Light and dark end up adjacent —
     /// the comparison a reader actually makes — and one check stays one row.
+    /// An iPhone Duo lights one screen at a time and captures follow the lit one, so
+    /// each pose is its own device group: the variant name says which screen it shows.
     private static let verifyDevices: [(key: String, label: String)] = [
-        ("iphone", "iPhone"), ("ipad", "iPad")
+        ("iphone", "iPhone"), ("ipad", "iPad"),
+        ("duo-cover", "iPhone Duo cover"), ("duo-open", "iPhone Duo open")
     ]
     private static let verifyModes: [(key: String, label: String)] = [
         ("light", "Light"), ("dark", "Dark")
     ]
-    private static let verifyVariants = ["iphone-light", "iphone-dark", "ipad-light", "ipad-dark"]
+    /// Every variant folder a verify session may hold, `<device>-<mode>`. The single
+    /// source for `verify-session capture` validation and for report discovery, so the
+    /// two cannot disagree about which folders exist.
+    public static let verifyVariants: [String] = verifyDevices.flatMap { device in
+        verifyModes.map { "\(device.key)-\($0.key)" }
+    }
+    /// The folders `verify-session init` creates up front. Duo folders are created by
+    /// the first capture into them, so a session without a Duo carries no empty ones.
+    public static let defaultVerifyVariants = ["iphone-light", "iphone-dark", "ipad-light", "ipad-dark"]
 
     private struct VerifyCheck {
         let filename: String

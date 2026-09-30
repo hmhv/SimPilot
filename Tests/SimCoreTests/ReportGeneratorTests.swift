@@ -204,6 +204,33 @@ final class ReportGeneratorTests: XCTestCase {
 
     // MARK: - Verify report
 
+    /// The workflow doc tells a Duo session to capture into `duo-open-*` / `duo-cover-*`;
+    /// capture validation and report discovery share one list, so both must know them.
+    func testVerifyVariantsIncludeDuoPosesAndReportShowsThem() throws {
+        XCTAssertEqual(ReportGenerator.defaultVerifyVariants,
+                       ["iphone-light", "iphone-dark", "ipad-light", "ipad-dark"])
+        for variant in ["duo-open-light", "duo-open-dark", "duo-cover-light", "duo-cover-dark"] {
+            XCTAssertTrue(ReportGenerator.verifyVariants.contains(variant), "\(variant) should be a valid variant")
+        }
+        XCTAssertTrue(Set(ReportGenerator.defaultVerifyVariants).isSubset(of: ReportGenerator.verifyVariants))
+
+        let verifyDir = tempDir.appendingPathComponent("verify-duo", isDirectory: true)
+        for variant in ["iphone-dark", "duo-open-dark", "duo-cover-dark"] {
+            let vdir = verifyDir.appendingPathComponent(variant, isDirectory: true)
+            try FileManager.default.createDirectory(at: vdir, withIntermediateDirectories: true)
+            try writePNG(to: vdir.appendingPathComponent("001_player.png"))
+        }
+        try Data("[]".utf8).write(to: verifyDir.appendingPathComponent("findings.json"))
+
+        let html = try ReportGenerator.verifyReportHTML(verifyDir: verifyDir.path)
+        XCTAssertTrue(html.contains("iPhone Duo open"), "Duo open captures should get their own column group")
+        XCTAssertTrue(html.contains("iPhone Duo cover"), "Duo cover captures should get their own column group")
+        XCTAssertFalse(html.contains(">iPad<"), "a device with no captures should drop out of the grid")
+
+        let summary = ReportGenerator.verifySummary(verifyDir: verifyDir.path)
+        XCTAssertEqual(summary["variants"] as? [String], ["iphone-dark", "duo-cover-dark", "duo-open-dark"])
+    }
+
     func testVerifyReportPairsLightAndDarkPerDeviceRow() throws {
         // Build a verify dir with the four variant folders + one screenshot each.
         let verifyDir = tempDir.appendingPathComponent("verify", isDirectory: true)

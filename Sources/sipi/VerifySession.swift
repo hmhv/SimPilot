@@ -17,8 +17,6 @@ private struct VerifySessionError: Error, CustomStringConvertible {
 }
 
 private enum VerifySessionUtil {
-    static let variants = ["iphone-light", "iphone-dark", "ipad-light", "ipad-dark"]
-
     static func slug(_ raw: String) -> String {
         let lower = raw.lowercased()
         let mapped = lower.map { ch -> Character in
@@ -115,7 +113,7 @@ extension Sipi {
                         if suffix > 10_000 { throw error }
                     }
                 }
-                for variant in VerifySessionUtil.variants {
+                for variant in ReportGenerator.defaultVerifyVariants {
                     try fm.createDirectory(atPath: dir + "/" + variant, withIntermediateDirectories: true)
                 }
                 try VerifySessionUtil.writeArray([], path: dir + "/findings.json")
@@ -133,7 +131,7 @@ extension Sipi {
             @Argument(help: "Verification directory.")
             var verifyDir: String
 
-            @Argument(help: "Variant folder, e.g. iphone-light, ipad-dark.")
+            @Argument(help: "Variant folder, e.g. iphone-light, ipad-dark, duo-open-dark (Duo: set the pose first; the capture shows the lit screen).")
             var variant: String
 
             @Argument(help: "Check name; always normalized to a slug filename (NNN_<check>.png with --index, else <check>.png).")
@@ -149,8 +147,8 @@ extension Sipi {
             var appearance: String?
 
             func run() throws {
-                guard VerifySessionUtil.variants.contains(variant) else {
-                    throw ValidationError("variant must be one of \(VerifySessionUtil.variants.joined(separator: ", "))")
+                guard ReportGenerator.verifyVariants.contains(variant) else {
+                    throw ValidationError("variant must be one of \(ReportGenerator.verifyVariants.joined(separator: ", "))")
                 }
                 let driver = NativeDriver()
                 let udid: String
