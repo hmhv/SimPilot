@@ -66,7 +66,7 @@ git status --short; git log -1 --stat; git show HEAD --format= -- . ':!*.pbxproj
 
 Point the last line at wherever the change is (`git diff` for uncommitted work).
 Read the notes `doctor` prints and act on them before verifying anything — a
-binary older than the checkout, an iPhone Duo pose whose screen drops taps. If
+binary older than the checkout, a device whose input Device Hub holds. If
 `doctor` fails, no iPhone or iPad is booted, or `.simpilot/config.json` is
 missing, follow `../sipi-common/docs/preflight.md` before going on. If its
 `build` section does not name both `project` and `scheme` (`"build": {}` is

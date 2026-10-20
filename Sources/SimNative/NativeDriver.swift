@@ -145,6 +145,7 @@ public final class NativeDriver: SimDriver {
         // rotate it into physical-normalized space when rotated (portrait is a
         // pass-through). See OrientationMath.normalizedToPhysical.
         let physical = try physicalNormalized(point, udid: udid)
+        try routeTouches(udid: udid)
         try SPSimBridge.tapUDID(
             udid,
             normalizedX: physical.x,
@@ -159,6 +160,7 @@ public final class NativeDriver: SimDriver {
         // (`swipe`/`compositeDrag`/`longPress`) instead resolve once up front and
         // emit pre-transformed points via `touchPhysical` to avoid per-step IPC.
         let physical = try physicalNormalized(point, udid: udid)
+        try routeTouches(udid: udid)
         try touchPhysical(physical, phase: phase, udid: udid)
     }
 
@@ -188,6 +190,7 @@ public final class NativeDriver: SimDriver {
         // Resolve orientation + logical extent ONCE; every interpolated point is
         // mapped with the pure helper so a rotated swipe issues no per-step IPC.
         let context = try resolvePhysicalContext(udid: udid)
+        try routeTouches(udid: udid)
 
         try touchPhysical(physicalNormalized(a, context: context), phase: .begin, udid: udid)
         if steps > 1 {
@@ -220,6 +223,7 @@ public final class NativeDriver: SimDriver {
 
         // Resolve orientation + logical extent ONCE and reuse for every step.
         let context = try resolvePhysicalContext(udid: udid)
+        try routeTouches(udid: udid)
 
         try touchPhysical(physicalNormalized(start, context: context), phase: .begin, udid: udid)
         if initialHold > 0 { usleep(useconds_t(initialHold * 1_000_000)) }
@@ -242,6 +246,7 @@ public final class NativeDriver: SimDriver {
         // Resolve orientation + logical extent ONCE; the down and up events reuse
         // the same pre-transformed physical point (no per-event IPC / AX fetch).
         let context = try resolvePhysicalContext(udid: udid)
+        try routeTouches(udid: udid)
         let physical = physicalNormalized(point, context: context)
         try touchPhysical(physical, phase: .begin, udid: udid)
         if hold > 0 { usleep(useconds_t(hold * 1_000_000)) }
@@ -251,6 +256,20 @@ public final class NativeDriver: SimDriver {
     /// Upper bound on interpolated move events for a single gesture, so a long
     /// duration / large step count cannot saturate the HID transport.
     private static let maxInterpolationSteps = 1000
+
+    /// Point the touches that follow at the lit screen's own digitizer, on a
+    /// device that has one per screen (iPhone Duo); a no-op anywhere else, and
+    /// without the devicectl read there. Called once per gesture, before its
+    /// first touch.
+    ///
+    /// Measured on Xcode 27.2 / iOS 27.2: the shared slot every other device
+    /// uses reaches a Duo's inner screen and never its cover. With no screen lit
+    /// (asleep), or the screens unreadable, touches stay on the shared slot.
+    private func routeTouches(udid: String) throws {
+        guard SPSimBridge.hasSeparateTouchscreens(forUDID: udid, developerDir: developerDir) else { return }
+        let lit = (try? DisplayResolver.resolve(.active, udid: udid)) ?? nil
+        try SPSimBridge.setTouchScreenID(lit?.screenID ?? 0, udid: udid, developerDir: developerDir)
+    }
 
     // MARK: - Orientation transform (logical -> physical framebuffer)
 
@@ -453,6 +472,13 @@ public final class NativeDriver: SimDriver {
             displayPixelHeight: display?.pixelHeight ?? 0,
             toPath: url.path
         )
+        // The framebuffer comes out the way the panel is mounted; turn it the
+        // way the screen is being held (see DeviceDisplay.uprightQuarterTurns).
+        if let turns = display?.uprightQuarterTurns,
+           let original = try? Data(contentsOf: url),
+           let upright = PNGRotate.rotated(original, quarterTurnsClockwise: turns) {
+            try upright.write(to: url, options: .atomic)
+        }
     }
 
     public func uiOrientation(_ udid: String) throws -> UIOrientation {
@@ -604,6 +630,7 @@ public final class NativeDriver: SimDriver {
         // a pass-through). Without this, a rotated pinch lands at the wrong points.
         let physicalA = try physicalNormalized(a, udid: udid)
         let physicalB = try physicalNormalized(b, udid: udid)
+        try routeTouches(udid: udid)
         try sendMultiTouch(physicalA, physicalB, phase: phase, udid: udid)
     }
 
@@ -615,6 +642,7 @@ public final class NativeDriver: SimDriver {
         // device — enough delay between moves that the guest no longer reads the
         // sequence as one continuous gesture.
         let context = try resolvePhysicalContext(udid: udid)
+        try routeTouches(udid: udid)
         let lastIndex = frames.count - 1
         for (index, frame) in frames.enumerated() {
             try sendMultiTouch(

@@ -161,7 +161,10 @@ rejected for accented / non-Latin / emoji text, and produces the WRONG character
 when the guest's active keyboard is a different layout (typing "hello" under a
 Japanese keyboard yields "へっぉ"). Pasting clobbers and best-effort restores the
 simulator pasteboard, which is synced with the Mac pasteboard — the host
-clipboard is transiently replaced too.
+clipboard is transiently replaced too. The text is read back before it is pasted,
+and the step fails without pasting when the pasteboard no longer holds it: while
+Device Hub is open it puts the Mac's clipboard there, and pasting would type
+whatever the user last copied.
 
 `"input-method": "xcode-mcp"` hands the text to Xcode 27's own device-interaction
 service, which types through a path that is neither HID nor layout-dependent. It
@@ -172,9 +175,9 @@ iOS 27.0 24A434). Put such a step last in the run, or restart the device before
 the next `launch`. Setup is one-time and per-binary — see
 `../../sipi-common/docs/troubleshooting.md` § `type` failures. It cannot perform
 `"clear": true` (select-all and delete are keystrokes too), so that combination is
-rejected; use `set-text` to replace a value outright. The iOS 27.1 re-measurement
-found the empty-tree breakage comes from the session itself, not the typing: a
-session of taps alone did the same.
+rejected; use `set-text` to replace a value outright. The empty-tree breakage
+comes from the session itself, not the typing: re-measured on Xcode 27.2, a
+session of one tap did the same.
 
 Both methods insert at the caret, so a field that already holds text ends up with
 both strings. `"clear": true` selects all (Cmd+A) and deletes first.
@@ -367,13 +370,19 @@ to react to:
 ```
 
 The step does not finish until the screen handover has landed, so the next step's
-screenshot and tree are of the new screen. The handover sits between 80° and 85°;
-`angle` inside that band is accepted and lands on whichever screen the system
-picks.
+screenshot and tree are of the new screen. Jumping from either end, 82° and below
+lights the cover and 88° and above the inner screen; an `angle` between them is
+accepted and lands on whichever screen the system picks (measured on Xcode 27.2).
 
 This is what makes one suite cover both poses. The pose the device was found in
 is captured before the first `fold` and restored at the end of the run, so a
-suite never hands the device on shut.
+suite never hands the device on in another pose. Xcode 27.2 cannot read the hinge,
+so "the pose it was found in" is the angle sipi last set, or the lit screen's end
+of the range when the device was folded some other way.
+
+On the inner screen, selector taps go to the element's frame without the usual
+check of what is under it (the screen answers no hit-test), and `set-text` fails
+the step — tap the field and `type`, or fold the device shut first.
 
 `display-state` — every key is optional, at least one is required, and an unknown
 key is a validation error rather than a silently ignored setting:

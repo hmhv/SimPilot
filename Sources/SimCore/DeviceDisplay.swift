@@ -2,7 +2,7 @@
 //
 // The screens a device has built in, and the rules for choosing between them.
 //
-// Every simulator before iPhone Duo (Xcode 27.1) had exactly one, so "the
+// Every simulator before iPhone Duo had exactly one, so "the
 // screen" needed no naming and no choosing: a capture went to the one
 // framebuffer, and `SimDeviceScreen initWithDevice:screenID:1` read the one
 // orientation. A Duo has two — a 1398x2034 cover and a 2007x2853 inner screen —
@@ -92,6 +92,22 @@ public struct DeviceDisplay: Equatable, Sendable {
         orientation.isLandscape
             ? (pointHeight, pointWidth)
             : (pointWidth, pointHeight)
+    }
+
+    /// Clockwise quarter turns that bring a capture of this screen upright, or
+    /// nil when there is nothing to turn. Only a lit screen on a device with
+    /// more than one reports `active`, and only a lit screen's rotation means
+    /// anything, so a phone's single screen is never turned here. Measured on
+    /// iPhone Duo / iOS 27.2: the inner screen in its normal hold reports
+    /// `rot90`, and one clockwise turn makes its capture match describe-ui.
+    public var uprightQuarterTurns: Int? {
+        guard active == true else { return nil }
+        switch rotation {
+        case "rot90": return 1
+        case "rot180": return 2
+        case "rot270": return 3
+        default: return nil
+        }
     }
 }
 

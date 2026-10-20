@@ -1,13 +1,11 @@
 // FoldState.swift
 //
-// `sipi fold-state <udid>` — which of the device's screens is lit, what it
-// measures, and how far the hinge is open.
+// `sipi fold-state <udid>` — which of the device's screens is lit, and what it
+// measures. Xcode 27.2 offers no way to read the hinge angle itself.
 //
-// This reads; `sipi fold` writes. Neither is anything Apple exposes: simctl has
-// no verb, CoreSimulator carries no hinge symbol, and devicectl's
-// `motion hinge-angle` monitors the angle without being able to change it. The
-// read here is devicectl's stream; the write goes through a guest-side helper
-// (see SimShell's HingeControl).
+// This reads; `sipi fold` writes. The read is devicectl's display report; the
+// write goes through a guest-side helper (see SimShell's HingeControl), because
+// simctl has no verb and CoreSimulator carries no hinge symbol.
 //
 // Why that is worth a command: on a foldable every other reading depends on the
 // answer. A capture of the dark screen is a black PNG, an accessibility tree
@@ -25,20 +23,11 @@ extension Sipi {
     struct FoldState: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "fold-state",
-            abstract: "Report which built-in screen is lit, and the hinge angle on a foldable (read only)."
+            abstract: "Report which built-in screen is lit on a foldable (read only)."
         )
 
         @Argument(help: "Simulator UDID.")
         var udid: String
-
-        @Flag(
-            name: .long,
-            help: """
-            Skip the hinge angle. It costs one process spawn on a foldable; the \
-            pose is already told by which screen is lit.
-            """
-        )
-        var noHinge = false
 
         func run() throws {
             let displays = try DeviceCtl.displays(udid: udid)
@@ -90,12 +79,6 @@ extension Sipi {
                 }
             } else {
                 object["activeDisplay"] = NSNull()
-            }
-
-            // Only a foldable has a hinge, and asking a device without one costs a
-            // process spawn to be told so.
-            if foldable && !noHinge {
-                object["hingeAngle"] = DeviceCtl.hingeAngle(udid: udid) as Any? ?? NSNull()
             }
 
             let data = try JSONSerialization.data(

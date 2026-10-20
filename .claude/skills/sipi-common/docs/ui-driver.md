@@ -176,25 +176,28 @@ the screen was actually inspected.
 
 ## Foldables (iPhone Duo)
 
-An iPhone Duo has **two** built-in screens and lights exactly one at a time:
+Measured on Xcode 27.2 RC / iOS 27.2. An iPhone Duo has **two** built-in screens
+and lights exactly one at a time:
 
 | Role | Screen ID | Points | Lit when |
 |---|---|---|---|
 | `cover` | 1 | 466x678 | shut |
-| `inner` | 3 | 669x951 | open |
+| `inner` | 3 | 669x951 panel, 951x669 as apps see it (landscape-left) | open |
 
 The dark one is not absent. It keeps vending a live, solid-black framebuffer, so
 reading the wrong screen is never an error — it is a black PNG, or an
 accessibility tree describing a screen nobody is looking at. Two habits follow:
 
 - **Check the pose before trusting a size.** A 466x678 tree where you expected
-  669x951 is a shut device, not a layout bug. `fold-state` says which it is:
+  951x669 is a shut device, not a layout bug. `fold-state` says which it is:
 
   ```bash
   "$SIPI" fold-state "$UDID"
-  # { "foldable": true, "folded": false, "hingeAngle": 180,
-  #   "activeDisplay": 3, "orientation": "landscape-left", "displays": [ … ] }
+  # { "foldable": true, "folded": false, "activeDisplay": 3,
+  #   "orientation": "landscape-left", "displays": [ … ] }
   ```
+
+  There is no hinge angle in it: Xcode 27.2 has no way to read one.
 
 - **Name the screen when you mean a specific one.** `--display active` (the
   default), `inner`, `cover`, or a screen ID, on both `screenshot` and
@@ -206,94 +209,82 @@ accessibility tree describing a screen nobody is looking at. Two habits follow:
   ```
 
   Naming a screen the device does not have is an error, not a silent fallback to
-  the other one.
+  the other one. A capture of the lit screen is turned the way the screen is held,
+  so the inner screen comes back upright at 2853x2007, matching describe-ui.
 
 - **Fold it yourself when you need the other pose.**
 
   ```bash
   "$SIPI" fold "$UDID" --closed          # 0° — the cover takes over
   "$SIPI" fold "$UDID" --open            # 180° — the inner screen takes over
-  "$SIPI" fold "$UDID" --angle 90
+  "$SIPI" fold "$UDID" --angle 120       # book pose
   "$SIPI" fold "$UDID" --open --over 1.5 # sweep, for an app that animates on the fold
   ```
 
-  It prints the pose the device actually reached (`180° inner 669x951pt`), not
-  the one asked for, and does not return until the screen handover has landed —
-  so the next command sees the new screen. The handover sits between 80° and 85°
-  in both directions.
+  It prints the screen the device actually lit (`inner 669x951pt`), not the one
+  asked for, and does not return until the screen handover has landed — so the
+  next command sees the new screen. Jumping from either end, 82° and below shows
+  the cover and 88° and above the inner screen; in between it depends on the
+  direction (opening from 0° hands over at 83°, closing from 180° at 87°). Small
+  steps hand over much later: stepping down 5° at a time from 120° kept the inner
+  screen lit to 50°. `--over` sweeps from the angle sipi last set on the device,
+  or from the lit screen's end when the device was folded some other way.
 
-  Apple exposes no way to do this: simctl has no verb and devicectl's
-  `motion hinge-angle` only reads. `fold` builds a small helper with the active
-  Xcode's iPhoneSimulator SDK the first time it runs (~1s, then cached under
-  `~/.local/share/simpilot/hinge`). A toolchain with no such SDK cannot fold, and
-  `doctor` says so.
+  Apple exposes no way to do this: simctl and devicectl have no verb for it.
+  `fold` builds a small helper with the active Xcode's iPhoneSimulator SDK the
+  first time it runs (~1s, then cached under `~/.local/share/simpilot/hinge`). A
+  toolchain with no such SDK cannot fold, and `doctor` says so.
 
-**Input on a Duo is not dependable in Xcode 27.1.** Reading is:
+**What works on each screen:**
 
-| | open (inner) | shut (cover) |
+| | cover (shut) | inner (open, and book poses) |
 |---|---|---|
 | `describe-ui`, `screenshot`, `record-video`, `fold-state` | yes | yes |
-| `describe-point` (a hit-test, not a touch) | **never** | yes |
-| `tap`, `swipe`, `touch` | **never** | sometimes |
-| `tap --xcode-mcp` (Xcode's device-interaction service) | **never** — refused | yes, measured |
-| rotation (`orientation --set`, devicectl, Xcode MCP) | **never** | **never** |
+| `tap`/`double-tap` by point, `swipe`, `touch`, `drag`, `key`, `type`, `button` | yes | yes |
+| `tap`/`double-tap` by `--id`/`--label`/`--value` | yes | yes — sent to the element's frame unchecked |
+| `set-text`, `describe-point` | yes | **no** — refused with the reason |
+| rotation (`orientation --set`, devicectl, Xcode MCP) | **no** | **no** |
 
-*Open* is settled: measured on freshly created devices, the accessibility
-hit-test answers nothing at any of 49 points across the inner screen and no
-touch at any of 70 normalized points activates anything — the events reach
-backboardd and are discarded. Every attempt reproduced it. A tap there is
-refused with that explanation instead of the usual "clipped control" one.
+The inner screen answers no accessibility hit-test anywhere on it, while touches
+at a frame's point land. A selector tap there skips the usual check of what is
+under the point and says so on stderr; check the effect as you would anyway.
+`set-text` and `describe-point` are built on the hit-test, so they stop with an
+error that says to fold the device shut for them. `doctor` prints this table for
+any booted Duo.
 
-*Shut* varies by device and the reason is not known. One Duo tapped normally on
-its cover — a tap launched Safari and the whole live suite passed against it —
-and four created afterwards did not, with no difference found: not uptime, not a
-fold transition, not the device's own data. An iPhone 17 taps correctly
-throughout. On 2026-09-23 one Duo ignored sipi's cover taps, took them again after
-`xcrun simctl shutdown` + `boot`, and kept taking them through an open/close
-cycle — so restart first; it is cheap and has no side effect.
+Rotation has no scripted route on a Duo: `sipi orientation --set`,
+`xcrun devicectl device orientation set|rotate` and Xcode MCP's `orientation`
+each report success and leave both screens as they were. A person can turn it
+with Device Hub's rotate button, after which sipi drives it as usual — the cover
+on its side takes taps by selector and by point in 678x466 points. Apps that are
+portrait-only on iPhone (Settings, the home screen) stay upright on the cover
+whichever way it is held.
 
-Where the cover still ignores sipi, `sipi tap --xcode-mcp` sends the tap through
-Xcode's device-interaction service instead, and it landed on that same device in
-the same state (by label and by coordinates). It is never used unasked, because
-any such session leaves every app LAUNCHED afterwards with an empty
-accessibility tree until the device restarts (measured with taps alone on iOS
-27.1) — tap last, or restart before the next launch. It cannot help an open Duo:
-the service drives the cover even while the inner screen is lit, so sipi refuses
-the combination. Setup is the same one-time, per-binary approval as
-`type --xcode-mcp` (see `troubleshooting.md` § `type` failures).
+**Device Hub takes over input while it is open.** Opening it raises the guest
+state `com.apple.coredevice.dtuhidd.active` to 1; from then on taps on the inner
+screen are silently dropped (the cover still takes them), and Device Hub keeps
+replacing the simulator's pasteboard with the Mac's clipboard — so `type` refuses
+to paste rather than type whatever the user last copied. `doctor` reports the
+state, and `sipi repair-input "$UDID"` clears it (it restarts SpringBoard, which
+closes running apps). Quitting Device Hub shuts down the simulators it was
+showing; boot them again afterwards.
 
-Rotation has no scripted route on a Duo at all: `sipi orientation --set`,
-`xcrun devicectl device orientation set` and Xcode MCP's `orientation` each
-report success and leave both screens as they were. The inner screen in portrait
-and the cover in landscape are reachable only with Device Hub's rotate button.
-
-**So check before you rely on it**, once per device:
+**Testing what survives a fold.** A fold is a live resize, not a relaunch, so
+state lives or dies with the app's view tree. To test that, put the app in the
+state first through its launch environment rather than by tapping there, then
+fold and read:
 
 ```bash
-sipi fold "$UDID" --closed
-# From the HOME SCREEN, with the Safari icon actually in the tree. With an app
-# foregrounded the selector matches nothing, no touch is sent at all, and the
-# check below reports "broken" on a device whose input is fine.
-xcrun simctl terminate "$UDID" com.apple.mobilesafari
-# Resolve the same way the tap will — by LABEL. Exits non-zero if the icon is
-# not there, which is the case the check must not mistake for broken input.
-sipi wait-for "$UDID" --label Safari --timeout 5 >/dev/null || echo "not on the home screen" 
-sipi tap "$UDID" --label Safari          # prints ok either way
-for _ in $(seq 10); do
-  xcrun simctl spawn "$UDID" launchctl list | grep -q mobilesafari && break
-  sleep 1
-done
-xcrun simctl spawn "$UDID" launchctl list | grep -c mobilesafari   # 1 = input works
+SIMCTL_CHILD_SCREEN=Settings xcrun simctl launch "$UDID" com.example.app
+"$SIPI" fold "$UDID" --closed
+"$SIPI" describe-ui "$UDID" --format compact
 ```
 
-`tap` returns `ok` when the event was sent, which is not the same as landing, so
-the check has to look at an effect — and poll for it, because `tap` returns
-before the app has launched. If input does not work, restart the device and
-check again, then fall back to `tap --xcode-mcp` for the taps that matter. The
-Duo is still useful for layout either way: capture both poses and read the tree.
-`doctor` reports the pose and this caveat for any booted Duo.
+An app that writes what it measured (sizes, size classes, a token held in
+`@State`) to a file in its Documents directory can be read back with
+`xcrun simctl get_app_container "$UDID" <bundle-id> data`.
 
 Everything else — `describe-ui`, `tap`, `orientation`, `screenshot` — follows the
 lit screen automatically and needs no flag. A harness run records the pose it
 found in `run.json` under `device-state.fold-state` and puts the device back in
-it afterwards, so a suite that folds never hands the device on shut.
+it afterwards, so a suite that folds never hands the device on in another pose.

@@ -352,6 +352,11 @@ extension Sipi {
             )
 
             let element = try driver.element(at: logical, udid: udid)
+            if element == nil, DuoScreens.isInnerLit(DisplayResolver.displays(udid: udid)) {
+                throw ValidationError(
+                    "describe-point cannot work here: \(DuoScreens.innerHitTest). "
+                    + "Read the screen with `sipi describe-ui`, or shut it with `sipi fold \(udid) --closed`.")
+            }
             let nodes = element.map { [$0] } ?? []
             let json = try AXNodeJSON.string(for: nodes)
             print(json)
@@ -371,18 +376,9 @@ extension Sipi {
             error rather than a silent preference for the coordinates, so a typo'd
             selector cannot look like it resolved.
 
-            --xcode-mcp sends the tap through Xcode 27's device-interaction service
-            instead of sipi's own HID path. It exists for one case: an iPhone Duo
-            whose cover screen ignores sipi's taps (measured on Xcode 27.1 beta: on
-            the same device and state sipi's tap was sent and nothing fired, while
-            this one fired). It cannot reach a Duo's inner screen — the service
-            drives the cover even while the device is open — so an open Duo is
-            refused. It is never used unasked: every app launched afterwards on the
-            device has an empty accessibility tree until the device restarts
-            (`xcrun simctl shutdown` + `boot`), so tap last, or restart before the
-            next launch. Selectors still resolve through sipi's own tree first.
-            Needs Xcode 27, `sudo xcrun mcp-server enable`, and
-            `sipi xcode-mcp --approve` once.
+            On an iPhone Duo the tap goes to whichever screen is lit. The inner
+            screen answers no accessibility hit-test, so there a selector tap goes
+            to the element's frame without the usual check of what is under it.
             """
         )
 
@@ -390,9 +386,6 @@ extension Sipi {
 
         @Argument(help: "Simulator UDID.")
         var udid: String
-
-        @Flag(name: .customLong("xcode-mcp"), help: "Tap through Xcode's device-interaction service instead. For an iPhone Duo cover that ignores sipi's taps; never the inner screen. Apps launched afterwards read an empty tree until the device restarts.")
-        var useXcodeMCP: Bool = false
 
         @Option(name: .customShort("x"), help: "X (normalized 0...1, or pixels with --pixel). Use with -y for a direct tap.")
         var x: Double?
@@ -423,10 +416,6 @@ extension Sipi {
 
         func run() throws {
             let driver = NativeDriver()
-            if useXcodeMCP {
-                try tapThroughXcode(driver: driver)
-                return
-            }
 
             // Direct point — standardize to internal normalized 0...1 (Gate 4).
             if let x, let y {
@@ -444,49 +433,6 @@ extension Sipi {
                 driver: driver, udid: udid, query: query, elementType: elementType, verb: "tap"
             )
             try driver.tap(point, udid: udid)
-            print("ok")
-        }
-
-        /// The `--xcode-mcp` route: resolve where to tap exactly as the HID route
-        /// does, then hand Xcode the point in the describe-ui coordinate space.
-        private func tapThroughXcode(driver: NativeDriver) throws {
-            // Refused before anything is resolved: on an open Duo the selector
-            // path would fail on the hit-test with the HID explanation, and a
-            // coordinate tap would be sent to the dark cover and report ok.
-            if TapTargetCheck.undrivableScreen(displays: DisplayResolver.displays(udid: udid)) != nil {
-                emitError("Error: --xcode-mcp cannot reach an iPhone Duo's inner screen either: "
-                    + "Xcode's device-interaction service drives the cover even while the device is "
-                    + "open (its capture of an open Duo is the dark cover). Shut it first with "
-                    + "`sipi fold \(udid) --closed`. No tap performed.")
-                throw ExitCode.failure
-            }
-
-            let normalizedPoint: Point
-            if let x, let y {
-                let screen = coordinate.unit == .pixel ? tapScreenSize(udid: udid) : nil
-                normalizedPoint = try CoordinateConverter.normalize(x: x, y: y, unit: coordinate.unit, screen: screen)
-            } else {
-                let query = try selectorQuery(id: id, label: label, value: value)
-                normalizedPoint = try resolveActivationPoint(
-                    driver: driver, udid: udid, query: query, elementType: elementType, verb: "tap")
-            }
-            guard let screen = tapScreenSize(udid: udid) else {
-                emitError("Error: could not read the screen size to give Xcode the tap in points. No tap performed.")
-                throw ExitCode.failure
-            }
-
-            do {
-                try XcodeMCP.tap(
-                    x: normalizedPoint.x * screen.width,
-                    y: normalizedPoint.y * screen.height,
-                    udid: udid,
-                    developerDir: SPSimBridge.defaultDeveloperDir())
-            } catch let reason as XcodeMCP.Unavailable {
-                throw ValidationError(reason.description)
-            }
-            emitError("Note: this Xcode device-interaction session leaves every app launched afterwards "
-                + "on the device with an empty accessibility tree until it restarts: "
-                + "xcrun simctl shutdown \(udid) && xcrun simctl boot \(udid)")
             print("ok")
         }
     }
@@ -626,11 +572,15 @@ func resolveActivationPoint(
         let hit = try driver.element(at: resolution.point, udid: udid)
         let outcome = TapTargetCheck.evaluate(target: resolution, hit: hit, screen: frame)
         guard outcome.isMatch else {
-            let reason = TapTargetCheck.describe(
-                outcome,
-                selector: "This selector",
-                undrivableScreen: TapTargetCheck.undrivableScreen(
-                    displays: DisplayResolver.displays(udid: udid)))
+            // An empty answer on Duo's inner screen says nothing about the
+            // element: the hit-test answers that way everywhere there, while
+            // touches at a frame's point do land. Asked only after the miss, so
+            // a device with one screen pays nothing for it.
+            if DuoScreens.isInnerLit(DisplayResolver.displays(udid: udid)) {
+                emitError("Note: \(DuoScreens.innerHitTest), so this \(verb) goes to the element's frame unchecked.")
+                return normalizedPoint
+            }
+            let reason = TapTargetCheck.describe(outcome, selector: "This selector")
             emitError("Error: \(reason) No \(verb) performed.")
             throw ExitCode.failure
         }
@@ -815,6 +765,12 @@ extension Sipi {
             do {
                 try driver.setValue(text, at: target.point, udid: udid)
             } catch {
+                if DuoScreens.isInnerLit(DisplayResolver.displays(udid: udid)) {
+                    throw ValidationError(
+                        "set-text cannot work here: \(DuoScreens.innerHitTest), and set-text finds "
+                        + "its field through it. Tap the field and use `sipi type`, or shut it with "
+                        + "`sipi fold \(udid) --closed`.")
+                }
                 throw ValidationError("Failed to write the accessibility value: \(error)")
             }
 

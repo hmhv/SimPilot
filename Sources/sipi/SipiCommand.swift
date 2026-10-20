@@ -52,6 +52,7 @@ struct Sipi: ParsableCommand {
             RecordVideo.self,
             FoldState.self,
             Fold.self,
+            RepairInput.self,
             ContainerCommand.self,
             FilesAppCommand.self,
             XCAppDataCommand.self,

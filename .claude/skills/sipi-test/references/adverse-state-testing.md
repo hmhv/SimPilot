@@ -28,7 +28,7 @@ covers what each one actually changes and how to test with it.
 | `biometrics` | Enrolls/unenrolls Face ID / Touch ID and delivers match / no-match to a live prompt (Xcode 27+) |
 | `display-state` | Sets the accessibility appearance facets simctl cannot reach (Xcode 27+) |
 | `memory-warning` | Delivers a memory-pressure warning to the running app, so cache eviction and low-memory recovery run on demand (Xcode 27+) |
-| `fold` | Folds or unfolds an iPhone Duo, so one suite covers both the inner screen and the cover (Xcode 27.1+) |
+| `fold` | Folds or unfolds an iPhone Duo, so one suite covers both the inner screen and the cover (Xcode 27.2+) |
 
 ## What cleanup actually covers
 

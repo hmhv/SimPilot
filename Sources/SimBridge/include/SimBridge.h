@@ -173,6 +173,20 @@ NS_ASSUME_NONNULL_BEGIN
      developerDir:(NSString *)developerDir
             error:(NSError **)error;
 
+/// Whether the device has a digitizer per screen (iPhone Duo), so touches must
+/// be pointed at the lit one with `setTouchScreenID:`. NO when the device
+/// cannot be loaded.
++ (BOOL)hasSeparateTouchscreensForUDID:(NSString *)udid
+                          developerDir:(NSString *)developerDir;
+
+/// Send later touches to the digitizer of CoreSimulator screen `screenID`
+/// (iPhone Duo: 1 = cover, 3 = inner), or to the shared slot when 0. Holds until
+/// the next call or a different device. A device with one touchscreen ignores it.
++ (BOOL)setTouchScreenID:(NSInteger)screenID
+                    udid:(NSString *)udid
+            developerDir:(NSString *)developerDir
+                   error:(NSError **)error;
+
 /// Two-finger touch phase at two normalized 0...1 points (e.g. pinch-to-zoom).
 /// `phase` 1 = begin/move, 2 = end.
 + (BOOL)multiTouchUDID:(NSString *)udid

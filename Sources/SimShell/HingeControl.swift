@@ -12,14 +12,14 @@
 //
 // Why a guest-side helper rather than something host-side:
 //
-//   • simctl and devicectl have no verb for it. devicectl's `motion hinge-angle`
-//     reads the angle and cannot write it.
+//   • simctl and devicectl have no verb for it, and on Xcode 27.2 none for
+//     reading it either.
 //   • sipi's own Indigo HID path cannot carry it. `IndigoHIDMessageForHIDArbitrary`
 //     takes four uint32s; the payload is ~150 bytes.
 //   • An entitled helper cannot be run at all: backboardd rejects a HID client
 //     without `com.apple.private.hid.client.admin`, and CoreSimulator refuses to
 //     spawn OR launch any binary that claims that entitlement ("Security policy
-//     issue"). Both measured on Xcode 27.1.
+//     issue").
 //
 // What works is a plain, unsigned guest binary using HID client TYPE 4, which
 // backboardd accepts without the admin entitlement. That is the whole trick.
@@ -57,16 +57,23 @@ public enum HingeControl {
     public static let range: ClosedRange<Double> = 0...180
 
     /// The largest angle MEASURED to still show the cover, and the smallest
-    /// MEASURED to show the inner screen — iPhone Duo / iOS 27.1, stepped in
-    /// both directions, same result each way (no hysteresis).
+    /// MEASURED to show the inner screen, for a fold that jumps straight from
+    /// either end — iPhone Duo / iOS 27.2. The handover has hysteresis: opening
+    /// from 0° lights the inner screen from 83°, closing from 180° lights the
+    /// cover from 87°, so only 82° and below and 88° and above answer the same
+    /// way from both ends.
+    ///
+    /// Small steps hand over much later or not at all: stepping down 5° at a
+    /// time from 120° kept the inner screen lit down to 50°. The wait that uses
+    /// these then times out after 3s and reports the screen that is lit.
     ///
     /// Two constants rather than one range, because the interesting property is
-    /// which angles are KNOWN. 80 and 85 are known; only 81...84 were never
-    /// measured. A range invites `<` / `>` comparisons that quietly treat its
-    /// own endpoints as unknown, which is exactly the off-by-one that made a
-    /// fold to 80° skip waiting for the handover it was about to cause.
-    public static let lastCoverDegrees: Double = 80
-    public static let firstInnerDegrees: Double = 85
+    /// which angles are KNOWN. A range invites `<` / `>` comparisons that quietly
+    /// treat its own endpoints as unknown, which is exactly the off-by-one that
+    /// made a fold to the last known angle skip waiting for the handover it was
+    /// about to cause.
+    public static let lastCoverDegrees: Double = 82
+    public static let firstInnerDegrees: Double = 88
 
     /// Which screen `degrees` will light, or nil for an angle between the two
     /// measured points, where this build genuinely does not know.
@@ -93,10 +100,10 @@ public enum HingeControl {
         let helper = try helperPath()
         var arguments = ["set", format(clamped)]
         if let seconds, seconds > 0 {
-            // A sweep needs a starting angle, and only the device knows it. When
-            // it cannot be read the jump is the honest fallback: inventing a
-            // start would sweep from somewhere the hinge never was.
-            if let from = DeviceCtl.hingeAngle(udid: udid) {
+            // A sweep needs a starting angle. When there is none the jump is the
+            // honest fallback: inventing a start would sweep from somewhere the
+            // hinge never was.
+            if let from = currentAngle(udid: udid) {
                 arguments = ["sweep", format(from), format(clamped), format(seconds)]
             }
         }
@@ -107,6 +114,51 @@ public enum HingeControl {
                 result.stderr.isEmpty ? result.stdout : result.stderr
             )
         }
+        record(clamped, udid: udid)
+    }
+
+    /// The device's hinge angle as best sipi knows it, or nil for a device that
+    /// does not fold.
+    ///
+    /// Xcode 27.2 has no way to read the hinge (devicectl's `motion hinge-angle`
+    /// is gone, and no other devicectl report carries it), so this is the angle
+    /// sipi last set on the device, checked against the screen that is lit. A
+    /// record at one end of the range while the other end's screen is lit means
+    /// the device was opened or shut since (Device Hub's buttons do that), and
+    /// so does having no record; both fall back to the lit screen's end. An
+    /// intermediate angle set by hand in Device Hub is the one case this gets
+    /// wrong.
+    public static func currentAngle(udid: String) -> Double? {
+        let displays = (try? DeviceCtl.displays(udid: udid)) ?? []
+        guard displays.count > 1 else { return nil }
+        let lit = DisplaySelection.active(displays).flatMap { DisplaySelection.roles(displays)[$0.screenID] }
+        return reconcile(recorded: recordedAngle(udid: udid), lit: lit)
+    }
+
+    static func reconcile(recorded: Double?, lit: DisplayRole?) -> Double? {
+        switch lit {
+        case .cover?:
+            return recorded == range.upperBound ? range.lowerBound : (recorded ?? range.lowerBound)
+        case .inner?:
+            return recorded == range.lowerBound ? range.upperBound : (recorded ?? range.upperBound)
+        default:
+            return recorded
+        }
+    }
+
+    private static func recordURL(udid: String) -> URL {
+        cacheDirectory.appendingPathComponent("angle-\(udid)")
+    }
+
+    private static func recordedAngle(udid: String) -> Double? {
+        (try? String(contentsOf: recordURL(udid: udid), encoding: .utf8))
+            .flatMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    /// Best-effort: losing the record only costs the fallback above.
+    private static func record(_ degrees: Double, udid: String) {
+        try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        try? format(degrees).write(to: recordURL(udid: udid), atomically: true, encoding: .utf8)
     }
 
     /// Whether this toolchain can build the helper at all. Used by `doctor` to

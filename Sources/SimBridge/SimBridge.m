@@ -163,6 +163,8 @@ static id SPCopySimDeviceForUDID(NSString *udid, NSString *developerDir, NSError
 - (BOOL)hasKeyboardFunc;
 - (BOOL)hasCrownFunc;
 - (void)sendMultiTouchPhase:(int32_t)phase x1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2;
+- (BOOL)hasSeparateTouchscreens;
+- (void)setTouchScreenID:(NSInteger)screenID;
 @end
 
 // Private helper on the framebuffer mirror, used by the headless PNG utility.
@@ -297,6 +299,23 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
     // The Indigo mouse builder takes a normalized 0...1 location directly, so
     // normalized coordinates pass straight through.
     return [self tapUDID:udid absoluteX:nx y:ny developerDir:developerDir error:error];
+}
+
++ (BOOL)hasSeparateTouchscreensForUDID:(NSString *)udid developerDir:(NSString *)developerDir {
+    SPHIDInjector *hid = [SPHIDInjector shared];
+    @synchronized (hid) {
+        if (![hid setupForUDID:udid developerDir:developerDir error:NULL]) return NO;
+        return [hid hasSeparateTouchscreens];
+    }
+}
+
++ (BOOL)setTouchScreenID:(NSInteger)screenID udid:(NSString *)udid developerDir:(NSString *)developerDir error:(NSError **)error {
+    SPHIDInjector *hid = [SPHIDInjector shared];
+    @synchronized (hid) {
+        if (![hid setupForUDID:udid developerDir:developerDir error:error]) return NO;
+        [hid setTouchScreenID:screenID];
+    }
+    return YES;
 }
 
 + (BOOL)touchUDID:(NSString *)udid phase:(NSInteger)phase normalizedX:(double)nx y:(double)ny developerDir:(NSString *)developerDir error:(NSError **)error {
@@ -1467,7 +1486,9 @@ static void SPFinalizeProbeHit(NSMutableDictionary *node) {
 //           message builders from SimulatorKit; create SimDeviceLegacyHIDClient
 //           via -initWithDevice:error:; cache selector
 //           sendWithMessage:freeWhenDone:completionQueue:completion:.
-//   touch:  IndigoHIDMessageForMouseNSEvent(&pt, NULL, 50, phase, 1, 1, edge),
+//   touch:  IndigoHIDMessageForMouseNSEvent(&pt, NULL, target, phase, 1, 1, edge),
+//           target = the shared slot 0x32, or the lit screen's own digitizer on
+//           iPhone Duo (see -setTouchScreenID:),
 //           phase begin/move=1, end=2; send (freeWhenDone:YES).
 //   button: IndigoHIDMessageForButton(source, direction, 0x33), press=1 then 2.
 
@@ -1486,7 +1507,19 @@ typedef void * (*SPIndigoCrownFunc)(double);
     SPIndigoCrownFunc _crownFunc;
     NSString *_loadedUDID;
     BOOL _hardwareKeyboardEnabled; // lazily enabled on first key event (see -sendKeyUsage:down:)
+    BOOL _hasSeparateTouchscreens;
+    uint32_t _touchTarget;         // see -setTouchScreenID:
 }
+
+// The Indigo target every touch went to before iPhone Duo: the shared slot.
+static const uint32_t kSPSharedTouchTarget = 0x32;
+
+// iPhone Duo registers one digitizer per screen, addressed as this mask OR'd with
+// the CoreSimulator screen ID (cover 1 -> 0x40000001, inner 3 -> 0x40000003).
+// Measured on Xcode 27.2 / iOS 27.2: the shared slot reaches the inner screen and
+// never the cover, while the cover's own target reaches it. Recipe from serve-sim
+// (DevicePose.touchTarget).
+static const uint32_t kSPIntegratedScreenTargetMask = 0x40000000;
 
 + (instancetype)shared {
     static SPHIDInjector *shared = nil;
@@ -1538,7 +1571,21 @@ typedef void * (*SPIndigoCrownFunc)(double);
     _sendSel = NSSelectorFromString(@"sendWithMessage:freeWhenDone:completionQueue:completion:");
     _loadedUDID = [udid copy];
     _hardwareKeyboardEnabled = NO; // re-enable lazily for this (possibly new) device
+    NSString *typeIdentifier = ((SimDevice *)device).deviceType.identifier;
+    _hasSeparateTouchscreens = [typeIdentifier isEqualToString:@"com.apple.CoreSimulator.SimDeviceType.iPhone-Duo"];
+    _touchTarget = kSPSharedTouchTarget;
     return YES;
+}
+
+- (BOOL)hasSeparateTouchscreens { return _hasSeparateTouchscreens; }
+
+// 0 returns to the shared slot. Ignored on a device with one touchscreen.
+- (void)setTouchScreenID:(NSInteger)screenID {
+    if (!_hasSeparateTouchscreens || screenID <= 0) {
+        _touchTarget = kSPSharedTouchTarget;
+        return;
+    }
+    _touchTarget = kSPIntegratedScreenTargetMask | (uint32_t)screenID;
 }
 
 // Tell the guest a hardware keyboard is attached. WHY this is required: with no
@@ -1586,7 +1633,7 @@ typedef void * (*SPIndigoCrownFunc)(double);
 - (void)sendTouchPhase:(int32_t)phase x:(double)x y:(double)y edge:(uint32_t)edge {
     if (_mouseFunc == NULL) return;
     CGPoint point = CGPointMake(x, y);
-    void *message = _mouseFunc(&point, NULL, 50, phase, 1.0, 1.0, edge);
+    void *message = _mouseFunc(&point, NULL, _touchTarget, phase, 1.0, 1.0, edge);
     [self sendMessage:message];
 }
 
@@ -1696,12 +1743,12 @@ static BOOL SPIsModifierUsage(uint32_t usage) {
 - (BOOL)hasKeyboardFunc { return _keyboardFunc != NULL; }
 - (BOOL)hasCrownFunc { return _crownFunc != NULL; }
 
-// Two-finger touch (e.g. pinch): one message carries both points, flags 0x32.
+// Two-finger touch (e.g. pinch): one message carries both points.
 - (void)sendMultiTouchPhase:(int32_t)phase x1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2 {
     if (_mouseFunc == NULL) return;
     CGPoint p1 = CGPointMake(x1, y1);
     CGPoint p2 = CGPointMake(x2, y2);
-    void *message = _mouseFunc(&p1, &p2, 0x32, phase, 1.0, 1.0, 0);
+    void *message = _mouseFunc(&p1, &p2, _touchTarget, phase, 1.0, 1.0, 0);
     [self sendMessage:message];
 }
 
@@ -1863,7 +1910,7 @@ static id SPPerformNoArg(id target, NSString *selectorName) {
 // "the built-in screen" was a static property of the device and one reading of
 // it lasted a whole run.
 //
-// iPhone Duo (Xcode 27.1) vends TWO: the 1398x2034 cover and the 2007x2853
+// iPhone Duo vends TWO: the 1398x2034 cover and the 2007x2853
 // inner screen, both class 0, and `simctl io <udid> enumerate` reports BOTH as
 // "Power state: On" whichever way the device is folded. Only one of them is lit
 // at a time, and which one that is changes when someone folds the device in

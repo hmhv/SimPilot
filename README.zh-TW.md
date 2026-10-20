@@ -172,7 +172,7 @@ SimPilot 在 `.simpilot/` 下使用以下標準結構:
 - 無障礙樹宣稱存在、但實際無法觸控的元素，點擊後仍會回報成功。`describe-point` 也會回傳該元素，因此任何一層都無法分辨；Xcode 自身的工具也是相同行為
 - Face ID / Touch ID，以及 light/dark 之外的無障礙外觀項目需要 Xcode 27——它們透過 `xcrun devicectl` 實作，而 devicectl 只能作用於該版本以後的 simulator
 - 對比度與文字裁切不在 `sipi a11y-audit` 的範圍內；兩者都需要對算繪後的影格做像素分析
-- **Xcode 27.1 中 iPhone Duo 的輸入受限**：內螢幕完全不接受觸控，外螢幕則因裝置而異，有的接受 sipi 的點擊，有的不接受（有一台重新啟動後恢復）。對忽略 sipi 點擊的外螢幕，`tap --xcode-mcp` 可以送達，代價與 `type --xcode-mcp` 相同（見下文）。無法透過腳本旋轉 Duo simulator，請使用 Device Hub 的旋轉按鈕
+- **iPhone Duo**（在 Xcode 27.2 上實測）：點擊、滑動、文字輸入和硬體按鈕都能到達兩塊螢幕。內螢幕對無障礙 hit-test 不回傳任何結果，因此依選擇器的點擊會不經確認地送到元素的位置，`set-text` / `describe-point` 只能在外螢幕使用。Device Hub 開啟期間會接管裝置的輸入：內螢幕的點擊被丟棄，模擬器的剪貼板被 Mac 的剪貼簿覆蓋，因此 `type` 會拒絕貼上。`sipi doctor` 會回報這種狀態，`sipi repair-input` 可恢復輸入。無法透過腳本旋轉 Duo simulator，請使用 Device Hub 的旋轉按鈕
 - 僅支援 simulator，不支援實機
 
 ## 對不再接受按鍵輸入的 simulator 輸入文字
@@ -193,7 +193,7 @@ sipi xcode-mcp --approve <.xcodeproj 或 .xcworkspace 的路徑>
 
 `--clear` 無法使用該路徑：全選與刪除同樣是按鍵輸入，而該服務只能輸入文字、無法清空欄位。需要整體取代值時請使用 `sipi set-text`。
 
-同一個授權也會啟用 `sipi tap --xcode-mcp`，用於外螢幕忽略 sipi 點擊的 iPhone Duo：在實測裝置上，sipi 的點擊無效時，經由 Xcode 服務的點擊無論依標籤或依座標都能送達。它無法到達 Duo 的內螢幕——即使裝置處於展開狀態，該服務操作的仍是外螢幕——因此 sipi 會拒絕這種組合。代價相同，且來自工作階段本身而非輸入：在 iOS 27.1 上僅使用點擊重新測量，之後啟動的 App 的無障礙樹在裝置重新啟動前都是空的。
+代價來自工作階段本身而非輸入：在 Xcode 27.2 上僅用一次點擊的工作階段重新測量，之後啟動的 App 的無障礙樹在裝置重新啟動前都是空的。
 
 
 ## Note

@@ -467,8 +467,8 @@ public enum SimShell {
     /// One `    <name> (<udid>) (Booted)` line, or nothing when it is not one.
     ///
     /// Parsed from the RIGHT. A device NAME can itself contain parentheses:
-    /// simctl names the iPhone Duo "iPhone Duo (27.1)" when the plain name is
-    /// already taken on another runtime. Reading left to right took `27.1` as
+    /// simctl names a device after its runtime — "iPhone Duo (27.2)" — when the
+    /// plain name is already taken on another runtime. Reading left to right took `27.2` as
     /// the UDID, so `isBooted` answered false for a device that was booted, and
     /// the harness then tried to boot it and failed with "Unable to boot device
     /// in current state: Booted" — on every run against that device.

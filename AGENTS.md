@@ -3,6 +3,7 @@
 - Skill docs and code are in English
 - Test JSON ids use kebab-case
 - Run/result timestamps must be ISO 8601 with timezone offset
+- Target Xcode 27.2 RC and later. Do not keep, branch on, or document Xcode 27.1 behaviour; state measured facts as measured on 27.2
 
 ## 最優先の行動原則（他のどの指針よりも優先）
 

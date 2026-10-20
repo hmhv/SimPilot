@@ -260,14 +260,14 @@ private struct DoctorReport {
         case .staleGrant:
             notes.append(
                 "Xcode's MCP device-interaction service is enabled, but the grant at this sipi's path "
-                + "belongs to an earlier build, so `sipi type --xcode-mcp` and `sipi tap --xcode-mcp` would be refused. "
+                + "belongs to an earlier build, so `sipi type --xcode-mcp` would be refused. "
                 + "Run `sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>` again — "
                 + "the grant is tied to the exact binary, so every update or rebuild needs it."
             )
         case .notApprovedYet:
             notes.append(
                 "Xcode's MCP device-interaction service is enabled but nothing at this sipi's path is "
-                + "approved, so `sipi type --xcode-mcp` and `sipi tap --xcode-mcp` would be refused. Run `sipi xcode-mcp --approve "
+                + "approved, so `sipi type --xcode-mcp` would be refused. Run `sipi xcode-mcp --approve "
                 + "<path to an .xcodeproj or .xcworkspace>` once — the grant is tied to this exact "
                 + "binary, so an update or rebuild needs it again."
             )
@@ -291,10 +291,20 @@ private struct DoctorReport {
             )
         }
 
+        // Nothing else surfaces this: a device in this state answers every tap
+        // and key with ok and acts on none of them.
+        for udid in bootedUDIDs where (try? SimShell.isInputShadowedByDeviceHub(udid: udid)) == true {
+            notes.append(
+                "\(udid): Device Hub has taken over this device's input, so sipi's taps and keys "
+                + "may report ok and do nothing. `sipi repair-input \(udid)` reconnects them; it "
+                + "restarts SpringBoard and closes running apps."
+            )
+        }
+
         // A booted foldable, if one is here. Everything the rest of sipi does
-        // depends on which of its screens is lit, and nothing in Xcode 27.1 can
-        // change that from a command line, so say both plainly rather than let a
-        // black capture or a 466x678 accessibility tree be the first hint.
+        // depends on which of its screens is lit, so say which one plainly
+        // rather than let a black capture or a 466x678 accessibility tree be
+        // the first hint.
         for udid in bootedUDIDs {
             let displays = DisplayResolver.displays(udid: udid)
             guard displays.count > 1 else { continue }
@@ -317,22 +327,12 @@ private struct DoctorReport {
                 + "`sipi fold-state` reports the pose, \(folding), and `--display inner|cover` "
                 + "picks a screen to capture. Neither simctl nor devicectl can fold a simulator."
             )
-            // The single most useful thing to know before writing a test against
-            // this device, and nothing else announces it: an open Duo looks
-            // perfectly healthy until every tap is refused.
-            if let undrivable = TapTargetCheck.undrivableScreen(displays: displays) {
-                notes.append("\(udid): \(undrivable)")
-            } else if DisplaySelection.roles(displays)[
-                DisplaySelection.active(displays)?.screenID ?? -1] == .cover {
-                notes.append(
-                    "\(udid) is shut, which is the better pose for input: an iPhone Duo's INNER "
-                    + "screen accepts no touches at all in Xcode 27.1 (reading and capture still "
-                    + "work), and the cover accepts sipi's taps on some Duo devices and not others. "
-                    + "Check before relying on it — tap something and confirm it happened. Where "
-                    + "it does not, `sipi tap --xcode-mcp` reached the cover; restart the device "
-                    + "afterwards, since every app launched after it reads an empty tree."
-                )
-            }
+            // What works on which screen decides how a test against this device
+            // has to be written, and nothing else announces it.
+            notes.append(
+                "\(udid) — what sipi can do on each screen:\n"
+                + DuoScreens.summary.map { "    \($0)" }.joined(separator: "\n")
+            )
         }
 
         return notes

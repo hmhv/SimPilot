@@ -1983,10 +1983,10 @@ private final class HarnessRunner {
             // the end-of-run restore puts it back.
             if initialHingeAngle == nil {
                 initialHingeAngle = try captureBaseline("fold") {
-                    guard let reading = DeviceCtl.hingeAngle(udid: udid) else {
-                        throw HarnessError("the hinge angle stream reported nothing")
+                    guard let angle = HingeControl.currentAngle(udid: udid) else {
+                        throw HarnessError("no screen is lit, so the pose to restore is unknown")
                     }
-                    return reading
+                    return angle
                 }
             }
             try HingeControl.setAngle(udid: udid, degrees: target, over: action.duration)
@@ -2100,12 +2100,13 @@ private final class HarnessRunner {
         do {
             let hit = try driver.element(at: resolution.point, udid: udid)
             let outcome = TapTargetCheck.evaluate(target: resolution, hit: hit, screen: frame)
-            guard outcome.isMatch else {
+            // On Duo's inner screen the hit-test is empty everywhere while
+            // touches at a frame's point land, so the miss is not evidence; the
+            // action's own verify clause stays the backstop.
+            guard outcome.isMatch || DuoScreens.isInnerLit(DisplayResolver.displays(udid: udid)) else {
                 throw HarnessError(TapTargetCheck.describe(
                     outcome,
-                    selector: "\(verb.capitalized) on \(selector.describedTarget)",
-                    undrivableScreen: TapTargetCheck.undrivableScreen(
-                        displays: DisplayResolver.displays(udid: udid))))
+                    selector: "\(verb.capitalized) on \(selector.describedTarget)"))
             }
         } catch let harness as HarnessError {
             throw harness
@@ -2166,7 +2167,16 @@ private final class HarnessRunner {
             throw HarnessError("set-text action requires selector or point.")
         }
 
-        try driver.setValue(text, at: target.point, udid: udid)
+        do {
+            try driver.setValue(text, at: target.point, udid: udid)
+        } catch {
+            if DuoScreens.isInnerLit(DisplayResolver.displays(udid: udid)) {
+                throw HarnessError(
+                    "set-text cannot work here: \(DuoScreens.innerHitTest), and set-text finds its "
+                    + "field through it. Use a tap and a type action, or fold the device shut first.")
+            }
+            throw error
+        }
 
         // Confirming the write is the default, because an element that ignores it
         // still accepts the setter. `"verify-value": false` is the escape hatch for

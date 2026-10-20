@@ -153,6 +153,18 @@ enum TextInput {
             // — the restore below is what puts the user's clipboard back.
             let saved = try? SimShell.pbpaste(udid: udid)
             try SimShell.pbcopy(text, udid: udid)
+            // Read it back before pasting. While Device Hub is open it can put the
+            // Mac's clipboard over what was just written, and Cmd+V would then
+            // type the user's own clipboard into the app — measured on Xcode
+            // 27.2, where that text went on to a web search.
+            guard (try? SimShell.pbpaste(udid: udid)) == text else {
+                if let saved { try? SimShell.pbcopy(saved, udid: udid) }
+                throw TextInputError(description:
+                    "the simulator's pasteboard did not keep the text, so nothing was pasted — "
+                    + "something replaced it right after it was written (Device Hub does this with "
+                    + "the Mac's clipboard while it is open). Close Device Hub and retry, or use "
+                    + "`sipi set-text`, which needs no pasteboard.")
+            }
             for event in KeyInput.pasteCombo() {
                 try driver.key(usage: event.usage, down: event.down, udid: udid)
             }

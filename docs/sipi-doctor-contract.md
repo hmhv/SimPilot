@@ -116,7 +116,7 @@ terminated by a newline:
 | `checks[].ok` | bool | Whether this capability fully resolved. |
 | `checks[].detail` | string | Human-readable detail (which class/symbol resolved or why it failed). Informational; do not parse for control flow — gate on `ok` / `allCorePresent`. |
 | `bootedDevices` | array of strings | Booted simulators as `"<name> (<udid>)"`. May be empty. Informational only. |
-| `notes` | array of strings | Free-form advisory lines. **Never affects the exit code** and is not a capability list: which binary answered and when it landed, a staleness warning when the surrounding SimPilot checkout's HEAD is newer than that binary, whether devicectl can target simulators on this toolchain (which gates the biometrics / appearance / VoiceOver surface, Xcode 27+), and how to open a device window on this Xcode. May be empty; wording is not stable — display it, do not parse it. |
+| `notes` | array of strings | Free-form advisory lines. **Never affects the exit code** and is not a capability list: which binary answered and when it landed, a staleness warning when the surrounding SimPilot checkout's HEAD is newer than that binary, whether devicectl can target simulators on this toolchain (which gates the biometrics / appearance / VoiceOver surface, Xcode 27+), how to open a device window on this Xcode, any booted device whose input Device Hub has taken over (with `sipi repair-input`), and for a booted iPhone Duo what works on each of its screens. May be empty; wording is not stable — display it, do not parse it. |
 | `allCorePresent` | bool | `true` iff every `checks[].ok` is `true`. Mirrors the exit code: `true` ⇔ exit `0`. |
 
 Consumers should key on `name` + `ok` (and `allCorePresent`), not on array

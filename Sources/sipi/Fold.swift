@@ -2,9 +2,9 @@
 //
 // `sipi fold <udid>` — fold or unfold a foldable simulator (iPhone Duo).
 //
-// The write half of `fold-state`. Nothing in Xcode 27.1 exposes this: simctl has
-// no verb, devicectl's `motion hinge-angle` only reads, and Device Hub's own
-// slider is hidden behind an internal action bar. HingeControl explains how the
+// The write half of `fold-state`. Nothing in Xcode exposes this: simctl and
+// devicectl have no verb, and Device Hub's own slider is hidden behind an
+// internal action bar. HingeControl explains how the
 // angle actually gets there, and who the mechanism is derived from.
 //
 // The two poses that matter to a test are the ends of the range, so they have
@@ -127,19 +127,16 @@ extension Sipi {
             } while Date() < deadline
 
             let folded = DisplaySelection.isFolded(displays)
-            let reading = DeviceCtl.hingeAngle(udid: udid)
 
             var object: [String: Any] = [
                 "folded": folded as Any? ?? NSNull(),
-                "hingeAngle": reading as Any? ?? NSNull(),
                 "activeDisplay": lit.map { $0.screenID } as Any? ?? NSNull()
             ]
             if let lit {
                 let role = (roles[lit.screenID] ?? .screen).rawValue
                 object["activeRole"] = role
                 object["pointSize"] = [lit.pointWidth, lit.pointHeight]
-                let angleText = reading.map { String(format: "%g", $0) } ?? "?"
-                return ("\(angleText)° \(role) \(lit.pointWidth)x\(lit.pointHeight)pt", object)
+                return ("\(role) \(lit.pointWidth)x\(lit.pointHeight)pt", object)
             }
             return ("no screen lit", object)
         }

@@ -230,6 +230,7 @@ The full per-action JSON shapes are in
 sipi doctor [--json]                 # probe native capabilities; exit 0 only if all present
 sipi version [--json]                # print the sipi version
 sipi open-ui [--json|--print-only]   # open Device Hub (Xcode 27+) / Simulator.app (<=26)
+sipi repair-input <udid>             # reconnect touch/keys after Device Hub took them over (restarts SpringBoard)
 sipi setup                           # install the embedded skills into Claude Code + Codex
 sipi update                          # download the latest release binary + refresh skills
 sipi uninstall                       # remove skills, install metadata, and the sipi binary

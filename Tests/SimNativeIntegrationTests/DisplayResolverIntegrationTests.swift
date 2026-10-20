@@ -61,8 +61,17 @@ final class DisplayResolverIntegrationTests: XCTestCase {
         }
 
         let shot = try capture(.active, udid: udid)
-        XCTAssertEqual(shot.width, lit.pixelWidth)
-        XCTAssertEqual(shot.height, lit.pixelHeight)
+        let size = Self.uprightSize(lit)
+        XCTAssertEqual(shot.width, size.width)
+        XCTAssertEqual(shot.height, size.height)
+    }
+
+    /// A lit screen held on its side is captured upright, so its width and
+    /// height swap (iPhone Duo's inner screen: 2007x2853 panel, 2853x2007 shot).
+    private static func uprightSize(_ display: DeviceDisplay) -> (width: Int, height: Int) {
+        (display.uprightQuarterTurns ?? 0) % 2 == 1
+            ? (display.pixelHeight, display.pixelWidth)
+            : (display.pixelWidth, display.pixelHeight)
     }
 
     /// On a foldable, each role must resolve to its own screen and the lit one
@@ -77,16 +86,18 @@ final class DisplayResolverIntegrationTests: XCTestCase {
         try XCTSkipIf(displays.count < 2, "not a foldable; nothing to choose between")
         // Capturing does not move the device, but assert it so a future edit that
         // folds here cannot silently leave the pose changed for later tests.
-        let poseBefore = DeviceCtl.hingeAngle(udid: udid)
-        defer { XCTAssertEqual(DeviceCtl.hingeAngle(udid: udid), poseBefore, "pose must not move") }
-
         let roles = DisplaySelection.roles(displays)
         let lit = try XCTUnwrap(DisplaySelection.active(displays), "no screen is lit")
+        defer {
+            let after = DisplayResolver.displays(udid: udid)
+            XCTAssertEqual(DisplaySelection.active(after)?.screenID, lit.screenID, "pose must not move")
+        }
         for display in displays {
             guard let role = roles[display.screenID], role != .screen else { continue }
             let byRole = try capture(.role(role), udid: udid)
-            XCTAssertEqual(byRole.width, display.pixelWidth, "\(role.rawValue) width")
-            XCTAssertEqual(byRole.height, display.pixelHeight, "\(role.rawValue) height")
+            let size = Self.uprightSize(display)
+            XCTAssertEqual(byRole.width, size.width, "\(role.rawValue) width")
+            XCTAssertEqual(byRole.height, size.height, "\(role.rawValue) height")
 
             let byID = try capture(.screenID(display.screenID), udid: udid)
             XCTAssertEqual(byID.width, byRole.width, "screen \(display.screenID) by id and by role agree")
@@ -169,42 +180,31 @@ final class HingeControlIntegrationTests: XCTestCase {
 
     /// Shutting the device must light the cover and opening it must light the
     /// inner screen — the whole point of the mechanism.
-    func testFoldingMovesTheAngleAndHandsOverTheScreen() throws {
+    func testFoldingHandsOverTheScreen() throws {
         let udid = try foldableUDID()
-        let restore = DeviceCtl.hingeAngle(udid: udid)
+        let restore = HingeControl.currentAngle(udid: udid)
         defer { if let restore { try? HingeControl.setAngle(udid: udid, degrees: restore) } }
 
         try HingeControl.setAngle(udid: udid, degrees: HingeControl.range.lowerBound)
         XCTAssertEqual(litRole(udid, expecting: .cover), .cover, "shut device should be showing its cover")
-        XCTAssertEqual(DeviceCtl.hingeAngle(udid: udid), 0)
 
         try HingeControl.setAngle(udid: udid, degrees: HingeControl.range.upperBound)
         XCTAssertEqual(litRole(udid, expecting: .inner), .inner, "open device should be showing its inner screen")
-        XCTAssertEqual(DeviceCtl.hingeAngle(udid: udid), 180)
-    }
-
-    /// The angle is a continuum, not two poses: a partly-folded device must
-    /// report the angle it was given.
-    func testAnIntermediateAngleIsHeld() throws {
-        let udid = try foldableUDID()
-        let restore = DeviceCtl.hingeAngle(udid: udid)
-        defer { if let restore { try? HingeControl.setAngle(udid: udid, degrees: restore) } }
-
-        try HingeControl.setAngle(udid: udid, degrees: 45)
-        XCTAssertEqual(DeviceCtl.hingeAngle(udid: udid), 45)
     }
 
     /// Out-of-range input is clamped rather than sent, so a caller cannot drive
     /// the hinge somewhere the hardware has no pose for.
     func testAnglesAreClampedToTheHingeRange() throws {
         let udid = try foldableUDID()
-        let restore = DeviceCtl.hingeAngle(udid: udid)
+        let restore = HingeControl.currentAngle(udid: udid)
         defer { if let restore { try? HingeControl.setAngle(udid: udid, degrees: restore) } }
 
-        try HingeControl.setAngle(udid: udid, degrees: 999)
-        XCTAssertEqual(DeviceCtl.hingeAngle(udid: udid), 180)
         try HingeControl.setAngle(udid: udid, degrees: -20)
-        XCTAssertEqual(DeviceCtl.hingeAngle(udid: udid), 0)
+        XCTAssertEqual(litRole(udid, expecting: .cover), .cover)
+        XCTAssertEqual(HingeControl.currentAngle(udid: udid), 0)
+        try HingeControl.setAngle(udid: udid, degrees: 999)
+        XCTAssertEqual(litRole(udid, expecting: .inner), .inner)
+        XCTAssertEqual(HingeControl.currentAngle(udid: udid), 180)
     }
 
     /// The helper is compiled on first use and cached. A second call must reuse
@@ -244,9 +244,8 @@ final class HingeControlIntegrationTests: XCTestCase {
     func testConcurrentBuildsPublishAWorkingHelper() throws {
         let udid = try foldableUDID()
         // Put the pose back. This test ends by folding the device to prove the
-        // rebuilt helper works, and a test that leaves a Duo OPEN breaks every
-        // later test that needs to tap it — the inner screen takes no input.
-        let restore = DeviceCtl.hingeAngle(udid: udid)
+        // rebuilt helper works, and later tests expect the pose they found.
+        let restore = HingeControl.currentAngle(udid: udid)
         defer { if let restore { try? HingeControl.setAngle(udid: udid, degrees: restore) } }
 
         let helper = try HingeControl.helperPath()

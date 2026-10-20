@@ -47,6 +47,8 @@ final class OrientationTapWiringTests: XCTestCase {
         guard let udid else {
             throw XCTSkip("SIPI_TEST_UDID not set — skipping orientation tap-wiring test.")
         }
+        try XCTSkipIf(DuoScreens.isInnerLit(DisplayResolver.displays(udid: udid)),
+                      "an iPhone Duo's inner screen answers no hit-test")
         let driver = NativeDriver()
         let orientation = try driver.uiOrientation(udid)
 
@@ -84,6 +86,8 @@ final class OrientationTapWiringTests: XCTestCase {
         guard let udid else {
             throw XCTSkip("SIPI_TEST_UDID not set — skipping orientation tap-wiring test.")
         }
+        try XCTSkipIf(DuoScreens.isInnerLit(DisplayResolver.displays(udid: udid)),
+                      "an iPhone Duo's inner screen answers no hit-test")
         let driver = NativeDriver()
         let orientation = try driver.uiOrientation(udid)
         try XCTSkipUnless(

@@ -20,20 +20,19 @@ counts as the right screen, and when the observed state contradicts the request.
 When Xcode's MCP server is also connected, split the work like this:
 
 - **Simulators: sipi.** Reading the tree, tapping by selector, typing, folding
-  an iPhone Duo, capturing either screen, saved tests. It is headless, needs no
-  open Xcode workspace, and leaves the device as it found it.
+  an iPhone Duo and driving both of its screens, capturing either screen, saved
+  tests. It is headless, needs no open Xcode workspace, and leaves the device as
+  it found it.
 - **Do not call Xcode's `DeviceInteraction*` tools on a simulator yourself.** Any
-  such session — taps alone included — leaves every app launched afterwards with
-  an empty accessibility tree until the device restarts. The tools also take
-  coordinates only, and on an iPhone Duo they drive the cover even while the
-  inner screen is lit.
-- **Reach Xcode's service only through sipi's opt-in routes**, last in the
+  such session — one tap is enough — leaves every app launched afterwards with
+  an empty accessibility tree until the device restarts (measured on Xcode
+  27.2). The tools also take coordinates only, and on an iPhone Duo they reach
+  the cover only.
+- **Reach Xcode's service only through sipi's opt-in route**, last in the
   session or followed by `xcrun simctl shutdown` + `boot`:
-  `sipi type --xcode-mcp` for a simulator that stopped accepting keyboard HID,
-  `sipi tap --xcode-mcp` for a Duo cover that ignores sipi's taps.
+  `sipi type --xcode-mcp` for a simulator that stopped accepting keyboard HID.
 - **Physical devices: Xcode.** sipi drives simulators only.
-- **Neither** can tap a Duo's inner screen or rotate a Duo; rotation is Device
-  Hub's rotate button.
+- **Neither** can rotate a Duo; a person can, with Device Hub's rotate button.
 
 ## When to use
 

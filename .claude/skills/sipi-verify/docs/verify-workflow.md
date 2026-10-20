@@ -43,7 +43,7 @@ Use the same `--index` and check name across variants so the report grid aligns.
 Additional checks take the next index.
 
 **On an iPhone Duo, capture both poses and name the variant for each.** It has
-two screens — inner 669x951pt when open, cover 466x678pt when shut — and captures
+two screens — inner 951x669pt when open, cover 466x678pt when shut — and captures
 follow whichever is lit, so `duo-light` means nothing on its own. Set the pose,
 then capture under a name that says which it is:
 

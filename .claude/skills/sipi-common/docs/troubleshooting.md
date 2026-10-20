@@ -82,9 +82,9 @@ off).
 
 So case 2 now only happens when VoiceOver was switched by hand, in Settings or on
 another tool's behalf — **or after any Xcode device-interaction session**:
-`type --xcode-mcp`, `tap --xcode-mcp`, or an agent calling Xcode's MCP
-`DeviceInteraction*` tools directly (sipi never takes that path unasked; on iOS
-27.1 a session of taps and `orientation` alone did it). Measured on
+`type --xcode-mcp`, or an agent calling Xcode's MCP `DeviceInteraction*` tools
+directly (sipi never takes that path unasked). AXe — the driver inside
+XcodeBuildMCP — does the same after a single tap (measured on Xcode 27.2). Measured on
 Xcode 27.0 RC / iOS 27.0 24A434 with a
 control: one such session typed fine and left the running app readable (16 nodes),
 and every app launched afterwards read a single empty root (5s and 10s) while
@@ -234,14 +234,14 @@ only speaks to simulators from Xcode 27 on. Check with
 Xcode 27 or later with `xcode-select`, or use the simctl-backed actions
 (`appearance`, `content-size`, `increase-contrast`) instead.
 
-### A screenshot comes back black, or the tree is 466x678 instead of 669x951
+### A screenshot comes back black, or the tree is 466x678 instead of 951x669
 
 An iPhone Duo has two built-in screens and lights one at a time; the dark one
 keeps vending a live, solid-black framebuffer. Both symptoms are the same fact:
 you are looking at the screen the device is not using.
 
 Run `sipi fold-state "$UDID"`. `"folded": true` means the cover (466x678pt) is
-the lit screen and the inner screen (669x951pt) is off — the sizes and the pose
+the lit screen and the inner screen (951x669pt as apps see it) is off — the sizes and the pose
 explain each other. `sipi screenshot` and `describe-ui` follow the lit screen on
 their own, so a black capture with `"folded"` matching what you expected is a
 real bug in the app, not a screen mix-up.
@@ -249,62 +249,36 @@ real bug in the app, not a screen mix-up.
 To capture the other screen on purpose: `--display inner` / `--display cover`.
 To CHANGE the pose: `sipi fold "$UDID" --open` / `--closed`.
 
-### Every tap on an iPhone Duo is refused, or returns ok and does nothing
+### A command on an iPhone Duo is refused, or a tap returns ok and does nothing
 
-Two different things, and `sipi fold-state` tells them apart.
+Measured on Xcode 27.2 RC / iOS 27.2. Run `sipi fold-state "$UDID"` first.
 
-**Open (inner screen lit).** Expected: the inner screen takes no input in Xcode
-27.1 — the hit-test answers nothing anywhere on it and touches are discarded,
-measured on a freshly created device. Xcode's device-interaction service cannot
-reach it either (it drives the cover even while the device is open), so
-`tap --xcode-mcp` is refused here. Reading and capture still work.
-`sipi fold "$UDID" --closed` and try the cover — see below, it works on some
-Duo devices and not others, so check the effect rather than assuming.
+**Open (inner screen lit).** Taps by point and by selector, swipes, typing and
+buttons work. The inner screen answers no accessibility hit-test, so:
 
-**Shut (cover lit) and taps still do nothing.** Known, and not yet explained.
-One Duo accepted input on its cover; four created afterwards did not, with no
-difference found between them — not uptime, not a fold transition, not the
-device's own data, and `simctl erase`, recreating the device and restarting
-CoreSimulatorService all failed to change it either way. An iPhone 17 taps
-correctly throughout. Later (2026-09-23) one Duo that ignored sipi's cover taps
-took them after `xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"`.
+- a selector tap prints `Note: an iPhone Duo's inner screen answers no
+  accessibility hit-test, …` and goes to the element's frame unchecked — expected;
+- `set-text` and `describe-point` stop with `cannot work here` — fold it shut
+  (`sipi fold "$UDID" --closed`) for those, or tap the field and use `type`.
 
-In order:
-
-1. Check the effect once (below).
-2. If nothing happened, restart the device and check again — no side effect.
-3. Still nothing: send the taps that matter with `sipi tap "$UDID" --xcode-mcp
-   --label …` (or `-x/-y`). Xcode's device-interaction service landed where
-   sipi's tap did not, on the same device and state. Every app launched after it
-   reads an empty tree until the device restarts, so do it last or restart
-   before the next launch; setup is the one-time approval under § `type`
-   failures. It does not exist for `double-tap`, `swipe` or saved tests.
-4. Otherwise treat that Duo as read-only — capture, `describe-ui` and
-   `describe-point` all work — and drive the same app on a non-foldable device.
-
-Note that `tap` printing `ok` only means the event was sent. Confirm with an
-effect:
+**Taps on the inner screen return ok and nothing happens.** Device Hub has taken
+the device's input over: opening Device Hub raises
+`com.apple.coredevice.dtuhidd.active`, after which the inner screen drops every
+tap (the cover still takes them). `sipi doctor` says so. Reconnect with:
 
 ```bash
-# From the HOME SCREEN: with an app foregrounded the selector matches nothing,
-# no touch is sent, and this reports "broken" on a device whose input is fine.
-xcrun simctl terminate "$UDID" com.apple.mobilesafari
-# Resolve the same way the tap will — by LABEL. Exits non-zero if the icon is
-# not there, which is the case the check must not mistake for broken input.
-sipi wait-for "$UDID" --label Safari --timeout 5 >/dev/null || echo "not on the home screen"
-sipi tap "$UDID" --label Safari
-# tap returns as soon as the event is sent, so poll for the launch rather than
-# reading once — checking immediately reports 0 on a device where input works.
-for _ in $(seq 10); do
-  xcrun simctl spawn "$UDID" launchctl list | grep -q mobilesafari && break
-  sleep 1
-done
-xcrun simctl spawn "$UDID" launchctl list | grep -c mobilesafari   # 1 = input works
+sipi repair-input "$UDID"   # restarts SpringBoard; running apps close
 ```
 
-Heavy touch traffic has also been seen to kill a Duo's accessibility bridge
-outright — `describe-ui` then fails with `frontmostApplicationWithDisplayId
-returned nil` and only recreating the device brought it back.
+Then relaunch the app. Quitting Device Hub instead shuts the simulator down.
+
+**`type` fails with *the simulator's pasteboard did not keep the text*.** Device
+Hub is open and is putting the Mac's clipboard over the simulator's pasteboard.
+Nothing was pasted. Close Device Hub (and boot the device again), or use
+`set-text` on the cover.
+
+`tap` printing `ok` only means the event was sent, so confirm a tap by its effect
+— the next `wait-for` on what the tap should bring up.
 
 ## Build
 

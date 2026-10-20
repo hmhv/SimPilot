@@ -172,7 +172,7 @@ O SimPilot usa a seguinte estrutura padrão dentro de `.simpilot/`:
 - Um toque em um elemento que a árvore de acessibilidade declara presente, mas cuja área visível não é de fato tocável, ainda relata sucesso. `describe-point` também devolve esse elemento, então nenhuma camada consegue distinguir; as ferramentas do próprio Xcode se comportam da mesma forma
 - Face ID / Touch ID e as facetas de aparência de acessibilidade além de light/dark exigem o Xcode 27 — elas passam pelo `xcrun devicectl`, que só alcança simuladores dessa versão em diante
 - Taxas de contraste e texto cortado estão fora do escopo do `sipi a11y-audit`; ambos exigem análise de pixels do frame renderizado
-- **A entrada no iPhone Duo é limitada no Xcode 27.1**: a tela interna não aceita nenhum toque, e a tela externa aceita os toques do sipi em alguns dispositivos e em outros não (em um deles voltaram após reiniciar). `tap --xcode-mcp` alcançou uma tela externa que ignorava os toques do sipi, com o mesmo custo de `type --xcode-mcp` (veja abaixo). Nada consegue girar um simulador Duo por script; use o botão de rotação do Device Hub
+- **iPhone Duo** (medido no Xcode 27.2): toques, deslizes, digitação e botões físicos alcançam as duas telas. A tela interna não responde ao teste de acerto de acessibilidade, então ali um toque por seletor vai ao quadro do elemento sem verificação, e `set-text` / `describe-point` funcionam só na tela externa. Enquanto o Device Hub está aberto ele assume a entrada do dispositivo: a tela interna descarta os toques e a área de transferência do Mac substitui a do simulador, então `type` se recusa a colar. O `sipi doctor` informa isso e `sipi repair-input` reconecta a entrada. Nada consegue girar um simulador Duo por script; use o botão de rotação do Device Hub
 - Apenas simulador — dispositivos físicos não são suportados
 
 ## Digitar em um simulador que parou de aceitar teclas
@@ -193,7 +193,7 @@ O projeto é aberto apenas para levantar o diálogo de aprovação do Xcode e é
 
 `--clear` não pode usar esse caminho: selecionar tudo e apagar também são teclas, e o serviço digita mas não consegue esvaziar um campo. Use `sipi set-text` para substituir um valor por completo.
 
-A mesma aprovação habilita `sipi tap --xcode-mcp`, para um iPhone Duo cuja tela externa ignora os toques do sipi: no dispositivo medido, o serviço do Xcode entregou toques que os do sipi não entregaram, tanto por rótulo quanto por coordenadas. Ele não alcança a tela interna do Duo — o serviço controla a tela externa mesmo com o dispositivo aberto —, então o sipi recusa essa combinação. O custo é o mesmo e vem da sessão, não da digitação: medido novamente no iOS 27.1 apenas com toques, todos os apps abertos depois leram uma árvore de acessibilidade vazia até o dispositivo reiniciar.
+O custo vem da sessão, não da digitação: medido novamente no Xcode 27.2, uma sessão de um único toque deixou todos os apps abertos depois com uma árvore de acessibilidade vazia até o dispositivo reiniciar.
 
 
 ## Note

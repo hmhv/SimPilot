@@ -10,7 +10,7 @@ import XCTest
 
 final class DisplaySelectionTests: XCTestCase {
 
-    /// iPhone Duo, Xcode 27.1, as `devicectl device info displays` reports it.
+    /// iPhone Duo, Xcode 27.2, as `devicectl device info displays` reports it.
     private func duo(folded: Bool) -> [DeviceDisplay] {
         [
             DeviceDisplay(
@@ -254,53 +254,22 @@ final class UndrivableScreenTests: XCTestCase {
         ]
     }
 
-    func testAnOpenDuoNamesTheScreenAndTheWayOut() throws {
-        let reason = try XCTUnwrap(TapTargetCheck.undrivableScreen(displays: duo(folded: false)))
-        XCTAssertTrue(reason.contains("inner screen"), reason)
-        XCTAssertTrue(reason.contains("--closed"), "it must say what to do instead: \(reason)")
-        XCTAssertTrue(reason.contains("tap --xcode-mcp"), "it must name the route that reached the cover: \(reason)")
-    }
-
-    /// Shut, nothing is KNOWN to be wrong with the screen, so there is nothing to
-    /// report and the ordinary clipped-control explanation stands. That is not a
-    /// claim that a shut Duo takes input — measured, one device of five did and
-    /// the rest did not — only that the failure would not be the screen's pose,
-    /// which is all this function is entitled to say.
-    func testAShutDuoHasNoKnownScreenProblem() {
-        XCTAssertNil(TapTargetCheck.undrivableScreen(displays: duo(folded: true)))
-    }
-
-    func testADeviceWithOneScreenIsNeverBlamedOnItsScreen() {
+    func testOnlyAnOpenDuoReportsItsInnerScreenLit() {
+        XCTAssertTrue(DuoScreens.isInnerLit(duo(folded: false)))
+        XCTAssertFalse(DuoScreens.isInnerLit(duo(folded: true)))
         let phone = [DeviceDisplay(screenID: 1, pixelWidth: 1206, pixelHeight: 2622,
                                    pointScale: 3, active: true, primary: true)]
-        XCTAssertNil(TapTargetCheck.undrivableScreen(displays: phone))
-        XCTAssertNil(TapTargetCheck.undrivableScreen(displays: []))
+        XCTAssertNil(DuoScreens.litRole(phone))
+        XCTAssertNil(DuoScreens.litRole([]))
     }
 
-    /// Nothing lit means nothing is known, and a guess here would mislabel every
-    /// failure on an asleep device.
-    func testAnAsleepFoldableIsNotBlamed() {
+    /// Nothing lit means nothing is known, so no screen's limits apply.
+    func testAnAsleepFoldableHasNoLitScreen() {
         let asleep = duo(folded: false).map {
             DeviceDisplay(screenID: $0.screenID, pixelWidth: $0.pixelWidth,
                           pixelHeight: $0.pixelHeight, pointScale: $0.pointScale,
                           active: false, primary: $0.primary)
         }
-        XCTAssertNil(TapTargetCheck.undrivableScreen(displays: asleep))
-    }
-
-    /// The reason replaces the element-blaming text rather than being appended
-    /// to it, so the message has one explanation, not two.
-    func testTheReasonReplacesTheClippedControlExplanation() {
-        let message = TapTargetCheck.describe(
-            .nothingThere, selector: "This selector",
-            undrivableScreen: TapTargetCheck.undrivableScreen(displays: duo(folded: false)))
-        XCTAssertFalse(message.contains("clipped control"), message)
-        XCTAssertTrue(message.contains("inner screen"), message)
-    }
-
-    func testWithoutAKnownScreenProblemTheOriginalExplanationStands() {
-        let message = TapTargetCheck.describe(
-            .nothingThere, selector: "This selector", undrivableScreen: nil)
-        XCTAssertTrue(message.contains("clipped control"), message)
+        XCTAssertNil(DuoScreens.litRole(asleep))
     }
 }
