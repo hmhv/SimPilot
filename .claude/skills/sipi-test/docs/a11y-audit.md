@@ -51,7 +51,10 @@ Reserve your own analysis for what it deliberately does not decide:
   BUTTON label is therefore yours to spot
 - whether an undersized `hit-region` finding is real: the accessibility frame is
   a lower bound on the tappable area, so a 20pt glyph inside a 44pt control
-  reports as undersized. That rule warns rather than errors for this reason
+  reports as undersized. That rule warns rather than errors for this reason.
+  On an iPhone Duo every button in the system's vertical bar reports 38x38pt
+  and is flagged (measured on Xcode 27.2); that is the system's control, not a
+  defect in the app
 
 Run the pass under real accessibility settings, not only the defaults — several
 defects appear nowhere else (Xcode 27+):
