@@ -107,15 +107,22 @@ clean_existing_install() {
 # Sets REPO_DIR to the local checkout root when install.sh is run from inside
 # the repo (script dir, or cwd, contains Package.swift at the root). Leaves
 # REPO_DIR empty for the remote curl|bash path.
+# A directory is a SimPilot checkout only when its Package.swift declares the
+# `sipi` executable — any other Swift package (say, the app being tested, where
+# the README's curl one-liner is likely to be run) gets the release binary.
+is_simpilot_checkout() {
+  [ -f "$1/Package.swift" ] && grep -q '\.executable(name: "sipi"' "$1/Package.swift"
+}
+
 resolve_local_checkout() {
   REPO_DIR=""
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
-  if [ -n "$script_dir" ] && [ -f "$script_dir/Package.swift" ]; then
+  if [ -n "$script_dir" ] && is_simpilot_checkout "$script_dir"; then
     REPO_DIR="$script_dir"
     return
   fi
-  if [ -f "$PWD/Package.swift" ]; then
+  if is_simpilot_checkout "$PWD"; then
     REPO_DIR="$PWD"
     return
   fi
