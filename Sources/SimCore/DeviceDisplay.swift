@@ -163,10 +163,8 @@ public enum DisplaySelection {
     /// (one screen) or cannot be answered (nothing lit).
     ///
     /// Shut means the cover is the lit screen. This is derived from which screen
-    /// is on rather than from the hinge angle, because the angle is a continuous
-    /// value with no documented threshold — a Duo reads 0 shut and 130 at the
-    /// angle Device Hub calls open, and nothing says where between those the
-    /// system hands over.
+    /// is on rather than from the hinge angle: Xcode 27.2 cannot read the angle,
+    /// and where the system hands over depends on which way the hinge moved.
     public static func isFolded(_ displays: [DeviceDisplay]) -> Bool? {
         guard displays.count == 2, let lit = active(displays) else { return nil }
         return roles(displays)[lit.screenID] == .cover

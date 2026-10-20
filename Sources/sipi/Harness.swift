@@ -539,8 +539,9 @@ private final class HarnessRunner {
     private var initialIncreaseContrast: String?
     private var initialDisplayState: AppearanceState?
     private var initialBiometricsEnrolled: Bool?
-    /// The hinge angle read right before the run's first `fold`, so the device
-    /// is handed back in the pose it was found in. Whoever left an iPhone Duo
+    /// The hinge angle as sipi knew it right before the run's first `fold`
+    /// (HingeControl.currentAngle), so the device is handed back in the pose it
+    /// was found in. Whoever left an iPhone Duo
     /// open did not consent to it being shut by a test suite.
     private var initialHingeAngle: Double?
     private var locationWasModified = false

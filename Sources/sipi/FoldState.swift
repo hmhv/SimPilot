@@ -10,7 +10,7 @@
 // Why that is worth a command: on a foldable every other reading depends on the
 // answer. A capture of the dark screen is a black PNG, an accessibility tree
 // read from the wrong screen describes something nobody is looking at, and a
-// 466x678 tree where 669x951 was expected looks like a layout bug rather than a
+// 466x678 tree where 951x669 was expected looks like a layout bug rather than a
 // shut device.
 
 import ArgumentParser
