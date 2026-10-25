@@ -184,6 +184,15 @@ and lights exactly one at a time:
 | `cover` | 1 | 466x678 | shut |
 | `inner` | 3 | 669x951 panel, 951x669 as apps see it (landscape-left) | open |
 
+Xcode 27.2 RC drives the Duo on its own runtime, a separate download from the
+general iOS 27.2 runtime:
+
+```bash
+xcrun simctl runtime list            # look for iOS 27.2 (24B91014)
+xcrun simctl create "iPhone Duo" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo \
+    com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4
+```
+
 The dark one is not absent. It keeps vending a live, solid-black framebuffer, so
 reading the wrong screen is never an error — it is a black PNG, or an
 accessibility tree describing a screen nobody is looking at. Two habits follow:
@@ -211,6 +220,13 @@ accessibility tree describing a screen nobody is looking at. Two habits follow:
   Naming a screen the device does not have is an error, not a silent fallback to
   the other one. A capture of the lit screen is turned the way the screen is held,
   so the inner screen comes back upright at 2853x2007, matching describe-ui.
+  A sipi binary older than the checkout returned it rotated (2007x2853);
+  rebuild when `doctor` says the binary predates the checkout. `xcrun simctl io
+  "$UDID" screenshot --display=3` also captures the inner screen upright
+  (`--display=1` is the cover); without `--display` simctl captures the cover,
+  which is black while the device is open. `No framebuffer image available`
+  meant the device had gone to sleep with no screen lit; `fold --open` then
+  `--closed` woke it.
 
 - **Fold it yourself when you need the other pose.**
 
@@ -252,6 +268,24 @@ under the point and says so on stderr; check the effect as you would anyway.
 error that says to fold the device shut for them. `doctor` prints this table for
 any booted Duo.
 
+Other tools: XCUITest taps both screens (a selector tap changed the app on the
+inner screen and on the cover, measured 2026-10-25). Xcode MCP's
+`DeviceInteractionSynthesize` does not reach the inner screen — its tap did not
+land and its screenshot was the cover. serve-sim drives both screens (points in
+the panel's portrait space). Some trees are incomplete
+on the inner screen: a `NavigationSplitView` sidebar's rows, a horizontal
+toolbar's items in portrait and the home screen's icon positions were missing or
+wrong in `describe-ui` — tap those by position. Rows in a detail column and
+ordinary views were fine.
+
+Split View can be entered by touch: on the inner home screen, long-press an
+app icon (`touch --down --up --delay 1.5`), tap "Open in Split View" (localized)
+— that app takes the left half — then tap a second app on the home screen that
+fills the right half. Dragging the divider to an edge leaves Split View. The
+home-indicator route does not work from sipi: a `swipe` or `drag` up from the
+bottom edge did not even go home, on either screen. Use `button home` to reach
+the home screen.
+
 Rotation has no scripted route on a Duo: `sipi orientation --set`,
 `xcrun devicectl device orientation set|rotate` and Xcode MCP's `orientation`
 each report success and leave both screens as they were. A person can turn it
@@ -259,6 +293,29 @@ with Device Hub's rotate button, after which sipi drives it as usual — the cov
 on its side takes taps by selector and by point in 678x466 points. Apps that are
 portrait-only on iPhone (Settings, the home screen) stay upright on the cover
 whichever way it is held.
+
+Each screen keeps its own rotation through folds: with the inner screen turned
+to portrait, shutting brought the cover up on its side, and opening again went
+back to the inner screen in portrait. A restart puts both back in their default
+holds. `fold-state` prints the orientation of the interface, not of the device:
+the inner screen in portrait reads `portrait-upside-down` (`rot180`), and the
+cover on its side reads `portrait` while a portrait-only app is in front.
+
+**What the Duo simulator cannot do** — checked 2026-10-25 with Xcode 27.2 RC
+(27B48) and the iOS 27.2 Duo runtime (24B91014). Re-check each one when a new
+Xcode or Duo runtime ships:
+
+| Not possible | How it showed | Re-check |
+|---|---|---|
+| Rotation from a script | `sipi orientation --set` printed ok; `devicectl device orientation set` printed "New Device Orientation" while `get` kept the old one; Xcode MCP's `orientation` changed its own report but not the app | `devicectl device orientation set --device "$UDID" landscapeLeft`, then `sipi fold-state` |
+| System edge gestures from a script (home, Split View from the home indicator) | `swipe`/`drag` up from the bottom edge left the app in front on both screens | `swipe` from y 0.995 to 0.5, then `describe-ui` |
+| Picture in Picture | `AVPictureInPictureController.isPictureInPictureSupported()` is false (an iPhone 18 Pro simulator too) | call it in any app |
+| Cameras | `AVCaptureDevice.DiscoverySession` finds no device | same call |
+| Reading the hinge angle from outside | `fold-state` carries no angle; only the app's `onHingeChange` sees it | `sipi fold-state` |
+| Xcode MCP on the inner screen | taps do not land; its screenshot is the cover | one tap, then `xcrun simctl shutdown` + `boot` |
+| `set-text`, `describe-point` on the inner screen | refused: the inner screen answers no hit-test | `sipi describe-point` while open |
+
+Not re-checked on this version: AXe and idb (neither was usable here).
 
 **Device Hub takes over input while it is open.** Opening it raises the guest
 state `com.apple.coredevice.dtuhidd.active` to 1; from then on taps on the inner
@@ -283,6 +340,36 @@ SIMCTL_CHILD_SCREEN=Settings xcrun simctl launch "$UDID" com.example.app
 An app that writes what it measured (sizes, size classes, a token held in
 `@State`) to a file in its Documents directory can be read back with
 `xcrun simctl get_app_container "$UDID" <bundle-id> data`.
+
+Such an instrument pays for itself: size, both size classes, safe-area insets,
+`toolbarVerticalEdge`, hinge status and angle, every reserved region with
+`isActive`, and a counter of size changes, written on every change. Watching
+those through one fold shows that a single fold delivers more than one size.
+Write from `onChange(of:initial:)` or the geometry action, not from a `.task`
+loop: the loop keeps the view value it started with, so the environment values
+it reads stay at their launch values.
+
+A pose sweep, in bash — zsh does not word-split an unquoted `$args`, so
+`--angle 128 --over 1.5` would reach sipi as one argument:
+
+```bash
+#!/bin/bash
+for pose in "--open:flat:inner" "--angle 128 --over 1.5:book:inner" "--closed:cover:cover"; do
+  IFS=: read -r args name display <<< "$pose"
+  "$SIPI" fold "$UDID" $args
+  "$SIPI" wait-for "$UDID" --text "<text only the settled layout shows>" --timeout 5
+  "$SIPI" screenshot "$UDID" "shot-$name.png" --display "$display"
+done
+```
+
+`a11y-audit` reads either screen; expect a 38x38pt warning for every system
+vertical-bar button and look at the controls the app draws itself.
+
+In long sessions a Duo can drop to Shutdown, and after a reboot the first launch
+can sit behind the home screen — launch again. Never run `simctl bootstatus`
+without `-b` on a shut-down device; it waits forever.
+`xcrun simctl launch --console-pty "$UDID" <bundle-id>` to a file captures
+`print` output, another way to watch the sizes a fold delivers.
 
 Everything else — `describe-ui`, `tap`, `orientation`, `screenshot` — follows the
 lit screen automatically and needs no flag. A harness run records the pose it
