@@ -77,7 +77,7 @@ public final class NativeDriver: SimDriver {
         // Correct the ROOT's frame rather than only clipping against the right
         // rectangle, because the root's frame is what every caller reads as "the
         // screen": HitPoints clips with it, `describe-point` and `--pixel`
-        // convert through it, and the harness sizes pixel-unit steps by it.
+        // convert through it, and pixel-unit coordinates are sized by it.
         // Fixing one consumer and not the others would leave two disagreeing
         // ideas of how big the screen is, which is worse than one wrong one.
         //
@@ -401,8 +401,7 @@ public final class NativeDriver: SimDriver {
     /// rotated by these two numbers, so swapped they put each touch somewhere
     /// the element is not: on that screen no tap landed at all.
     ///
-    /// Falls back to the root's frame when the screens cannot be read — Xcode 26
-    /// and earlier, where no device has two screens anyway.
+    /// Falls back to the root's frame when the screens cannot be read.
     private func logicalExtent(
         udid: String,
         orientation: UIOrientation
@@ -424,6 +423,8 @@ public final class NativeDriver: SimDriver {
     }
 
     public func button(_ button: HardwareButton, udid: String) throws {
+        // swipe_home is a touch gesture, not a button event.
+        if button == .swipeHome { try routeTouches(udid: udid) }
         try SPSimBridge.pressButton(
             button.rawValue,
             udid: udid,
@@ -437,9 +438,7 @@ public final class NativeDriver: SimDriver {
     /// is strict — asking for one the device cannot give you is an error — but a
     /// caller who named nothing asked for a picture, and refusing to produce one
     /// because the screens could not be told apart would be a worse answer than
-    /// the bridge's own single-screen reading. The harness captures after every
-    /// step through this path; a step that produces no image at all is a bigger
-    /// loss than a step whose image came from the fallback.
+    /// the bridge's own single-screen reading.
     public func screenshot(to url: URL, udid: String) throws {
         let resolved = try? DisplayResolver.resolve(.active, udid: udid)
         try capture(to: url, udid: udid, display: resolved ?? nil)
@@ -454,9 +453,9 @@ public final class NativeDriver: SimDriver {
     /// way the device is folded — the dark one solid black. Only the resolved
     /// screen tells them apart.
     ///
-    /// When the screens cannot be read (Xcode 26, a device still coming up) the
-    /// bridge falls back to its own single-screen reading, which is right for
-    /// every device that has one screen and is all those toolchains can boot.
+    /// When the screens cannot be read (a device still coming up) the bridge
+    /// falls back to its own single-screen reading, which is right for every
+    /// device that has one screen.
     public func screenshot(to url: URL, udid: String, display: DisplaySelection.Selector) throws {
         try capture(to: url, udid: udid, display: try DisplayResolver.resolve(display, udid: udid))
     }
@@ -507,14 +506,9 @@ public final class NativeDriver: SimDriver {
     }
 
     public func setOrientation(_ name: OrientationSetName, udid: String) throws {
-        // Three tiers, strongest first:
-        //   1. native PurpleEvent SET — headless, locale-independent, in-process,
-        //      but only expresses UIDeviceOrientation 1...4.
-        //   2. devicectl — headless and locale-independent too, and the only
-        //      supported way to reach face-up / face-down now that Xcode 27
-        //      removed Simulator.app. Costs a process spawn, hence tier 2.
-        //   3. osascript menu click — needs a visible Simulator.app and is
-        //      locale-sensitive. Xcode 26 and earlier only.
+        // Native PurpleEvent SET first: headless, in-process, but only
+        // UIDeviceOrientation 1...4. devicectl reaches face-up / face-down too, at
+        // the cost of a process spawn.
         if name.isNativeExpressible {
             do {
                 try SPSimBridge.setOrientationNative(
@@ -524,103 +518,14 @@ public final class NativeDriver: SimDriver {
                 )
                 return
             } catch {
-                // Non-fatal: fall through to the next tier.
                 warn("orientation: native SET unavailable (\(error.localizedDescription)); trying devicectl")
             }
         }
-
-        if DeviceCtl.isSimulatorCapable() {
-            do {
-                try DeviceCtl.setOrientation(udid: udid, name: name.deviceCtlName)
-                return
-            } catch {
-                warn("orientation: devicectl SET failed (\(error)); trying the Simulator.app menu")
-            }
-        }
-
-        guard simulatorAppPath() != nil else {
-            // Xcode 27+ with devicectl unavailable or failing: there is no menu to
-            // click. Say so instead of emitting an opaque AppleScript error.
-            throw SimDriverError.bridge(
-                """
-                orientation: cannot set \(name.canonicalName). The native SET \
-                \(name.isNativeExpressible ? "failed" : "cannot express this orientation") \
-                and devicectl could not set it. This Xcode ships no Simulator.app to fall back on \
-                (Xcode 27 replaced it with Device Hub) — check `xcrun devicectl list plugins` for \
-                SimulatorCoreDevicePlugin.
-                """
-            )
-        }
-        try setOrientationViaOSAScript(name, udid: udid)
-    }
-
-    /// Path to the legacy Simulator.app for this toolchain, or nil on Xcode 27+
-    /// where it was removed in favor of Device Hub.
-    private func simulatorAppPath() -> String? {
-        let path = URL(fileURLWithPath: developerDir)
-            .appendingPathComponent("Applications/Simulator.app").path
-        return FileManager.default.fileExists(atPath: path) ? path : nil
+        try DeviceCtl.setOrientation(udid: udid, name: name.deviceCtlName)
     }
 
     private func warn(_ message: String) {
         FileHandle.standardError.write(Data((message + "\n").utf8))
-    }
-
-    /// Last-resort AppleScript fallback for the orientation SET: clicks the
-    /// Simulator "Device > Orientation" menu item.
-    ///
-    /// Only reachable on Xcode 26 and earlier. Xcode 27 removed Simulator.app, so
-    /// `setOrientation` checks for the app before coming here and face-up /
-    /// face-down go through devicectl instead — this path is no longer the only
-    /// way to express them. Lives here (not in SimCore) because SimCore is pure
-    /// Foundation with no Process().
-    private func setOrientationViaOSAScript(_ name: OrientationSetName, udid: String) throws {
-        let device = (try? deviceName(for: udid)) ?? ""
-        let script = """
-        on run argv
-          set deviceName to item 1 of argv
-          set targetOrientation to item 2 of argv
-          tell application "Simulator" to activate
-          delay 0.2
-          tell application "System Events"
-            tell process "Simulator"
-              if deviceName is not "" then
-                repeat with w in windows
-                  if name of w contains deviceName then
-                    perform action "AXRaise" of w
-                    exit repeat
-                  end if
-                end repeat
-              end if
-              click menu item targetOrientation of menu 1 of menu item "Orientation" of menu 1 of menu bar item "Device" of menu bar 1
-            end tell
-          end tell
-        end run
-        """
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-", device, name.menuItemName]
-        let input = Pipe()
-        let output = Pipe()
-        let error = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = error
-        try process.run()
-        input.fileHandleForWriting.write(Data(script.utf8))
-        input.fileHandleForWriting.closeFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "osascript failed"
-            throw SimDriverError.bridge("orientation: \(message.trimmingCharacters(in: .whitespacesAndNewlines))")
-        }
-    }
-
-    /// Resolve a device's display name (used by the osascript fallback to raise the
-    /// matching Simulator window). Empty string when the UDID is not found.
-    private func deviceName(for udid: String) throws -> String {
-        let raw = try SPSimBridge.listDevices(forDeveloperDir: developerDir)
-        return raw.first { $0.udid.caseInsensitiveCompare(udid) == .orderedSame }?.name ?? ""
     }
 
     public func multiTouch(_ a: Point, _ b: Point, phase: TouchPhase, udid: String) throws {

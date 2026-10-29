@@ -64,10 +64,6 @@ enum DataArtifactCLI {
             .appendingPathComponent(manifest.deletingPathExtension().lastPathComponent + "-backups")
     }
 
-    static func manifestDirectory(for manifestPath: String) -> URL {
-        URL(fileURLWithPath: manifestPath).deletingLastPathComponent()
-    }
-
     static func cleanupManifest(path: String, selectedRoot: URL) throws -> (cleaned: Int, remaining: Int) {
         var manifest = try loadManifest(path)
         let canonicalRoot = selectedRoot.standardizedFileURL.resolvingSymlinksInPath()
@@ -82,7 +78,7 @@ enum DataArtifactCLI {
         let failures = ContainerArtifacts.cleanup(
             scoped,
             allowedRoots: [canonicalRoot],
-            allowedBackupRoot: manifestDirectory(for: path)
+            allowedBackupRoot: backupDirectory(for: path)
         )
         if !failures.isEmpty { throw DataArtifactCLIError.cleanupFailed(failures) }
         let selectedSet = Set(selected.map { "\($0.root)\u{0}\($0.path)\u{0}\($0.backup ?? "")" })
@@ -90,7 +86,7 @@ enum DataArtifactCLI {
             selectedSet.contains("\($0.root)\u{0}\($0.path)\u{0}\($0.backup ?? "")")
         }
         try saveManifest(manifest, path: path)
-        let trustedRecoveryRoot = manifestDirectory(for: path)
+        let trustedRecoveryRoot = backupDirectory(for: path)
             .standardizedFileURL.resolvingSymlinksInPath()
         for recoveryPath in selected.flatMap({ [$0.backup, $0.marker].compactMap { $0 } }) {
             let recoveryURL = URL(fileURLWithPath: recoveryPath)

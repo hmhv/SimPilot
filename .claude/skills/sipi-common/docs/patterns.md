@@ -2,8 +2,7 @@
 
 Which control behaves how, and what to do when it misbehaves — plus
 § App State on Disk, for reading back what the app persisted. For *which command
-does what*, see `ui-driver.md`; the same primitives are available as saved v2 test
-actions (`../../sipi-test/references/actions.md`).
+does what*, see `ui-driver.md`.
 
 ## Element Interaction Fallback Chain
 
@@ -18,15 +17,16 @@ return success from a tap without changing state.
 2. sipi tap $UDID --id "identifier"
    ↓ fail
 3. sipi tap $UDID --pixel -x cx -y cy   (from frame: cx=x+w/2, cy=y+h/2)
-   ↓ verify fail
-4. Screenshot → Read → locate → touch / swipe / long press → verify → else FAIL
+   ↓ no change on screen
+4. Screenshot → Read → locate → touch / swipe / long press → re-read → else give up and report
 ```
 
 A `--label` / `--id` / `--value` tap (and `sipi slider`) re-fetches the deep grid
 tree and retries automatically when the fast tree has no match, so selector taps
 reach System UI without `--deep`. Only a *true* not-found escalates: a
 multiple-match or invalid-frame error fails immediately. On a multiple-match,
-follow the error's advice (`--element-type`, `--id`, or coordinates) rather than
+follow the error's advice (`--id`, or coordinates — `--element-type` can also
+narrow a shared label) rather than
 re-tapping. Fall through to coordinates only when a selector genuinely cannot
 resolve.
 
@@ -82,10 +82,11 @@ only while expanded.
 
 ### App Launch
 
-- Wait ~2s after launch. On iPad iOS 18.x the app may not come forward — tap it
+- Wait for the app's own content with `sipi wait-for` (it appears ~3.5s after
+  launch; see `ui-driver.md` § Waiting). On iPad iOS 18.x the app may not come forward — tap it
   on SpringBoard with `sipi tap $UDID --label "AppName"`.
-- iPad iOS 26+: terminate+launch may return `DockFolderViewService`. Do not
-  terminate between tests when running suites.
+- iPad iOS 26+: terminate+launch may return `DockFolderViewService`. Avoid
+  terminating and relaunching more than the task needs.
 
 ### Tab Switching
 
@@ -94,8 +95,6 @@ only while expanded.
   frame (width / tab count).
 - iPad: `AXRadioButton` present in all versions → `--label` works.
 - 6+ tabs: the last becomes "..." (More).
-- Landscape iOS 26+: use System Events —
-  `osascript ... click (first radio button ... whose description is "TabName")`.
 
 ### Navigation (push/pop)
 
@@ -126,7 +125,8 @@ app's own output: a secure field (reads back as bullets) and an empty write
 Use `sipi type` only when the KEYSTROKES are the subject — per-character
 `onChange`, keyboard toolbar, candidate bar, Return/submit. Tap the field to
 focus it first, then `sipi type $UDID "text"`. It pastes via the pasteboard by
-default; `--keyboard` injects US-only keystrokes and `--clear` selects-all and
+default, which the app sees as one change; per-character input needs
+`--keyboard`, which injects US-layout keystrokes. `--clear` selects-all and
 deletes first. Because `set-text` types nothing, it also does not exercise input
 filters — a length cap or character whitelist may be bypassed (unmeasured).
 
@@ -134,7 +134,7 @@ filters — a length cap or character whitelist may be bypassed (unmeasured).
 keyboard HID, the guest keyboard layout deciding what `--keyboard` actually types
 (and IME composition under a non-Latin keyboard), and `--clear` against a pending
 composition. All three, with their recovery steps — including the Xcode 27
-service `type` falls back to when its own keystrokes do not arrive — are in
+service `type --xcode-mcp` reaches when its own keystrokes do not arrive — are in
 `troubleshooting.md`.
 
 ### Scrolling
@@ -264,7 +264,7 @@ Light/dark and Dynamic Type go through `xcrun simctl ui $UDID appearance
 light|dark` and `content_size`; no native driver needed. The accessibility facets
 simctl cannot reach — reduce motion, reduce transparency, show borders, color
 filters, Liquid Glass opacity, Larger Accessibility Sizes — go through
-`sipi appearance` (Xcode 27+). VoiceOver cannot be switched on: that is retired,
+`sipi appearance`. VoiceOver cannot be switched on: that is retired,
 since on iOS 27 turning it back off empties the accessibility tree of every app
 launched afterwards until the device restarts. `sipi voiceover "$UDID"` still reads the state.
 
@@ -272,7 +272,20 @@ For rotation, `sipi orientation $UDID --set <portrait|portrait-upside-down|lands
 Wait ~3s for it to settle, then confirm. The plain read
 (`sipi orientation $UDID --json`) reports only the four upright orientations —
 SimulatorKit cannot express the flat ones — so confirm a `face-up` / `face-down`
-set with `--physical`, which adds `flat`, `physical`, and `locked` from devicectl.
+set with `--json --physical`, which adds `flat`, `physical`, and `locked` from devicectl.
+
+The simulator has no time zone setting; pass `TZ` to the processes instead
+(measured on Xcode 27.2 / iOS 27.2):
+
+| Reach | Set | Status bar | Undo |
+|---|---|---|---|
+| One app | `SIMCTL_CHILD_TZ=Pacific/Honolulu xcrun simctl launch --terminate-running-process "$UDID" <bundle-id>` | unchanged | The same launch without `SIMCTL_CHILD_TZ` |
+| Apps launched afterwards, from the icon too | `xcrun simctl spawn "$UDID" launchctl setenv TZ Pacific/Honolulu`, then relaunch the app | unchanged | `xcrun simctl spawn "$UDID" launchctl unsetenv TZ`, relaunch; a shutdown also clears it |
+| Everything, SpringBoard included | `xcrun simctl shutdown "$UDID"; SIMCTL_CHILD_TZ=Pacific/Honolulu xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b` | changes | Shut down and boot without it; `launchctl unsetenv` does not remove it |
+
+Each starts the app in another zone; none changes the zone while it runs, so a
+`NSSystemTimeZoneDidChange` reaction needs a real device. Check the app's own
+value (`TimeZone.current`), not the status bar.
 
 ---
 
@@ -370,7 +383,7 @@ This file covers controls in general. What it cannot hold is what is true of
 *one* app — that its Settings tab is labelled `Settings, tab 2 of 3`, that the
 sign-out row and the sign-out button share a label, that the onboarding sheet
 must be dismissed before the tab bar is reachable. Keep those in
-`.simpilot/notes.md`, next to the tests, so the next session (yours, another
+`.simpilot/notes.md`, so the next session (yours, another
 agent's, or a teammate's) does not rediscover them:
 
 ```markdown
@@ -383,8 +396,7 @@ agent's, or a teammate's) does not rediscover them:
 One bullet per fact: screen, control, what failed, what worked. Read it before
 the first interaction when it exists; append when this app needed something the
 tables above do not cover. Do not put generic control behaviour here (that
-belongs in this file), test data, or findings — a saved test already records
-its own selectors, and `findings.json` records what was wrong with the app.
+belongs in this file), test data, or findings about the app.
 
 ### PhotosPicker multiple selection, by version
 

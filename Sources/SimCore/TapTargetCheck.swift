@@ -25,8 +25,8 @@
 // them); a frame that contains another proves nothing about accessibility
 // ancestry; and inside a cross-process remote view the two frames are not even
 // in the same coordinate space. Every rule tried for this rejected real,
-// working taps on real screens. For a test harness a false failure is as
-// damaging as a false pass, so the check claims only what it can prove.
+// working taps on real screens. A false failure is as damaging as a false
+// pass, so the check claims only what it can prove.
 
 import Foundation
 

@@ -16,8 +16,6 @@ The following files are derived from AXe source under the MIT License:
   (from `Sources/AXe/Utilities/AccessibilityElement.swift`)
 - `Sources/SimCore/AccessibilityTargetResolver.swift`
   (from `Sources/AXe/Utilities/AccessibilityTargetResolver.swift`)
-- `Sources/SimCore/AccessibilityPoller.swift`
-  (from `Sources/AXe/Utilities/AccessibilityPoller.swift`)
 - `Sources/SimCore/TapResolution.swift`
   (the `TapResolution` struct, from `Sources/AXe/Types/TapStyle.swift`)
 - `Sources/SimCore/KeyCode.swift`
@@ -83,73 +81,11 @@ model). The gesture geometry, timing, and event-encoding workarounds derive
 from serve-sim's expression; the Apple private-API symbols and the
 idb-credited button/event constants are facts, not serve-sim's.
 
-SimBridge's accessibility-tree, framebuffer-capture, and orientation code were
+SimBridge's accessibility-tree, framebuffer-capture, and orientation code, and
+the `repair-input` recipe in `Sources/SimShell/InputRepair.swift`, were
 **informed by** serve-sim (and by idb and AXe, which serve-sim itself credits)
 but are independent reimplementations with no source copied — the resemblance
 there is limited to the underlying Apple private-API mechanics.
-
----
-
-## hinge
-
-The guest-side helper that sets a foldable simulator's hinge angle —
-`Sources/SimShell/HingeHelperSource.swift`, compiled on first use by
-`Sources/SimShell/HingeControl.swift` — is **derived from hinge**
-(https://github.com/artemnovichkov/hinge, Copyright (c) 2026 Artem Novichkov),
-specifically `skills/hinge/scripts/hinge_helper.c`, under the MIT License.
-
-What comes from hinge is the mechanism, which is undocumented and not
-discoverable from Apple's headers: the vendor-defined HID usage page `0xFF61`
-and usage `0x5B`, the four-key payload dictionary
-(`provider` / `source` / `type` / `value`), the use of `IOCFSerialize`'s binary
-format rather than a property list, and HID client **type 4** — the one
-`backboardd` accepts from a process without the
-`com.apple.private.hid.client.admin` entitlement, which is what makes the helper
-runnable under `simctl spawn` at all.
-
-SimPilot's copy is restructured and re-commented, and the surrounding build,
-caching, pose/angle resolution, screen-handover waiting, harness action and
-restore behaviour are its own. The dispatch sequence itself is hinge's
-expression and is used under its license, reproduced below.
-
-```
-MIT License
-
-Copyright (c) 2026 Artem Novichkov
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
-## swift-argument-parser
-
-The `sipi` CLI parses its command line with **swift-argument-parser**
-(https://github.com/apple/swift-argument-parser, Copyright © Apple Inc.), used
-under the Apache License, Version 2.0. It is a declared dependency in
-`Package.swift` (pinned to 1.8.2 in `Package.resolved`) and SwiftPM links it
-**statically** into the distributed prebuilt `sipi` binary, so the released
-binary contains its object code and redistribution requires this attribution.
-No source is modified; it is consumed unchanged as a package dependency.
-
-The Apache License 2.0 — the same license serve-sim is under — is reproduced in
-full below; it covers swift-argument-parser as well.
 
 The Apache License 2.0, reproduced in full as required by its terms:
 
@@ -357,3 +293,61 @@ The Apache License 2.0, reproduced in full as required by its terms:
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+---
+
+## hinge
+
+The guest-side helper that sets a foldable simulator's hinge angle —
+`Sources/SimShell/HingeHelperSource.swift`, compiled on first use by
+`Sources/SimShell/HingeControl.swift` — is **derived from hinge**
+(https://github.com/artemnovichkov/hinge, Copyright (c) 2026 Artem Novichkov),
+specifically `skills/hinge/scripts/hinge_helper.c`, under the MIT License.
+
+What comes from hinge is the mechanism, which is undocumented and not
+discoverable from Apple's headers: the vendor-defined HID usage page `0xFF61`
+and usage `0x5B`, the four-key payload dictionary
+(`provider` / `source` / `type` / `value`), the use of `IOCFSerialize`'s binary
+format rather than a property list, and HID client **type 4** — the one
+`backboardd` accepts from a process without the
+`com.apple.private.hid.client.admin` entitlement, which is what makes the helper
+runnable under `simctl spawn` at all.
+
+SimPilot's copy is restructured and re-commented, and the surrounding build,
+caching, pose/angle resolution, and screen-handover waiting are its own. The dispatch sequence itself is hinge's
+expression and is used under its license, reproduced below.
+
+```
+MIT License
+
+Copyright (c) 2026 Artem Novichkov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
+## swift-argument-parser
+
+The `sipi` CLI parses its command line with swift-argument-parser
+(https://github.com/apple/swift-argument-parser, Copyright (c) Apple Inc. and
+the Swift project authors), linked unmodified into the binary. It is under the
+Apache License 2.0 with the Runtime Library Exception, which waives the
+attribution requirements for binaries built with it; it is listed here for
+reference only.

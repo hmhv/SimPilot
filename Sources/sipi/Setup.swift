@@ -2,11 +2,11 @@
 //
 // `sipi setup` — materialize the embedded skill trees onto disk.
 //
-// The prebuilt sipi binary ships the three skills (sipi-common, sipi-test,
-// sipi-verify) baked in. `setup` recreates them under BOTH ~/.claude/skills
+// The prebuilt sipi binary ships the sipi-common skill baked in. `setup`
+// recreates it under BOTH ~/.claude/skills
 // (Claude Code) and ~/.agents/skills (Codex) and records install metadata to
 // ~/.local/share/simpilot/install.json. CLEAN-FIRST and idempotent — re-running
-// is the supported refresh path and only ever touches our own three skills.
+// is the supported refresh path and only ever touches our own skills.
 //
 // All of the heavy lifting lives in SimCore.SkillInstaller so `setup` and
 // `update` share one implementation.

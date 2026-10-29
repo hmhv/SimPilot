@@ -92,10 +92,10 @@ extension Sipi {
         @Argument(help: "Direction: in (zoom out) or out (zoom in).")
         var direction: String
 
-        @Option(name: .customLong("center-x"), help: "Center X (normalized 0...1, or pixels with --pixel). Default: screen center.")
+        @Option(name: .customLong("center-x"), help: "Center X (normalized 0...1, or pixels with --pixel). Default: screen center when both are omitted.")
         var centerX: Double?
 
-        @Option(name: .customLong("center-y"), help: "Center Y (normalized 0...1, or pixels with --pixel). Default: screen center.")
+        @Option(name: .customLong("center-y"), help: "Center Y (normalized 0...1, or pixels with --pixel). Default: screen center when both are omitted.")
         var centerY: Double?
 
         @Option(name: .long, help: "Widest normalized finger separation (default \(PinchPlan.defaultSeparation)).")
@@ -172,7 +172,7 @@ extension Sipi {
         @Argument(help: "Simulator UDID.")
         var udid: String
 
-        @Argument(help: "Crown rotation delta (positive scrolls one way, negative the other).")
+        @Argument(help: "Crown rotation delta (positive scrolls one way, negative the other; pass a negative one after --).")
         var delta: Double
 
         func run() throws {

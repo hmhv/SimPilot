@@ -77,37 +77,6 @@ final class OrientationMathTests: XCTestCase {
         assertClose(right, w, 0)
     }
 
-    func testLetterboxParametersCenterUniformly() {
-        // A 800x600 logical rect inside a 1000x1000 physical rect: scale to fit
-        // the wider axis (1000/800 vs 1000/600 -> min = 1.25) and center.
-        let params = OrientationMath.letterboxParameters(
-            logicalWidth: 800, logicalHeight: 600,
-            physicalWidth: 1000, physicalHeight: 1000
-        )
-        XCTAssertEqual(params.scale, 1000.0 / 800.0, accuracy: 1e-9)
-        XCTAssertEqual(params.offsetX, 0, accuracy: 1e-9)
-        XCTAssertEqual(params.offsetY, (1000 - 600 * (1000.0 / 800.0)) / 2, accuracy: 1e-9)
-    }
-
-    func testLetterboxParametersGuardZeroExtent() {
-        // No usable logical extent -> identity (unit scale, zero offsets) instead
-        // of dividing by zero.
-        let params = OrientationMath.letterboxParameters(
-            logicalWidth: 0, logicalHeight: 600,
-            physicalWidth: 1000, physicalHeight: 1000
-        )
-        XCTAssertEqual(params.scale, 1)
-        XCTAssertEqual(params.offsetX, 0)
-        XCTAssertEqual(params.offsetY, 0)
-    }
-
-    func testLetterboxToPhysicalAppliesScaleAndOffset() {
-        let p = OrientationMath.letterboxToPhysical(
-            x: 100, y: 50, scale: 2, offsetX: 10, offsetY: 20
-        )
-        assertClose(p, 10 + 100 * 2, 20 + 50 * 2)
-    }
-
     // MARK: - physicalExtent
 
     func testPhysicalExtentPortraitPassesThrough() {

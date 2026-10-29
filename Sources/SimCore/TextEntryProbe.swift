@@ -4,8 +4,8 @@
 //
 // `sipi type` reaches the guest through HID (a Cmd+V paste or keystrokes), and a
 // simulator whose keyboard HID has stopped being delivered swallows all of it
-// while every call still succeeds. Reporting `ok` there is worse than failing: a
-// saved test goes green while the app never saw the input.
+// while every call still succeeds. Reporting `ok` there is worse than failing:
+// the caller is told the input arrived while the app never saw it.
 //
 // Measured 2026-08-01: this tracks DEVICE age, not the iOS runtime. A freshly
 // created device types fine on iOS 27.0; long-lived ones stop delivering

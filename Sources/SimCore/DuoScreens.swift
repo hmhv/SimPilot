@@ -43,6 +43,6 @@ public enum DuoScreens {
             + "A selector tap goes to the element's frame unchecked, because \(innerHitTest); "
             + "for the same reason set-text and describe-point do not work there — fold it shut for those.",
         "both: rotation cannot be scripted (Device Hub's rotate button can), and "
-            + "`--xcode-mcp` reaches the cover only."
+            + "`type --xcode-mcp` reaches the cover only."
     ]
 }

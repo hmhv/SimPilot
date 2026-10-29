@@ -2,7 +2,7 @@
 //
 // Locks the retry helper behind the pasteboard calls (`pbcopy`/`pbpaste`), which
 // the default `type` path depends on: a transient simctl failure there used to
-// fail an otherwise-good test step. Pure closures — no simulator involved.
+// fail an otherwise-good `type`. Pure closures — no simulator involved.
 
 import Foundation
 import XCTest

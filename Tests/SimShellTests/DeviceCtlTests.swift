@@ -48,11 +48,6 @@ final class DeviceCtlTests: XCTestCase {
 
     // MARK: - AppearanceState
 
-    func testEmptyStateIsEmpty() {
-        XCTAssertTrue(AppearanceState().isEmpty)
-        XCTAssertFalse(AppearanceState(reduceMotion: false).isEmpty)
-    }
-
     /// A nil facet means "unsupported / unknown", which must not serialize as
     /// `false` — a restore that wrote it back would leave the device in a state it
     /// was never in.
@@ -175,8 +170,7 @@ final class HingeAngleFormatTests: XCTestCase {
         XCTAssertNil(HingeControl.impliedRole(atAngle: 85.5))
     }
 
-    /// The pose a run restores comes from this, so a stale record must not win
-    /// over the screen that is lit: a device recorded shut but showing its inner
+    /// A stale record must not win over the screen that is lit: a device recorded shut but showing its inner
     /// screen was opened since, and restoring it to 0° would be wrong.
     func testTheRecordedAngleYieldsToTheLitScreenAtTheEnds() {
         XCTAssertEqual(HingeControl.reconcile(recorded: 0, lit: .inner), 180)

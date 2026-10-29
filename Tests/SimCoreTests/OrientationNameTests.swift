@@ -3,8 +3,7 @@
 // Locks the pure-logic orientation-name mapping for the orientation SET path:
 // name parsing (with the short aliases), native-expressibility (PurpleEvent
 // covers 1...4 only), the canonical name handed to the native SET, and the
-// Simulator "Device > Orientation" menu item label used by the osascript
-// fallback. Pure Foundation — no simulator.
+// devicectl name. Pure Foundation — no simulator.
 
 import XCTest
 @testable import SimCore
@@ -69,17 +68,6 @@ final class OrientationNameTests: XCTestCase {
         XCTAssertEqual(OrientationSetName.landscapeRight.deviceCtlName, "landscapeRight")
         XCTAssertEqual(OrientationSetName.faceUp.deviceCtlName, "faceUp")
         XCTAssertEqual(OrientationSetName.faceDown.deviceCtlName, "faceDown")
-    }
-
-    func testMenuItemNamesMatchSimulatorMenu() {
-        // These must match the Simulator "Device > Orientation" submenu labels the
-        // osascript fallback clicks.
-        XCTAssertEqual(OrientationSetName.portrait.menuItemName, "Portrait")
-        XCTAssertEqual(OrientationSetName.portraitUpsideDown.menuItemName, "Portrait Upside Down")
-        XCTAssertEqual(OrientationSetName.landscapeLeft.menuItemName, "Landscape Left")
-        XCTAssertEqual(OrientationSetName.landscapeRight.menuItemName, "Landscape Right")
-        XCTAssertEqual(OrientationSetName.faceUp.menuItemName, "Face Up")
-        XCTAssertEqual(OrientationSetName.faceDown.menuItemName, "Face Down")
     }
 
     // MARK: - multitouch coordinate-unit conversion

@@ -2,32 +2,32 @@
 
 翻译: [English](README.md) | [日本語](README.ja.md) | **简体中文** | [繁體中文](README.zh-TW.md) | [Español](README.es.md) | [한국어](README.ko.md) | [Português do Brasil](README.pt-BR.md)
 
-SimPilot 是一组面向 iOS Simulator 测试与验证的 agent skills，可在 Claude Code 或 Codex 中通过自然语言请求驱动。
+SimPilot 让 Claude Code 或 Codex 通过自然语言驱动 iOS Simulator——读取屏幕、点按、输入、折叠、截取、把文件放进 App 并读回它保存的内容——同时让背后的 Xcode 和 simulator 工具链保持已安装且干净。如何检查结果交给 agent 决定：它会读取屏幕、截取画面，并以适合任务的方式读取 App 的数据。
 
 目前仅翻译顶层 README。skill docs 和代码仍保持英文。
 
 ## 功能
 
-- **`/sipi-test`**: 在 iOS Simulator 上自动化 UI 测试与异常状态测试。skill 会把自然语言意图转换成明确的 v2 JSON 规范，再由 `sipi run-test` / `sipi run-suite` 通过确定性 harness 执行。保存的测试可以控制权限、deep links、推送通知、定位、外观、Dynamic Type、Increase Contrast、Face ID / Touch ID、更广泛的无障碍外观设置、内存警告、启动环境，以及显式配置的 network-condition provider。
-- **`/sipi-verify`**: 实现后的验证。用于在功能开发或缺陷修复后，确认行为和界面都符合预期。
-
-结果会以 JSON 形式保存在 `.simpilot/` 中，代理或 CI 可直接读取。供浏览器查看的 HTML 报告可按需生成。
+- **驱动 simulator**：`sipi` 以原生、headless 的方式读取无障碍树并据此操作：按标签或 id 点按、以任何文字系统输入文本、手势、硬件按钮、旋转、折叠 iPhone Duo、截图和录像、Face ID / Touch ID、无障碍外观设置，以及内存警告。
+- **处理 App 数据**：把文件放进 App 的数据容器、App Group 或 Files.app；以文本、JSON、plist 或 SQLite 形式查看 App 保存的内容；为容器创建快照并比较差异；收集 App 的崩溃报告。
+- **管理 Xcode 和 simulator runtime**：`sipi xcode list / install / uninstall` 用于查看、安装和删除 Xcode，`sipi runtime list` 显示 Apple 提供的 simulator runtime；runtime 和设备的安装与删除按 skill 中的说明通过 `xcodebuild` 和 `simctl` 完成。
+- **清理**：找出并移除 Xcode 和 simulator 留下的内容：DerivedData、device support 文件、预览和测试用设备、无法使用的 runtime、旧版 Xcode。未经批准不会移除任何内容，文件会被移到废纸篓。
 
 ## 前置条件
 
-- macOS 15 或更高版本
-- Xcode 26 或更高版本：在**运行时**需要，用于驱动 Simulator（SimPilot 会加载 Xcode 的 private Simulator frameworks）。安装时不需要。Xcode 27 或更高版本还会额外启用 Face ID / Touch ID、无障碍外观设置和内存警告，它们通过 `xcrun devicectl` 实现，并且可以作为键盘输入的回退路径（见[向不再接受按键输入的 simulator 输入文本](#向不再接受按键输入的-simulator-输入文本)）。
+- Xcode 27.2 或更高版本
+- macOS 26.6 或更高版本
 - [Claude Code](https://claude.com/claude-code) 或 Codex
 
 ## 安装
 
-SimPilot 以单个内置 skills 的 `sipi` 二进制文件分发。一条命令即可安装:
+SimPilot 以单个内置 skill 的 `sipi` 二进制文件分发。一条命令即可安装:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh | bash
 ```
 
-安装脚本会下载预构建的 `sipi` 二进制文件，随后 `sipi` 会将内置的 `sipi-common` / `sipi-test` / `sipi-verify` skills 注册到:
+安装脚本会下载预构建的 `sipi` 二进制文件，随后 `sipi` 会将内置的 `sipi-common` skill 安装到:
 
 - Claude Code (`~/.claude/skills/`)
 - Codex (`~/.agents/skills/`)
@@ -37,159 +37,84 @@ curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh | bas
 更新和卸载:
 
 ```bash
-sipi update      # 从 GitHub Releases 下载最新的 sipi 并刷新 skills
-sipi uninstall   # 移除 skills、安装 metadata 和 sipi 二进制文件
+sipi update      # 从 GitHub Releases 下载最新的 sipi 并刷新 skill
+sipi uninstall   # 删除 skill、安装元数据和 sipi 二进制文件
 ```
+
+从 2.x 更新时会移除 `sipi-test` 和 `sipi-verify` skills。App 仓库中的 `.simpilot/tests/`、`suites/`、`devices/`、`runs/`、`verify/`，以及 `config.json` 中 `app`、`build` 以外的键都不再使用，不需要时请删除。
 
 ## 快速开始
 
 在你的 iOS 应用项目中:
 
-- Claude Code: 使用 `/sipi-test` 这类 slash command
-- Codex: 自然地提到 skill，例如 `Use the sipi-test skill to ...`
+- Claude Code: 使用 `/sipi-common` 后接请求内容，或直接提出请求
+- Codex: 提到该 skill，例如 `Use the sipi-common skill to ...`
 
-**测试:**
 ```text
-/sipi-test 创建一个在首页和设置页签之间切换的测试
-Use the sipi-test skill to create a test for switching between the home and settings tabs
+/sipi-common 构建 App，并在 simulator 上检查新的登录流程是否正常
+/sipi-common 打开设置并开启通知
+/sipi-common 把 sample.pdf 放进 App 的 Inbox，并检查导入界面
+/sipi-common 显示登录后 App 保存的内容
+/sipi-common 安装 Xcode 27.2 和 iOS 27.2 runtime
+/sipi-common 清理 Xcode 占用的磁盘空间
 ```
 
-首次使用时，SimPilot 会检测你的项目，创建 `.simpilot/config.json`，并准备 simulator 会话。
+首次使用时，SimPilot 会检测你的项目，创建 `.simpilot/config.json`，并准备 simulator。
 
-**验证:**
-```text
-/sipi-verify 检查新的登录流程是否能在 simulator 上正常工作
-Use the sipi-verify skill to verify the dark mode fix looks correct
+## 直接驱动 simulator
+
+`sipi` 是一个可由 agent 逐步调用的普通 CLI。`describe-ui --format compact` 以每个元素一行（类型、标签、id、值、frame、点击坐标）输出无障碍树，体积只有 JSON 的几分之一；`wait-for` 会轮询直到某个标签、id、值或文本出现（或消失），替代 sleep；`screenshot --max-pixel 600` 返回足够小、便于查看的截图；`memory-warning` 发送 Simulator.app Debug 菜单曾提供的内存警告（Xcode 27 及以上）；`fold-state` 报告 iPhone Duo 的两块屏幕中哪一块是点亮的，`fold --closed|--open|--angle` 可以折叠它（simctl 和 devicectl 都做不到），`--display inner|cover` 可以截取熄灭的那一块。完整命令见 `sipi --help`。
+
+`sipi a11y-audit` 可针对任意已启动的 simulator 检查当前界面——过小的点按目标、缺少标签的控件、有歧义的重复标签、无意义的标签、被截断的文本。Xcode 自带的无障碍审查只能在 UI 测试 target 内部运行。
+
+App 数据相关命令见 [App data and evidence commands](docs/data-artifacts.md)。
+
+## Xcode 和 simulator runtime
+
+```bash
+sipi xcode install 27B48
 ```
 
-## 常见任务
+传入 `sipi xcode list`（来自 [xcodereleases.com](https://xcodereleases.com)）列出的 build 号。随后会打开一个 developer.apple.com 的窗口；在其中登录后它会自动关闭。会话只在本次运行期间保存在内存中，不会存储任何内容。App 会安装为 `/Applications/Xcode-<version>.app`（例如 `Xcode-27.2.0-release.candidate.app`）。选择该 Xcode 需要 root 权限，因此 `sipi` 会打印 `sudo xcode-select -s …` 和 `sudo xcodebuild -runFirstLaunch` 命令，由你自行执行。
 
-**创建测试:**
-```text
-/sipi-test 创建一个首页标签切换测试
-/sipi-test 创建一个登录后打开设置的测试
-/sipi-test 创建一个把亮度滑块设为 80% 并切换通知开关的测试
-/sipi-test 从当前界面创建测试
-```
+`sipi runtime list` 列出 Apple 提供的 simulator runtime，并标出已安装的（`xcodebuild` 和 `simctl` 都无法列出）。安装用 `xcodebuild -downloadPlatform iOS -buildVersion <版本> -architectureVariant arm64`，删除用 `xcrun simctl runtime delete`，创建设备用 `xcrun simctl create`。skill 了解这些命令并会替你执行。
 
-保存的测试以确定性步骤驱动完整的交互面——点按、双击、开关切换、滑块、手势、拖拽、长按、捏合与原始多点触控、组合键和旋转——而不仅是点按和滑动。
+## 项目文件
 
-它们还能创建由 Simulator 真实控制的错误前置条件，比如拒绝权限、deep links、推送投递、模拟坐标、Face ID / Touch ID 的匹配与不匹配、完整的无障碍外观设置（减弱动态效果、降低透明度、颜色滤镜、Liquid Glass 不透明度），以及由 provider 支撑的离线/延迟配置。SimPilot 不捆绑也不模仿任何专有的网络条件模拟工具：使用网络配置前请先检查 `sipi network-condition status`。
-
-验证不止于文本匹配：除了 `contains` / `absent` 和正则表达式，单个步骤还可以对元素本身做断言——某个控件处于禁用状态、某个列表恰好有五行、某个值匹配指定模式，或者某个点按目标达到 44pt。
-
-**运行测试:**
-```text
-/sipi-test 运行 settings-navigation 测试
-/sipi-test 运行 regression 套件
-/sipi-test 运行带 smoke 标签的测试
-/sipi-test 在 iPhone 16 Pro 上运行 regression 套件
-/sipi-test 在 iPhone 16 和 iPhone 15 上运行测试
-/sipi-test 使用 regression-profile 设备集运行测试
-```
-
-测试执行由确定性的 `sipi` harness 负责。运行前请先构建并安装应用，或在 `config.json` 中指定已安装的 bundle ID。加 `--junit` 可生成供 CI 读取的 `junit.xml`；加 `--record-video`（或在 `config.json` 中设置 `record-video`）可为每个测试保留 `recording.mp4`。
-
-**查看结果:**
-```text
-/sipi-test 显示最新结果
-/sipi-test 显示 settings-toggle 测试的失败细节
-/sipi-test 显示所有失败测试的细节
-/sipi-test 打开 HTML 报告
-```
-
-每次运行都会写出 `summary.json`（状态、计数，以及每个失败测试的第一个失败步骤），同时还有 `run.json` 和每个测试的 `result.json`。结果保存在 `.simpilot/runs/` 下（`config.json` 中的 `keep-runs` 会从最旧的 run 开始清理）。`report.html` 是供人在浏览器中翻阅的页面，只有在运行时加 `--html`，或事后执行 `sipi report <run-dir>` 时才会生成。面向 CI 的 `junit.xml` 同样通过 `--junit` 生成；`--record-video`（或 `config.json` 中的 `record-video`）会为每个测试保留 `recording.mp4`。
-
-**直接驱动 simulator:**
-
-`sipi` 也是一个可由 agent 逐步调用的普通 CLI。`describe-ui --format compact` 以每个元素一行（类型、标签、id、值、frame、点击坐标）输出无障碍树，体积只有 JSON 的几分之一；`wait-for` 会轮询直到某个标签、id、值或文本出现（或消失），替代 sleep；`screenshot --max-pixel 600` 返回足够小、便于查看的截图；`memory-warning` 发送 Simulator.app Debug 菜单曾提供的内存警告（Xcode 27 及以上）；`fold-state` 报告 iPhone Duo 的两块屏幕中哪一块是点亮的，`fold --closed|--open|--angle` 可以真正折叠／展开它（simctl 和 devicectl 都做不到），`--display inner|cover` 可以截取熄灭的那一块。完整命令见 `sipi --help`。
-
-**管理套件:**
-```text
-/sipi-test 显示所有测试
-/sipi-test 显示带 smoke 标签的测试
-/sipi-test 使用 app-launch、settings-toggle 和 tab-navigation 创建 regression 套件
-```
-
-**质量审查:**
-```text
-/sipi-test 对 onboarding 和 settings 页面做无障碍审查
-/sipi-test 检查缺失的 accessibility labels 和 identifiers
-/sipi-test 检查 onboarding 在 English、日语和德语下的翻译完整性
-/sipi-test 检查未翻译文本和文字截断
-/sipi-test 比较 profile 页面在 Light 和 Dark 模式下的表现
-/sipi-test 检查 settings 流程在大号 Dynamic Type 下的显示
-/sipi-test 在开启减弱动态效果和颜色滤镜的情况下审查这个界面
-```
-
-`sipi a11y-audit` 可以在命令行中针对任意已启动的 simulator 运行其中机械可查的部分——过小的点按目标、缺少标签的控件、有歧义的重复标签、无意义的标签、被截断的文本——并在出现 error 级别的问题时以非零码退出，因此可以用来把关 CI。Xcode 自带的无障碍审查只能在 UI 测试 target 内部运行。
-
-## 工作区结构
-
-SimPilot 在 `.simpilot/` 下使用如下目录结构:
+SimPilot 会在你的项目中保留两个文件:
 
 ```text
 .simpilot/
-  config.json                  # Project configuration (app bundle ID, build settings)
-  tests/                       # Test definitions
-    <test-id>.json
-  suites/                      # Test suites
-    <suite-name>.json
-  devices/                     # Device/simulator profiles
-    <profile-name>.json
-  runs/                        # Test run results (sipi-test)
-    <run-id>/
-      run.json                 # Run summary
-      summary.json             # Compact agent/CI summary
-      report.html              # only with --html, or `sipi report`
-      junit.xml                # only with --junit, or `sipi report --junit`
-      <test-id>/
-        result.json            # Test result
-        trace.jsonl            # Per-test event trace
-        step-NNN.png           # Step screenshots
-        step-NNN.describe-before.json
-        step-NNN.describe-after.json
-        recording.mp4          # only with record-video / --record-video
-  verify/                      # Verification results (sipi-verify)
-    <timestamp>_<description>/
-      summary.json             # 状态、计数、findings、variant 目录
-      checks.json
-      findings.json
-      <variant>/NNN_<check>.png
-      report.html              # 仅在 `finalize --html` 或 `sipi verify-report` 时
+  config.json   # bundle ID 以及 App 的构建方式
+  notes.md      # skill 记录的 App 特有操作技巧
 ```
 
-建议将 `.simpilot/runs/` 和 `.simpilot/verify/` 加入项目的 `.gitignore`，其余部分保持跟踪：`config.json`、`tests/`、`suites/` 以及 `notes.md`（技能记录的应用特有交互问题）正是队友或其他智能体能受益的部分。忽略整个 `.simpilot/` 对个人临时使用也可行，但这样其中的内容就无法共享。
-
-## 参考
-
-- **[JSON-REFERENCE.md](.claude/skills/sipi-test/references/json-reference.md)**: tests、suites、devices、results 和 metadata 的完整 JSON 规范
+两者都值得提交：队友或其他 agent 都能从中受益。
 
 ## 已知限制
 
 - 文本输入默认写入字段的无障碍值（`set-text`），无需键盘，任何文字系统都适用。按键级别的输入（`type`）默认通过剪贴板粘贴；逐键直接 HID 输入仅支持美式键盘布局，若客户机当前启用的是其他布局则会输入错误的字符
 - **长期使用的 simulator 可能不再接受键盘 HID**（在 Xcode 27.0 beta 6 上实测）：粘贴、逐键输入和全选+删除都会被忽略，而触摸输入正常。这取决于设备的使用时长而非 iOS 版本，`simctl erase` 和重启都无法恢复。`type` 会检测到这一点并直接失败，而不是报告成功；`set-text` 不受影响。`type --xcode-mcp` 会改为经由 Xcode 27 自带的服务输入，在实测的设备上由此成功，但有代价（见下文）
 - 无障碍树声称存在、但实际无法触摸的元素，点击后仍会报告成功。`describe-point` 同样会返回该元素，因此任何一层都无法区分；Xcode 自身的工具也是同样的行为
-- Face ID / Touch ID，以及 light/dark 之外的无障碍外观项需要 Xcode 27——它们通过 `xcrun devicectl` 实现，而 devicectl 只能作用于该版本及之后的 simulator
-- 对比度和文字截断不在 `sipi a11y-audit` 的范围内；两者都需要对渲染帧做像素分析
+- 对比度和被容器裁切（不带省略号）的文字不在 `sipi a11y-audit` 的范围内；两者都需要对渲染帧做像素分析
 - **iPhone Duo**（在 Xcode 27.2 上实测）：点击、滑动、文字输入和硬件按钮都能到达两块屏幕。内屏对无障碍 hit-test 不返回任何结果，因此按选择器的点击会不经确认地发送到元素的位置，`set-text` / `describe-point` 只能在外屏使用。Device Hub 打开期间会接管设备的输入：内屏的点击被丢弃，模拟器的剪贴板被 Mac 的剪贴板覆盖，因此 `type` 会拒绝粘贴。`sipi doctor` 会报告这种状态，`sipi repair-input` 可恢复输入。无法通过脚本旋转 Duo simulator，请使用 Device Hub 的旋转按钮
 - 仅支持 simulator，不支持真机
 
 ## 向不再接受按键输入的 simulator 输入文本
 
-simulator 可能进入忽略 SimPilot 注入的键盘事件的状态：触摸依然可用，而粘贴、逐键输入和全选+删除都失效。SimPilot 在正常设备和该状态的设备上发送的是完全相同的事件，因此 SimPilot 这一侧没有可修复之处。而 Xcode 27 自带的设备交互服务走的是另一条路径，该状态的设备仍会接受，并且这条路径也不依赖客户机的键盘布局。
+simulator 可能进入忽略 SimPilot 注入的键盘事件的状态：触摸依然可用，而粘贴、逐键输入和全选+删除都失效。SimPilot 在正常设备和该状态的设备上发送的是完全相同的事件，因此 SimPilot 这一侧没有可修复之处。而 Xcode 27 自带的设备交互服务走的是另一条路径，实测时该状态的设备仍会接受（磨损更严重的设备连这条路径也会忽略），并且这条路径也不依赖客户机的键盘布局。
 
-`sipi type --xcode-mcp`（测试中为 `"input-method": "xcode-mcp"`）选择该路径。SimPilot 绝不会自行使用它：在 iOS 27 上，一次这样的会话会让该设备之后启动的所有 App 的无障碍树为空，直到设备重启（`simctl shutdown` + `boot`）。请把它放在最后使用，或在下一次启动前重启设备。SimPilot 的其他功能都无需这项配置，`set-text` 本来就不需要键盘。
+`sipi type --xcode-mcp` 选择该路径。SimPilot 绝不会自行使用它：在 iOS 27 上，一次这样的会话会让该设备之后启动的所有 App 的无障碍树为空，直到设备重启（`simctl shutdown` + `boot`）。请把它放在最后使用，或在下一次启动前重启设备。SimPilot 的其他功能都无需这项配置，`set-text` 本来就不需要键盘。
 
 需要满足三个条件：
 
 ```bash
-xcode-select -p                    # Xcode 27 或更高版本
+xcode-select -p                    # Xcode 27.2 或更高版本
 sudo xcrun mcp-server enable       # 开启 headless 模式
 sipi xcode-mcp --approve <.xcodeproj 或 .xcworkspace 的路径>
 ```
 
-打开该项目只是为了弹出 Xcode 的授权对话框，随后会立即关闭。配置完成后，若服务尚未运行，sipi 会将其启动。Xcode 将授权绑定到具体的二进制文件，因此每次 `sipi update` 或重新构建后都需要再次执行授权步骤。当前状态可用 `sipi xcode-mcp` 查看，该路径是否可用可用 `sipi doctor` 确认。
+打开该项目只是为了弹出 Xcode 的授权对话框，随后会立即关闭。配置完成后，若服务尚未运行，sipi 会将其启动。Xcode 将授权绑定到具体的二进制文件，因此每次 `sipi update` 或重新构建后都需要再次执行授权步骤。当前状态（包括同一路径上旧构建的授权）可用 `sipi xcode-mcp` 查看，该路径是否可用可用 `sipi doctor` 确认。
 
 `--clear` 无法使用该路径：全选和删除同样是按键输入，而该服务只能输入文本、无法清空字段。需要整体替换值时请使用 `sipi set-text`。
 

@@ -4,16 +4,10 @@
 //
 // sipi drives simulators headlessly: it boots and talks to devices through
 // CoreSimulator, so no window is ever required. When a human does want to look
-// at the device, the app to open depends on the Xcode generation:
-//
-//   Xcode 27+   Device Hub (`<Xcode>.app/Contents/Applications/DeviceHub.app`)
-//               replaced Simulator.app and manages devices + simulators together.
-//   Xcode <=26  Simulator.app (`<Xcode>.app/Contents/Developer/Applications/`).
-//
-// `open -a Simulator` — still the reflex, and still in older docs — simply fails
-// on Xcode 27 ("Unable to find application named 'Simulator'"), which reads as
-// "the simulator is gone" when it is booted and driveable the whole time. This
-// command resolves whichever app the active Xcode actually ships.
+// at the device, Device Hub (`<Xcode>.app/Contents/Applications/DeviceHub.app`)
+// shows it. `open -a Simulator` — still the reflex — fails ("Unable to find
+// application named 'Simulator'"), which reads as "the simulator is gone" when
+// it is booted and driveable the whole time.
 
 import ArgumentParser
 import Foundation
@@ -21,38 +15,23 @@ import SimBridge
 
 /// The GUI app that can display a simulator screen for the active Xcode.
 struct SimulatorUIApp {
-    /// Display name (`Device Hub` / `Simulator`).
+    /// Display name.
     var name: String
     /// Absolute path to the `.app` bundle.
     var path: String
 
-    /// Resolve the app shipped by `developerDir`'s Xcode, newest layout first.
-    /// Returns nil when neither app is present (a Command Line Tools-only
-    /// install, for example) — headless driving still works, so callers treat
-    /// this as informational.
+    /// Device Hub in `developerDir`'s Xcode, or nil when it is absent (a Command
+    /// Line Tools-only install, for example) — headless driving still works, so
+    /// callers treat this as informational.
     static func resolve(developerDir: String = SPSimBridge.defaultDeveloperDir()) -> SimulatorUIApp? {
-        for candidate in candidates(developerDir: developerDir) {
-            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
-        }
-        return nil
+        let app = deviceHub(developerDir: developerDir)
+        return FileManager.default.fileExists(atPath: app.path) ? app : nil
     }
 
-    /// Every location checked, in priority order. Exposed so a failure can say
-    /// where it looked.
-    static func candidates(developerDir: String) -> [SimulatorUIApp] {
-        let developer = URL(fileURLWithPath: developerDir).standardizedFileURL
+    static func deviceHub(developerDir: String) -> SimulatorUIApp {
         // <Xcode>.app/Contents/Applications/DeviceHub.app — sibling of Developer/.
-        let contents = developer.deletingLastPathComponent()
-        return [
-            SimulatorUIApp(
-                name: "Device Hub",
-                path: contents.appendingPathComponent("Applications/DeviceHub.app").path
-            ),
-            SimulatorUIApp(
-                name: "Simulator",
-                path: developer.appendingPathComponent("Applications/Simulator.app").path
-            )
-        ]
+        let contents = URL(fileURLWithPath: developerDir).standardizedFileURL.deletingLastPathComponent()
+        return SimulatorUIApp(name: "Device Hub", path: contents.appendingPathComponent("Applications/DeviceHub.app").path)
     }
 }
 
@@ -60,17 +39,16 @@ extension Sipi {
     struct OpenUI: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "open-ui",
-            abstract: "Open the Xcode app that shows simulator screens (Device Hub on Xcode 27+, Simulator.app before).",
+            abstract: "Open Device Hub, the Xcode window that shows simulator screens.",
             discussion: """
             sipi drives simulators headlessly — booting, tapping, and screenshots all
             work with no window open. Use this only to eyeball a device yourself.
 
             Xcode 27 removed Simulator.app in favor of Device Hub, so `open -a Simulator`
-            fails there even though the simulator is booted and driveable. This command
-            opens whichever app the active Xcode ships.
+            fails even though the simulator is booted and driveable.
 
-            Selecting a specific device inside the window is a manual step: neither app
-            has a documented way to be pointed at a UDID from the command line.
+            Selecting a specific device inside the window is a manual step: Device Hub
+            has no documented way to be pointed at a UDID from the command line.
             """
         )
 
@@ -83,12 +61,9 @@ extension Sipi {
         func run() throws {
             let developerDir = SPSimBridge.defaultDeveloperDir()
             guard let app = SimulatorUIApp.resolve(developerDir: developerDir) else {
-                let looked = SimulatorUIApp.candidates(developerDir: developerDir)
-                    .map { $0.path }
-                    .joined(separator: ", ")
                 throw ValidationError(
-                    "No simulator UI app found for the active Xcode (\(developerDir)). "
-                    + "Looked for: \(looked). Headless driving is unaffected."
+                    "No Device Hub in the active Xcode (\(developerDir)). Looked for: "
+                    + "\(SimulatorUIApp.deviceHub(developerDir: developerDir).path). Headless driving is unaffected."
                 )
             }
 

@@ -4,9 +4,8 @@
 // cannot change.
 //
 // A device with one built-in screen can only ever answer one way, so that
-// reading is kept for the life of the process — the harness screenshots every
-// step from one process, and this keeps the cost at one subprocess per run
-// rather than one per capture.
+// reading is kept for the life of the process, so repeated captures in one
+// process pay for one subprocess rather than one per capture.
 //
 // A foldable's answer changes the moment someone folds it in Device Hub, and
 // nothing notifies anyone that it did. So a multi-screen device is re-read every
@@ -23,8 +22,8 @@ public enum DisplayResolver {
     private static let cacheLock = NSLock()
 
     /// The device's built-in screens, or an empty array when devicectl cannot
-    /// answer (Xcode 26 and earlier, a device that is not booted, a coredevice
-    /// daemon still starting). An empty result is never cached: it says nothing
+    /// answer (a device that is not booted, a coredevice daemon still
+    /// starting). An empty result is never cached: it says nothing
     /// about the device, and caching it would pin the process to the
     /// single-screen fallback over one bad moment.
     public static func displays(udid: String) -> [DeviceDisplay] {
@@ -33,11 +32,6 @@ public enum DisplayResolver {
         cacheLock.unlock()
         if let cached { return [cached] }
 
-        // No `isSimulatorCapable()` probe first. It would cost a second
-        // subprocess on every capture — sipi is a one-shot CLI, so nothing
-        // caches across calls — to learn what the read itself reports by
-        // failing. A toolchain whose devicectl cannot target simulators simply
-        // returns nothing here and the caller falls back.
         guard let displays = try? DeviceCtl.displays(udid: udid), !displays.isEmpty else {
             return []
         }

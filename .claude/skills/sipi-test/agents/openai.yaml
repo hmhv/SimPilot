@@ -1,4 +1,0 @@
-interface:
-  display_name: "SimPilot Test"
-  short_description: "Run repeatable simulator tests with state and evidence"
-  default_prompt: "Use $sipi-test to create and run a repeatable iOS Simulator test with the required fixtures and evidence."

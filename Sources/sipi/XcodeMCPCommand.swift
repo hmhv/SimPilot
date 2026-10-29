@@ -13,26 +13,24 @@ extension Sipi {
     struct XcodeMCPCommand: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "xcode-mcp",
-            abstract: "Check or obtain access to Xcode's device-interaction service (behind `sipi type --xcode-mcp` and `sipi tap --xcode-mcp`).",
+            abstract: "Check or obtain access to Xcode's device-interaction service (behind `sipi type --xcode-mcp`).",
             discussion: """
-            sipi drives simulators on its own. This service covers the two cases it
+            sipi drives simulators on its own. This service covers the one case it
             cannot: a simulator that has stopped accepting keyboard HID, where
             paste, per-key typing and select-all all leave the field untouched
             while this service may still type into it (it also ignores the guest
-            keyboard layout, which per-key HID does not); and an iPhone Duo whose
-            cover screen ignores sipi's taps, where this service's tap still
-            landed. It cannot reach a Duo's inner screen.
+            keyboard layout, which per-key HID does not). It cannot reach a Duo's
+            inner screen.
 
-            It is only ever used when asked for (`sipi type --xcode-mcp`,
-            `sipi tap --xcode-mcp`, or `"input-method": "xcode-mcp"` in a test). On iOS 27 one session
-            leaves every app launched afterwards on that device with an empty
-            accessibility tree until the device restarts, so it is not a
+            It is only ever used when asked for (`sipi type --xcode-mcp`). On iOS 27
+            one session leaves every app launched afterwards on that device with an
+            empty accessibility tree until the device restarts, so it is not a
             fallback sipi reaches for on its own: use it last, or restart the
             device (`simctl shutdown` + `boot`) before the next launch.
 
             Three things must be true before sipi can use it:
 
-              1. Xcode 27 or later is selected (`xcode-select -p`).
+              1. Xcode 27.2 or later is selected (`xcode-select -p`).
               2. Headless mode is on:  sudo xcrun mcp-server enable
               3. THIS binary is approved. Run `sipi xcode-mcp --approve <path to
                  an .xcodeproj or .xcworkspace>` and accept the prompt. The
@@ -58,24 +56,27 @@ extension Sipi {
                 switch XcodeMCP.readiness(developerDir: developerDir) {
                 case .approved:
                     print("Xcode MCP service: enabled, this binary is approved.")
-                    print("  `sipi type --xcode-mcp` and `sipi tap --xcode-mcp` are available. Use them last: on iOS 27 one session leaves")
+                    print("  `sipi type --xcode-mcp` is available. Use it last: on iOS 27 one session leaves")
                     print("  every app launched afterwards unreadable until the device restarts.")
                 case .likelyApproved:
                     print("Xcode MCP service: enabled, an agent at this path is approved.")
-                    print("  `sipi type --xcode-mcp` and `sipi tap --xcode-mcp` should work (use them last; see --help).")
+                    print("  `sipi type --xcode-mcp` should work (use it last; see --help).")
                     print("  This Xcode's listing gives no digest to check the grant against this exact build,")
                     print("  so if a call is refused the grant belongs to an earlier build — approve again.")
                 case .staleGrant:
                     print("Xcode MCP service: enabled, but the grant at this path is for an earlier build.")
                     print("  Run `sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>` again.")
                     print("  The grant is tied to the exact binary, so every update or rebuild needs it.")
+                    throw ExitCode.failure
                 case .notApprovedYet:
                     print("Xcode MCP service: enabled, nothing at this path is approved.")
                     print("  Run `sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>` once.")
                     print("  The grant is tied to this exact binary, so an update or rebuild needs it again.")
+                    throw ExitCode.failure
                 case .unavailable(let reason):
                     print("Xcode MCP service: unavailable.")
                     print("  \(reason.description)")
+                    throw ExitCode.failure
                 }
                 return
             }
@@ -92,7 +93,7 @@ extension Sipi {
             do {
                 let workspace = try XcodeMCP.requestApproval(projectPath: path, developerDir: developerDir)
                 print("Approved. Xcode opened '\(workspace)' to ask, and it has been closed again.")
-                print("`sipi type --xcode-mcp` and `sipi tap --xcode-mcp` are now available for this binary.")
+                print("`sipi type --xcode-mcp` is now available for this binary.")
             } catch let reason as XcodeMCP.Unavailable {
                 throw ValidationError(reason.description)
             }

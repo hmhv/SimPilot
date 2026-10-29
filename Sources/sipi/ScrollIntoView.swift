@@ -8,7 +8,7 @@
 // frame whose center is nowhere on the screen. Sending a touch there is not an
 // error anywhere in the stack — the injector accepts the coordinate and the
 // guest simply has nothing at it — so the action reports success and does
-// nothing. That is the worst possible outcome for a test harness: a green step
+// nothing. That is the worst possible outcome for a driver: a reported success
 // that never happened.
 //
 // So an off-screen target is scrolled toward until it is reachable, and if it

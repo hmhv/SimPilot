@@ -251,9 +251,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// "landscape-right") in `*nameOut`, and returns YES. Returns NO + `error` when
 /// the device, SimDeviceScreen class, or the uiOrientation selector cannot be
 /// resolved (each step is `respondsToSelector`-guarded so a churned symbol
-/// surfaces as an actionable error, not a crash). This is READ only; orientation
-/// SET stays on the existing osascript path until the native PurpleEvent SET
-/// lands in M4.
+/// surfaces as an actionable error, not a crash). This is READ only.
 + (BOOL)uiOrientationForUDID:(NSString *)udid
                 developerDir:(NSString *)developerDir
                       rawOut:(nullable uint32_t *)rawOut
@@ -293,14 +291,14 @@ NS_ASSUME_NONNULL_BEGIN
 /// (the opposite of the `UIInterfaceOrientation`-style values the READ reports);
 /// this method maps the names to the correct device-orientation raw values.
 /// "face-up"/"face-down" are NOT supported here — PurpleEvent covers only
-/// `UIDeviceOrientation` 1...4, so those stay on the osascript path.
+/// `UIDeviceOrientation` 1...4, so those go through devicectl.
 ///
 /// The `PurpleWorkspacePort` is nil/0 until the guest is past pre-springboard
 /// boot, so the lookup is retried a few times before giving up. Every step is
 /// guarded (the lookup selector is checked, the reverse-engineered wire format is
 /// fenced behind a capability probe), so a churned symbol or an un-booted device
 /// surfaces as an actionable NSError, not a crash. Returns NO + `error` on
-/// failure so the caller can fall back to the osascript SET path.
+/// failure so the caller can fall back to devicectl.
 + (BOOL)setOrientationNative:(NSString *)orientation
                         udid:(NSString *)udid
                 developerDir:(NSString *)developerDir

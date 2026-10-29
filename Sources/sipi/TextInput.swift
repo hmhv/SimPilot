@@ -1,8 +1,7 @@
 // TextInput.swift
 //
-// Shared text-entry policy for `sipi type` and the saved-test harness. The
-// default inserts text by copying it onto the simulator pasteboard and pressing
-// Cmd+V, which is independent of the guest keyboard layout and active input
+// Text-entry policy for `sipi type`. The default inserts text by copying it
+// onto the simulator pasteboard and pressing Cmd+V, which is independent of the guest keyboard layout and active input
 // language/IME — exactly the things that make US-layout HID keystrokes flaky.
 // Keyboard injection stays available as an explicit opt-in for the rare field
 // that must receive real per-character keystrokes.
@@ -24,22 +23,8 @@ enum TextInputMethod: String {
     case xcodeMCP = "xcode-mcp"
 }
 
-/// An error that knows whether re-running the action that produced it is safe.
-///
-/// The harness retries a failed step by re-executing the whole action, which is
-/// correct for a failure that happened BEFORE anything reached the device and
-/// wrong for one that happened after. Errors that opt out stop the retry loop.
-protocol RetryAdvisingError: Error {
-    /// False once the action has had an effect that a second run would repeat.
-    var retrySafe: Bool { get }
-}
-
-struct TextInputError: Error, CustomStringConvertible, RetryAdvisingError {
+struct TextInputError: Error, CustomStringConvertible {
     let description: String
-    /// Defaults to safe: most text-entry failures happen before a keystroke is
-    /// sent (no field, unreadable tree, unrepresentable text) or leave the field
-    /// demonstrably untouched.
-    var retrySafe: Bool = true
 }
 
 enum TextInput {
@@ -102,6 +87,17 @@ enum TextInput {
                 + "empty a field, and the select-all/delete keystrokes are exactly what a device "
                 + "in this state is dropping. Use `sipi set-text` to replace the value outright.")
         }
+        if method == .keyboard, !TextToHIDEvents.validateText(text) {
+            throw TextInputError(description:
+                "--keyboard cannot type text containing non-US-keyboard "
+                + "characters (accented letters, non-Latin scripts, emoji); use the default paste method.")
+        }
+
+        // Put back after the effect check, not straight after Cmd+V: the guest
+        // handles the paste asynchronously, and a restore that lands first would
+        // paste the user's own clipboard into the app.
+        var savedPasteboard: String?
+        defer { if let savedPasteboard { try? SimShell.pbcopy(savedPasteboard, udid: udid) } }
 
         let clearIsTheEffect = clear && text.isEmpty
         var probe = verifyEffect && clearIsTheEffect ? try baseline(driver: driver, udid: udid) : nil
@@ -119,6 +115,11 @@ enum TextInput {
             return nil
         }()
 
+        // Refuse before the clear keystrokes when there is no field to type into.
+        if verifyEffect, clear, !clearIsTheEffect, preClear == nil {
+            _ = try baseline(driver: driver, udid: udid)
+        }
+
         if clear {
             for event in KeyInput.clearFieldEvents() {
                 try driver.key(usage: event.usage, down: event.down, udid: udid)
@@ -134,11 +135,6 @@ enum TextInput {
 
         switch method {
         case .keyboard:
-            guard TextToHIDEvents.validateText(text) else {
-                throw TextInputError(description:
-                    "input-method 'keyboard' cannot type text containing non-US-keyboard "
-                    + "characters (accented letters, non-Latin scripts, emoji); use the default paste method.")
-            }
             for event in try TextToHIDEvents.convertTextToHIDEvents(text) {
                 try driver.key(usage: event.usage, down: event.down, udid: udid)
                 // Pace events: sent back-to-back the guest keyboard coalesces and
@@ -150,25 +146,24 @@ enum TextInput {
             // be focused. Save and restore the user's prior pasteboard best-effort.
             // The simulator pasteboard is kept in sync with the HOST pasteboard in
             // both directions, so this transiently replaces the Mac clipboard too
-            // — the restore below is what puts the user's clipboard back.
-            let saved = try? SimShell.pbpaste(udid: udid)
+            // — the deferred restore is what puts the user's clipboard back.
+            savedPasteboard = try? SimShell.pbpaste(udid: udid)
             try SimShell.pbcopy(text, udid: udid)
             // Read it back before pasting. While Device Hub is open it can put the
             // Mac's clipboard over what was just written, and Cmd+V would then
             // type the user's own clipboard into the app — measured on Xcode
             // 27.2, where that text went on to a web search.
             guard (try? SimShell.pbpaste(udid: udid)) == text else {
-                if let saved { try? SimShell.pbcopy(saved, udid: udid) }
                 throw TextInputError(description:
                     "the simulator's pasteboard did not keep the text, so nothing was pasted — "
                     + "something replaced it right after it was written (Device Hub does this with "
-                    + "the Mac's clipboard while it is open). Close Device Hub and retry, or use "
+                    + "the Mac's clipboard while it is open). Quitting Device Hub shuts the simulator "
+                    + "down, so boot it again (`xcrun simctl boot <udid>`) before retrying, or use "
                     + "`sipi set-text`, which needs no pasteboard.")
             }
             for event in KeyInput.pasteCombo() {
                 try driver.key(usage: event.usage, down: event.down, udid: udid)
             }
-            if let saved { try? SimShell.pbcopy(saved, udid: udid) }
 
         case .xcodeMCP:
             try typeViaXcode(text, udid: udid, developerDir: developerDir)
@@ -193,18 +188,12 @@ enum TextInput {
     }
 
     /// Send `text` through Xcode's device-interaction service, translating its
-    /// failures into the error type the harness already understands.
-    ///
-    /// Whether a retry is safe depends on how far the call got. Everything up to
-    /// and including the session handshake happens before a single character is
-    /// sent, so those failures are safe to retry; once the typing command itself
-    /// has been issued the text may already be in the field, and re-running the
-    /// step would insert it twice.
+    /// failures into `TextInputError`.
     private static func typeViaXcode(_ text: String, udid: String, developerDir: String?) throws {
         do {
             try XcodeMCP.typeText(text, udid: udid, developerDir: resolvedDeveloperDir(developerDir))
         } catch let reason as XcodeMCP.Unavailable {
-            throw TextInputError(description: reason.description, retrySafe: reason.isBeforeTyping)
+            throw TextInputError(description: reason.description)
         }
     }
 
@@ -240,7 +229,7 @@ enum TextInput {
     /// whole-tree comparison reports a change every second whether or not the text
     /// arrived — the check would always pass and catch nothing.
     private static func read(driver: SimDriver, udid: String, deep: Bool) -> Reading {
-        guard let nodes = try? driver.describe(udid, deep: deep) else { return .unreadable }
+        guard let nodes = try? driver.describe(udid, deep: deep), !ChildTree.isDegenerate(nodes) else { return .unreadable }
         guard let fingerprint = TextEntryProbe.fingerprint(roots: nodes) else { return .noFields }
         return .fields(fingerprint)
     }
@@ -316,10 +305,10 @@ enum TextInput {
     /// bullets, which still differs from empty. An unchanged value therefore means
     /// the keystrokes never landed, which is exactly what a simulator whose
     /// keyboard HID has decayed does. Reporting `ok` there is worse than failing:
-    /// a saved test goes green while the app under test never saw the input.
+    /// the caller is told the input arrived while the app never saw it.
     ///
     /// This is intentionally a one-way check. A changed field is not proof the
-    /// RIGHT text arrived (assert that with `verify.contains` or use `set-text`),
+    /// RIGHT text arrived (check that with `wait-for --text` or use `set-text`),
     /// but an unchanged field IS proof nothing arrived.
     private static func assertEffect(
         probe: Probe,
@@ -367,11 +356,7 @@ enum TextInput {
                     may enter it twice. Wait and read the field with `sipi describe-ui` before deciding; do \
                     NOT toggle VoiceOver to "re-prime" the tree, which is what empties it on iOS 27. \
                     Pass --no-verify to skip the check.
-                    """,
-                // The text is already in flight. A harness retry would re-execute
-                // the whole action and could double-insert, so this failure ends
-                // the step instead of being attempted again.
-                retrySafe: false
+                    """
             )
         }
 
@@ -385,7 +370,7 @@ enum TextInput {
                 never arrived. On a simulator that has stopped delivering keyboard HID, use \
                 `sipi set-text <udid> "" --id <id> --no-verify`, which empties the field through the \
                 accessibility bridge. A pending IME composition also swallows the select-all — send \
-                `sipi key 41` (Escape) first. Pass --no-verify to skip this check.
+                `sipi key 41 <udid>` (Escape) first. Pass --no-verify to skip this check.
                 """)
         }
         throw TextInputError(description:

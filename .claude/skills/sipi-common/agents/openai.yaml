@@ -1,4 +1,4 @@
 interface:
-  display_name: "SimPilot Common"
-  short_description: "Prepare, repair, drive, and select ad-hoc sipi commands"
-  default_prompt: "Use $sipi-common to prepare the simulator and select the right sipi command from its help."
+  display_name: "SimPilot"
+  short_description: "Drive the iOS Simulator; install Xcode and runtimes; clean developer data"
+  default_prompt: "Use $sipi-common to drive the simulator, or to manage Xcode, simulator runtimes, and developer data."

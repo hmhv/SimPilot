@@ -168,8 +168,6 @@ public enum HingeControl {
     }
 
     /// The cached helper, building it if this is the first use on this toolchain.
-    /// Public so `doctor` can warm it and report a build failure as a capability
-    /// note rather than letting the first test step be the one that discovers it.
     @discardableResult
     public static func helperPath() throws -> String {
         let sdk = try simulatorSDKPath()

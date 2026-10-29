@@ -26,59 +26,15 @@ final class SimulatorKitPathTests: XCTestCase {
         developerDirectory = nil
     }
 
-    func testUsesSharedFrameworksPathForXcode27() throws {
+    func testUsesSharedFrameworksPath() {
         let sharedPath = temporaryDirectory
             .appendingPathComponent(
                 "Xcode.app/Contents/SharedFrameworks/SimulatorKit.framework/SimulatorKit"
             )
-        try createBinary(at: sharedPath)
-
         XCTAssertEqual(resolvePath(), sharedPath.path)
-    }
-
-    func testUsesClassicPathForOlderXcode() throws {
-        let classicPath = developerDirectory
-            .appendingPathComponent(
-                "Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"
-            )
-        try createBinary(at: classicPath)
-
-        XCTAssertEqual(resolvePath(), classicPath.path)
-    }
-
-    func testPrefersSharedFrameworksWhenBothPathsExist() throws {
-        let sharedPath = temporaryDirectory
-            .appendingPathComponent(
-                "Xcode.app/Contents/SharedFrameworks/SimulatorKit.framework/SimulatorKit"
-            )
-        let classicPath = developerDirectory
-            .appendingPathComponent(
-                "Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"
-            )
-        try createBinary(at: sharedPath)
-        try createBinary(at: classicPath)
-
-        XCTAssertEqual(resolvePath(), sharedPath.path)
-    }
-
-    func testFallsBackToClassicPathWhenNeitherExists() {
-        let classicPath = developerDirectory
-            .appendingPathComponent(
-                "Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"
-            )
-
-        XCTAssertEqual(resolvePath(), classicPath.path)
     }
 
     private func resolvePath() -> String {
         SPSimBridge.simulatorKitPath(forDeveloperDir: developerDirectory.path)
-    }
-
-    private func createBinary(at url: URL) throws {
-        try fileManager.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        XCTAssertTrue(fileManager.createFile(atPath: url.path, contents: Data()))
     }
 }

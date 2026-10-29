@@ -185,40 +185,4 @@ final class AccessibilityResolverTests: XCTestCase {
             XCTAssertTrue(error.isNotFound)
         }
     }
-
-    // MARK: - Poller
-
-    func testPollerResolvesOnFirstFetch() async throws {
-        let tree = fixtureTree()
-        let resolution = try await AccessibilityPoller.resolveTapWithPolling(
-            query: .id("continue-button"),
-            waitTimeout: 0,
-            pollInterval: 0.01,
-            rootsFetcher: { tree }
-        )
-        XCTAssertFalse(resolution.isSwitchLikeControl)
-        XCTAssertEqual(resolution.point.x, 20 + 280 / 2.0, accuracy: 0.0001)
-    }
-
-    func testPollerRetriesUntilElementAppears() async throws {
-        let tree = fixtureTree()
-        let attempts = AttemptCounter()
-        let resolution = try await AccessibilityPoller.resolveTapWithPolling(
-            query: .id("continue-button"),
-            waitTimeout: 1.0,
-            pollInterval: 0.02,
-            rootsFetcher: {
-                // Empty on the first attempt, then the populated tree.
-                attempts.value < 1 ? { attempts.value += 1; return [] }() : tree
-            }
-        )
-        XCTAssertEqual(resolution.point.y, 400 + 44 / 2.0, accuracy: 0.0001)
-        XCTAssertGreaterThanOrEqual(attempts.value, 1)
-    }
-
-    /// A trivial mutable counter for the polling test (the fetcher closure is
-    /// non-escaping and runs serially, so no synchronization is required).
-    private final class AttemptCounter {
-        var value = 0
-    }
 }

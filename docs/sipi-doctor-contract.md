@@ -1,7 +1,7 @@
 # `sipi doctor` contract
 
-`sipi doctor` is the capability probe that gates the whole `sipi-*` skill
-workflow. `preflight.md` runs it before any test/verify step. A DRAFT,
+`sipi doctor` is the capability probe that gates the `sipi-common` skill
+workflow. `preflight.md` runs it before any simulator interaction. A DRAFT,
 manual-only workflow (`.github/workflows/sipi-doctor-matrix.yml`,
 `workflow_dispatch` with a single placeholder Xcode) is *intended* to grow into
 a per-Xcode matrix that runs it to catch Apple-version churn once a runner-fleet
@@ -22,10 +22,7 @@ frameworks on **this** machine / Xcode:
   (`NSClassFromString`, `respondsToSelector`, `dlsym` results), including the
   Indigo HID event builders,
 - the active Xcode developer dir,
-- which simulators (if any) are currently booted,
-- whether `xcrun devicectl` can target simulators here (a note, not a core
-  check — it gates the Xcode 27+ device-state surface but is not needed to drive
-  a simulator).
+- which simulators (if any) are currently booted.
 
 It performs read-only probing only. It boots nothing, taps nothing, and mutates
 no device state.
@@ -59,7 +56,7 @@ check `bootedDevices` themselves.
 
 ```sh
 if ! sipi doctor; then
-  # stop: native driver cannot reach the private frameworks on this machine
+  exit 1   # stop: native driver cannot reach the private frameworks on this machine
 fi
 ```
 
@@ -97,9 +94,7 @@ terminated by a newline:
     "iPhone 16 Pro (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)"
   ],
   "notes" : [
-    "binary: /Users/you/.local/bin/sipi (modified 2026-07-18T14:38:00+09:00)",
-    "warning: this binary predates the SimPilot checkout at /Users/you/SimPilot (HEAD 3c32911, committed 2026-07-18T20:45:08+09:00). Rebuild and reinstall before trusting a source change: swift build -c release && cp .build/release/sipi \"$(command -v sipi)\"",
-    "devicectl can target simulators: `sipi biometrics`, `sipi appearance`, `sipi voiceover` (read), face-up/face-down orientation, and the biometrics / display-state test actions are available.",
+    "Xcode's MCP device-interaction service is enabled and this sipi binary is approved: `sipi type --xcode-mcp` is available. It is never used unasked — on iOS 27 one session leaves every app launched afterwards on that device unreadable until it restarts, so use it last or restart the device after it.",
     "sipi drives simulators headlessly (no window needed); open Device Hub with `sipi open-ui` to look at a device."
   ],
   "allCorePresent" : true
@@ -110,13 +105,13 @@ terminated by a newline:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `developerDir` | string | The active Xcode developer dir the probe used (`DEVELOPER_DIR` env override, else the well-known Xcode path). |
+| `developerDir` | string | The active Xcode developer dir the probe used (`DEVELOPER_DIR` — an `.app` gets `Contents/Developer` appended — else `xcode-select -p`, else `/Applications/Xcode.app/Contents/Developer`). |
 | `checks` | array of objects | One entry per core capability, in a stable order: `CoreSimulator`, `SimulatorKit`, `IndigoHID`, `AccessibilityPlatformTranslation`. |
 | `checks[].name` | string | Stable capability name (one of the four above). |
 | `checks[].ok` | bool | Whether this capability fully resolved. |
 | `checks[].detail` | string | Human-readable detail (which class/symbol resolved or why it failed). Informational; do not parse for control flow — gate on `ok` / `allCorePresent`. |
 | `bootedDevices` | array of strings | Booted simulators as `"<name> (<udid>)"`. May be empty. Informational only. |
-| `notes` | array of strings | Free-form advisory lines. **Never affects the exit code** and is not a capability list: which binary answered and when it landed, a staleness warning when the surrounding SimPilot checkout's HEAD is newer than that binary, whether devicectl can target simulators on this toolchain (which gates the biometrics / appearance / VoiceOver surface, Xcode 27+), how to open a device window on this Xcode, any booted device whose input Device Hub has taken over (with `sipi repair-input`), and for a booted iPhone Duo what works on each of its screens. May be empty; wording is not stable — display it, do not parse it. |
+| `notes` | array of strings | Free-form advisory lines. **Never affects the exit code** and is not a capability list: which binary answered and when it landed, a staleness warning when the surrounding SimPilot checkout's HEAD is newer than that binary, whether Xcode's MCP device-interaction service is usable by this binary, how to open a device window on this Xcode, any booted device whose input Device Hub has taken over (with `sipi repair-input`), and for a booted iPhone Duo what works on each of its screens. May be empty; wording is not stable — display it, do not parse it. |
 | `allCorePresent` | bool | `true` iff every `checks[].ok` is `true`. Mirrors the exit code: `true` ⇔ exit `0`. |
 
 Consumers should key on `name` + `ok` (and `allCorePresent`), not on array
@@ -136,8 +131,7 @@ sipi doctor
   [ok] IndigoHID: all builders resolve (mouse ✓, button ✓, keyboard ✓, crown ✓)
   [ok] AccessibilityPlatformTranslation: AXPTranslator ready (sharedInstance ✓, tokenDelegate proto ✓, macElement ✓, SimDevice transport ✓)
   booted devices: iPhone 16 Pro (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
-  binary: /Users/you/.local/bin/sipi (modified 2026-07-18T14:38:00+09:00)
-  devicectl can target simulators: `sipi biometrics`, `sipi appearance`, `sipi voiceover` (read), face-up/face-down orientation, and the biometrics / display-state test actions are available.
+  Xcode's MCP device-interaction service is enabled and this sipi binary is approved: `sipi type --xcode-mcp` is available. It is never used unasked — on iOS 27 one session leaves every app launched afterwards on that device unreadable until it restarts, so use it last or restart the device after it.
   sipi drives simulators headlessly (no window needed); open Device Hub with `sipi open-ui` to look at a device.
   result: all core capabilities present
 ```
@@ -146,8 +140,8 @@ sipi doctor
   `  [--] <name>: <detail>` when missing.
 - `booted devices:` lists `<name> (<udid>)` entries, or `none`.
 - The `notes` lines follow the booted devices and precede `result:`. They are
-  advisory (binary provenance / staleness warning / devicectl simulator support /
-  how to open a device window) and never change the exit code.
+  advisory (the same notes the JSON `notes` field lists) and never change the
+  exit code.
 - The final `result:` line is `all core capabilities present` (exit 0) or
   `missing core capabilities` (exit non-zero).
 

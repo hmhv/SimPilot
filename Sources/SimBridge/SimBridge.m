@@ -207,7 +207,10 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
     dispatch_once(&once, ^{
         NSString *envDir = NSProcessInfo.processInfo.environment[@"DEVELOPER_DIR"];
         if (envDir.length > 0) {
-            cached = envDir;
+            // xcrun also accepts the .app itself, as `xcode-select -s` does.
+            cached = [envDir.pathExtension isEqualToString:@"app"]
+                ? [envDir stringByAppendingPathComponent:@"Contents/Developer"]
+                : envDir;
         } else {
             NSString *selected = SPRunXcodeSelectPrintPath();
             cached = selected.length > 0 ? selected : @"/Applications/Xcode.app/Contents/Developer";
@@ -217,20 +220,9 @@ static NSString *SPRunXcodeSelectPrintPath(void) {
 }
 
 + (NSString *)simulatorKitPathForDeveloperDir:(NSString *)developerDir {
-    // Xcode 27 moved SimulatorKit out of Contents/Developer and into
-    // Contents/SharedFrameworks. Prefer that location when present, retain the
-    // Xcode 26-and-earlier path, and return the classic path as the diagnostic
-    // fallback when neither binary exists.
-    NSString *classicPath = [[developerDir stringByAppendingPathComponent:
-        @"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"]
-        stringByStandardizingPath];
-    NSString *sharedPath = [[developerDir stringByAppendingPathComponent:
+    return [[developerDir stringByAppendingPathComponent:
         @"../SharedFrameworks/SimulatorKit.framework/SimulatorKit"]
         stringByStandardizingPath];
-    NSFileManager *fileManager = NSFileManager.defaultManager;
-    if ([fileManager fileExistsAtPath:sharedPath]) return sharedPath;
-    if ([fileManager fileExistsAtPath:classicPath]) return classicPath;
-    return classicPath;
 }
 
 + (BOOL)loadCoreSimulator:(NSError **)error {
@@ -579,7 +571,7 @@ static mach_port_t SPLookupMachPort(id device, NSString *name, NSError **error) 
     // GSEventTypeDeviceOrientationChanged mach message to the simulator's
     // PurpleWorkspacePort (recipe in the header). The wire
     // format is reverse-engineered, so every step is guarded and a failure
-    // returns NO + error so the caller can fall back to the osascript SET path.
+    // returns NO + error so the caller can fall back to devicectl.
     uint32_t deviceOrientation = SPDeviceOrientationRawForName(orientation);
     if (deviceOrientation == 0) {
         if (error) *error = [NSError errorWithDomain:kBridgeErrorDomain code:57 userInfo:@{
@@ -597,7 +589,7 @@ static mach_port_t SPLookupMachPort(id device, NSString *name, NSError **error) 
 
     // PurpleWorkspacePort is nil/0 until the guest is past pre-springboard boot.
     // Retry the lookup a few times (the capability probe) before giving up so the
-    // caller can fall back to osascript on a genuinely un-booted device.
+    // caller can fall back to devicectl on a genuinely un-booted device.
     mach_port_t port = 0;
     NSError *lookupError = nil;
     for (int attempt = 0; attempt < 5 && port == 0; attempt++) {
@@ -1928,9 +1920,9 @@ static id SPPerformNoArg(id target, NSString *selectorName) {
 /// The first "Display class: 0" size `simctl io <udid> enumerate` prints, or
 /// CGSizeZero.
 ///
-/// The pre-devicectl route, kept for Xcode 26 and earlier. It cannot tell two
-/// built-in screens apart — it takes whichever the port enumeration happens to
-/// list first — but no runtime those toolchains can boot has two.
+/// The fallback for when devicectl cannot read the screens (a device still
+/// coming up). It cannot tell two built-in screens apart — it takes whichever
+/// the port enumeration happens to list first.
 ///
 /// The obvious in-process route is not usable: the descriptor's `state` snapshot
 /// is a `ROCKImmutableProxy` that answers neither the property nor KVC, and its
@@ -1975,8 +1967,7 @@ static CGSize SPEnumeratedBuiltInDisplaySize(NSString *udid) {
 }
 
 /// `SPEnumeratedBuiltInDisplaySize`, cached per UDID for the life of the
-/// process — the harness screenshots every step from one process, so the cost is
-/// paid once per run, not once per capture.
+/// process, so repeated captures in one process pay the cost once.
 ///
 /// Only a successful probe is cached. Caching a failure would pin the process to
 /// the largest-area fallback — i.e. black captures on Xcode 27 — for its whole
@@ -2010,9 +2001,9 @@ static CGSize SPFallbackBuiltInDisplaySizeForUDID(NSString *udid) {
 /// vended exactly one live framebuffer. Xcode 27 vends several: alongside the
 /// device LCD (e.g. 1206x2622) there is a 7680x4320 "Resizable" display whose
 /// surface is live and permanently black. Largest-area therefore captured that
-/// blank display instead of the screen — and because `screenshot`, the harness's
-/// per-step images, `verify-session` captures, and the mirror view all share
-/// this one selector, every visual artifact on an iOS 27 run came back black.
+/// blank display instead of the screen — and because `screenshot` and
+/// `record-video` share this one selector, every visual artifact on iOS 27 came
+/// back black.
 ///
 /// On iPhone Duo both built-in screens are live at once and the dark one is
 /// black, so largest-area would pick the inner screen even while the device is

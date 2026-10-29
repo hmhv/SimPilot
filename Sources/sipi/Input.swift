@@ -96,7 +96,7 @@ extension Sipi {
             first. --clear only clears reliably when no IME composition is pending: with
             one, the guest gives Cmd+A to the IME and the delete removes a single
             character, leaving the old text (measured under a Japanese keyboard). Send
-            `sipi key 41` (Escape) first to discard a composition, or use `sipi set-text`,
+            `sipi key 41 <udid>` (Escape) first to discard a composition, or use `sipi set-text`,
             which replaces the whole value without touching the keyboard.
 
             A simulator can stop delivering keyboard HID entirely — paste, --keyboard
@@ -117,13 +117,14 @@ extension Sipi {
             exception: there the clear is the effect, so the comparison brackets the
             clear instead.
 
-            Three distinct failures, and the message says which:
+            Four distinct failures, and the message says which:
               not attempted     no field on screen, or the tree could not be read.
                                 Nothing was typed — safe to retry.
               had no effect     the field's content did not change. The keystrokes
                                 were sent and did not land.
               could not verify  the tree could not be read back afterward. The text
                                 WAS sent, so check the field before retrying.
+              clear had no effect  `type "" --clear` left the field unchanged.
 
             Pass --keyboard to inject US-keyboard HID key events instead, for the rare
             field that must receive real per-character keystrokes. Keyboard mode only
@@ -144,7 +145,7 @@ extension Sipi {
         @Option(name: .customLong("file"), help: "Read the text from this file.")
         var inputFile: String?
 
-        @Flag(name: .customLong("xcode-mcp"), help: "Type through Xcode's device-interaction service instead (Xcode 27 with `sudo xcrun mcp-server enable`). Works on a simulator whose keyboard HID has stopped accepting input, and ignores the guest keyboard layout.")
+        @Flag(name: .customLong("xcode-mcp"), help: "Type through Xcode's device-interaction service instead (Xcode 27.2 or later with `sudo xcrun mcp-server enable`). Works on a simulator whose keyboard HID has stopped accepting input, and ignores the guest keyboard layout.")
         var useXcodeMCP: Bool = false
 
         @Flag(name: .customLong("keyboard"), help: "Inject US-keyboard HID keystrokes instead of pasting (US-representable text only).")
@@ -639,7 +640,7 @@ extension Sipi {
             let tol = tolerance ?? SliderPlan.valueTolerance
 
             // Resolve against the fast tree, then deep (System UI) on a not-found.
-            let roots = try resolveRoots(driver: driver, query: query)
+            let (roots, resolvedDeep) = try resolveRoots(driver: driver, query: query)
             let match: AccessibilityMatch
             do {
                 match = try AccessibilityTargetResolver.resolveElement(
@@ -690,6 +691,7 @@ extension Sipi {
             // pays the cost of spawning a process per iteration.
             let observed = try pollObservedValue(
                 query: query,
+                deep: resolvedDeep,
                 targetNormalized: targetNormalized,
                 tolerance: tol
             )
@@ -711,13 +713,13 @@ extension Sipi {
         /// Resolve against the fast tree, falling back to the deep (grid / System
         /// UI) pass via ChildTree (in-process, with a child-process fallback) on a
         /// not-found.
-        private func resolveRoots(driver: NativeDriver, query: AccessibilityQuery) throws -> [AXNode] {
+        private func resolveRoots(driver: NativeDriver, query: AccessibilityQuery) throws -> (roots: [AXNode], deep: Bool) {
             let fast = try driver.describe(udid, deep: false)
             do {
                 _ = try AccessibilityTargetResolver.resolveElement(roots: fast, query: query, elementType: elementType)
-                return fast
+                return (fast, false)
             } catch let error as ElementResolutionError where error.isNotFound {
-                return try ChildTree.nodes(udid: udid, deep: true)
+                return (try ChildTree.nodes(udid: udid, deep: true), true)
             }
         }
 
@@ -733,6 +735,7 @@ extension Sipi {
 
         private func pollObservedValue(
             query: AccessibilityQuery,
+            deep: Bool,
             targetNormalized: Double,
             tolerance: Double
         ) throws -> Observed? {
@@ -740,7 +743,7 @@ extension Sipi {
             var last: Observed?
 
             repeat {
-                let roots = try ChildTree.nodes(udid: udid, deep: false)
+                let roots = try ChildTree.nodes(udid: udid, deep: deep)
                 if let match = try? AccessibilityTargetResolver.resolveElement(roots: roots, query: query, elementType: elementType),
                    let normalized = try? SliderPlan.parseNormalizedAXValue(match.element.AXValue) {
                     let observed = Observed(raw: match.element.AXValue, normalized: normalized)
@@ -749,7 +752,7 @@ extension Sipi {
                         // Settle, then confirm stability once.
                         usleep(useconds_t(SliderPlan.verificationStabilityDelay * 1_000_000))
                         if Date() >= deadline { return observed }
-                        if let stable = try? ChildTree.nodes(udid: udid, deep: false),
+                        if let stable = try? ChildTree.nodes(udid: udid, deep: deep),
                            let stableMatch = try? AccessibilityTargetResolver.resolveElement(roots: stable, query: query, elementType: elementType),
                            let stableNormalized = try? SliderPlan.parseNormalizedAXValue(stableMatch.element.AXValue) {
                             let stableObserved = Observed(raw: stableMatch.element.AXValue, normalized: stableNormalized)

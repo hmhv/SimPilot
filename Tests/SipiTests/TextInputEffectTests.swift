@@ -80,7 +80,9 @@ private final class ScriptedDriver: SimDriver {
 final class TextInputEffectTests: XCTestCase {
 
     private func field(_ value: String?, type: String = "TextField") -> [AXNode] {
-        [AXNode(AXValue: value, role: "AX" + type, type: type, AXUniqueId: "field.1", enabled: true)]
+        [AXNode(AXLabel: "App", type: "Application", children: [
+            AXNode(AXValue: value, role: "AX" + type, type: type, AXUniqueId: "field.1", enabled: true)
+        ])]
     }
 
     private func insert(
@@ -292,46 +294,6 @@ final class TextInputEffectTests: XCTestCase {
             let message = (error as? TextInputError)?.description ?? "\(error)"
             XCTAssertTrue(message.contains("could not verify"), message)
             XCTAssertFalse(message.contains("did not change"), message)
-        }
-    }
-
-    // MARK: - retry advice
-
-    /// The harness retries a failed step by re-running the whole action. That is
-    /// right for a failure that happened before anything reached the device and
-    /// wrong once text is in flight, so the errors carry the distinction. These
-    /// lock which failures say which.
-    func testUnverifiableFailureIsMarkedUnsafeToRetry() {
-        XCTAssertThrowsError(
-            try insert("hello", driver: .failingFrom(1, trees: [field("")]))
-        ) { error in
-            XCTAssertEqual((error as? TextInputError)?.retrySafe, false,
-                           "a sent-but-unverified insertion must not be retried automatically")
-        }
-    }
-
-    func testPreSendFailuresAreSafeToRetry() {
-        // Nothing reached the device in any of these.
-        let cases: [(String, () throws -> Void)] = [
-            ("unreadable baseline", { _ = try self.insert("hello", driver: .failingFrom(0, trees: [self.field("")])) }),
-            ("no text field", {
-                let label = [AXNode(AXLabel: "x", role: "AXStaticText", type: "StaticText", enabled: true)]
-                _ = try self.insert("hello", trees: [label])
-            }),
-            ("unrepresentable text", { _ = try self.insert("こんにちは", trees: [self.field("")]) })
-        ]
-        for (name, body) in cases {
-            XCTAssertThrowsError(try body(), name) { error in
-                XCTAssertEqual((error as? TextInputError)?.retrySafe, true, name)
-            }
-        }
-    }
-
-    /// A field that stayed put was not modified, so re-running is safe — the
-    /// retry will simply fail the same way until the cause is fixed.
-    func testUnchangedFieldIsSafeToRetry() {
-        XCTAssertThrowsError(try insert("hello", trees: [field("old")])) { error in
-            XCTAssertEqual((error as? TextInputError)?.retrySafe, true)
         }
     }
 

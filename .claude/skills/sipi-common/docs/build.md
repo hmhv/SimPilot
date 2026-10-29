@@ -4,10 +4,10 @@
 
 A prerequisite step that builds the app from source and installs it on the iOS Simulator.
 
-- If `config.json` has a `build` section, build once at the start of a test execution session
-- If there is no `build` key, the app is assumed to be already installed and the build step is skipped
+- Build only when `preflight.md` step 4 calls for it; the `build` section says how, not when
+- If there is no `build` key, the app is assumed to be already installed
 - Build artifacts go to Xcode's default DerivedData, shared with builds made from Xcode itself
-- For suites and multi-device runs, the built `.app` is shared across all tests and all devices
+- The built `.app` can be installed on every device the session uses
 
 ## The build section in config.json
 
@@ -22,7 +22,7 @@ A prerequisite step that builds the app from source and installs it on the iOS S
 
 - `project`: `.xcworkspace` is also accepted (auto-detected if omitted)
 - `scheme`: detected via `xcodebuild -list` if omitted
-- `configuration`: defaults to Debug if omitted
+- `configuration`: if omitted, `-configuration` is not passed and the scheme's own configuration applies (Debug in a new project)
 - All fields are optional. Writing just `"build": {}` enables fully automatic detection mode
 - If the `build` key itself is absent, the build step is skipped
 
@@ -40,14 +40,15 @@ find . -name "*.xcworkspace" -not -path "*.xcodeproj/*" -maxdepth 2
 find . -name "*.xcodeproj" -maxdepth 2
 ```
 
-Scheme detection uses `xcodebuild -list`:
+Scheme detection uses `xcodebuild -list -json`:
 
 ```bash
-xcodebuild -list -project MyApp.xcodeproj 2>/dev/null | grep -A 50 "Schemes:" | grep "^    "
+xcodebuild -list -json -project MyApp.xcodeproj | plutil -extract project.schemes json -o - -
+# a workspace: -workspace MyApp.xcworkspace and workspace.schemes
 ```
 
 - If only one scheme is found it is selected automatically; if multiple, ask the user
-- Detection results are saved to `config.json` to avoid re-detection on subsequent runs
+- Detection results are saved to `config.json` to avoid re-detection in later sessions
 
 ## Build
 
@@ -62,27 +63,22 @@ Builds may fail due to macro or SPM plugin validation, so always include the fol
 
 `-derivedDataPath` is intentionally not passed: the default DerivedData is shared with Xcode's own builds, so work done here is reused when the project is opened in Xcode.
 
-`-quiet` prints nothing on success and keeps every diagnostic on failure — file, line, source excerpt, linker symbols, warnings. Judge the result by the exit code. If those diagnostics are not enough to fix the build, re-run the same command without `-quiet` for the full log.
+`-quiet` prints only warnings and errors, and keeps every diagnostic on failure — file, line, source excerpt, linker symbols, warnings. Judge the result by the exit code. If those diagnostics are not enough to fix the build, re-run the same command without `-quiet` for the full log.
 
 ### clean or not
 
-| Caller | Action | Why |
-|---|---|---|
-| test / suite run | `clean build` | A regression verdict has to come from a reproducible artifact |
-| verify | `build` | A one-off check right after a change; `clean` only adds wait time |
-
-Also use `clean build` after changing build settings, or when a stale-cache
-problem is suspected.
+Use `build`; `clean` only adds wait time. Use `clean build` after changing build
+settings, or when a stale-cache problem is suspected.
 
 ### Build Flow
 
 ```bash
-# 1. Build (test/suite run: `clean build`, verify: `build`)
+# 1. Build
 xcodebuild -project MyApp.xcodeproj -scheme MyApp \
   -destination 'generic/platform=iOS Simulator' \
   'ARCHS=$(NATIVE_ARCH)' \
   -skipMacroValidation -skipPackagePluginValidation \
-  -quiet clean build
+  -quiet build
 
 # 2. Get the .app path and bundle id (pass the same -destination as the build)
 # stderr is NOT redirected: only stdout is captured, so letting xcodebuild's own
@@ -129,7 +125,7 @@ BUNDLE_ID=$(printf '%s' "$SETTINGS" | plutil -extract "$IDX.buildSettings.PRODUC
 - Takes under a second, so run it after every build rather than caching the path
 - For `-workspace`, replace `-project` with `-workspace MyApp.xcworkspace`
 - For SPM, omit `-project`/`-workspace` and specify only `-scheme`
-- If `configuration` is specified, add `-configuration Release` (defaults to Debug if omitted)
+- If `configuration` is set, pass `-configuration <value>` to both the build and the `-showBuildSettings` call, so `APP_PATH` points at what was built
 
 ### Build Artifact Layout
 
@@ -148,12 +144,13 @@ The `<hash>` is not predictable. Always resolve the path with `-showBuildSetting
 xcrun simctl install $UDID "$APP_PATH"
 
 # Verify installation
-xcrun simctl listapps $UDID 2>/dev/null | grep -q "$BUNDLE_ID" && echo "OK"
+xcrun simctl get_app_container $UDID "$BUNDLE_ID" >/dev/null 2>&1 && echo "OK"
 ```
 
 ### Clean Install
 
-When the user explicitly requests a clean install, or when test instructions require fresh app state:
+Only when the user asks for it — or when the task needs fresh app state and the
+user agreed, since it deletes everything the app stored on that simulator:
 
 ```bash
 xcrun simctl uninstall $UDID $BUNDLE_ID 2>/dev/null
@@ -162,9 +159,14 @@ xcrun simctl install $UDID "$APP_PATH"
 
 The reinstall gives the app a brand-new data container: `Documents`, `Library`,
 and `tmp` start empty, and `get_app_container … data` resolves to a new path,
-so re-read it rather than reusing one captured earlier. `App Group` containers
-and the keychain are not part of that — see *What reinstalling does and does not
-clear* in `../../sipi-test/references/adverse-state-testing.md`.
+so re-read it rather than reusing one captured earlier. It is not a full reset:
+keychain items can survive an uninstall (Apple DTS calls that an implementation
+detail, not a contract), and App Group containers, extension or sibling-app
+data, and anything kept off the device are untouched. Reset those explicitly.
+
+`xcrun simctl erase <udid>` is not a substitute: it destroys every installed app,
+all their data, and all device settings on that simulator, for every project
+that uses it.
 
 **Without a build artifact** — `config.json` has no `build` section and the app
 is only installed on the device — the installed bundle itself is the source.
@@ -194,7 +196,7 @@ After a build, take `PRODUCT_BUNDLE_IDENTIFIER` from `-showBuildSettings -json` 
 /usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" <path-to-.app>/Info.plist
 ```
 
-If the `app` field in `config.json` is not set, it is automatically retrieved and set after the build.
+If `app` is not set in `config.json`, write `BUNDLE_ID` there after the build.
 
 ## Direct Install from .app / .ipa
 
@@ -208,10 +210,11 @@ xcrun simctl install $UDID /path/to/MyApp.app
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" /path/to/MyApp.app/Info.plist)
 ```
 
-For `.ipa` files, extract first:
+For `.ipa` files, extract first. Only a simulator build runs on a simulator — an `.ipa` exported for devices does not:
 ```bash
-unzip MyApp.ipa -d /tmp/app_extract
-APP_PATH=$(find /tmp/app_extract -name "*.app" -type d | head -1)
+EXTRACT="$(mktemp -d)"
+unzip -q MyApp.ipa -d "$EXTRACT"
+APP_PATH=$(find "$EXTRACT/Payload" -maxdepth 1 -name "*.app" -type d | head -1)
 xcrun simctl install $UDID "$APP_PATH"
 ```
 

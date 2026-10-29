@@ -1,8 +1,8 @@
 // SipiCommand.swift
 //
 // `sipi` — the umbrella CLI and sole native simulator driver for the package.
-// It provides the perception, input, capture, lifecycle, and report subcommands
-// the `sipi-*` skills drive.
+// It provides the perception, input, capture, and lifecycle subcommands the
+// `sipi-common` skill drives.
 
 import ArgumentParser
 import Foundation
@@ -10,12 +10,33 @@ import SimCore
 import SimNative
 import SimShell
 import SimBridge
+import SimSkills
 
 /// The sipi version. Keep in sync with the repo-root VERSION file.
-let sipiVersion = "2.1.0"
+let sipiVersion = "3.0.0"
 
 @main
 struct Sipi: ParsableCommand {
+    /// A failure inside `run()` is not a usage error: ArgumentParser would print
+    /// the root usage block and exit 64 for a thrown ValidationError, which reads
+    /// as "nothing ran" even when the command already acted.
+    static func main() {
+        var command: ParsableCommand
+        do {
+            command = try parseAsRoot()
+        } catch {
+            exit(withError: error)
+        }
+        do {
+            try command.run()
+        } catch let error as ValidationError {
+            FileHandle.standardError.write(Data("Error: \(error.message)\n".utf8))
+            Foundation.exit(1)
+        } catch {
+            exit(withError: error)
+        }
+    }
+
     static let configuration = CommandConfiguration(
         commandName: "sipi",
         abstract: "Native simulator driver CLI.",
@@ -57,17 +78,13 @@ struct Sipi: ParsableCommand {
             FilesAppCommand.self,
             XCAppDataCommand.self,
             CrashEvidenceCommand.self,
-            NetworkCondition.self,
             OpenUI.self,
-            RunTest.self,
-            RunSuite.self,
-            VerifySession.self,
-            Report.self,
-            VerifyReport.self,
-            Validate.self,
             Doctor.self,
             XcodeMCPCommand.self,
+            XcodeCommand.self,
+            RuntimeCommand.self,
             Version.self,
+            Licenses.self,
             Setup.self,
             Update.self,
             Uninstall.self
@@ -98,6 +115,17 @@ extension Sipi {
             } else {
                 print(sipiVersion)
             }
+        }
+    }
+
+    struct Licenses: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "licenses",
+            abstract: "Print SimPilot's license and the third-party licenses it carries."
+        )
+
+        func run() {
+            print(EmbeddedSkills.licenses)
         }
     }
 }

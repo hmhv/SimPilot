@@ -6,12 +6,8 @@
 //   record-video    Wraps `xcrun simctl io <udid> recordVideo --codec h264
 //                   --force <path>` as a background process. Returns once simctl
 //                   reports "Recording started", then waits for SIGINT and
-//                   finalizes the recording with a clean SIGINT to the child
-//                   (matches the `axe record-video … &; kill -INT` pattern,
-//                   run.md:193).
-//   list-simulators Native device enumeration. `--format axe` emits the
-//                   pipe-table that run.md's `awk -F'|'` expects so the skill
-//                   keeps working until it migrates to `simctl list devices`.
+//                   finalizes the recording with a clean SIGINT to the child.
+//   list-simulators Native device enumeration as JSON.
 
 import ArgumentParser
 import Darwin
@@ -61,7 +57,7 @@ extension Sipi {
             RecordVideoSignal.shared.install()
 
             // Resolve the screen before recording starts. nil means the screens
-            // could not be read at all (Xcode 26, a device still coming up), in
+            // could not be read at all (a device still coming up), in
             // which case simctl's own default is the best available answer — and
             // is correct for every device with one screen.
             let selector = DisplaySelection.parseSelector(display) ?? .active
@@ -77,13 +73,16 @@ extension Sipi {
 
             // Wait for the SIGINT, then forward a clean SIGINT to the simctl child
             // so it finalizes the container (moov atom) before we exit.
-            RecordVideoSignal.shared.wait()
+            while !RecordVideoSignal.shared.wait(seconds: 1) {
+                if !recording.isRunning { break }
+            }
 
             let status = recording.stop()
-            emitError("[sipi] recording finalized: \(path)")
-            if status != 0 {
+            guard status == 0 else {
+                emitError("[sipi] recording ended with status \(status): \(path) may be incomplete")
                 throw ExitCode(status)
             }
+            emitError("[sipi] recording finalized: \(path)")
         }
     }
 }
@@ -96,22 +95,26 @@ extension Sipi {
 private final class RecordVideoSignal: @unchecked Sendable {
     static let shared = RecordVideoSignal()
     private let semaphore = DispatchSemaphore(value: 0)
-    private var source: DispatchSourceSignal?
 
+    private var sources: [DispatchSourceSignal] = []
+
+    /// SIGTERM too: a plain `kill` or a task timeout would otherwise leave the
+    /// simctl child recording and the container unfinalized.
     func install() {
-        // Ignore the default SIGINT disposition so the DispatchSourceSignal can
-        // observe it instead of the process being terminated.
-        signal(SIGINT, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
-        source.setEventHandler { [weak self] in
-            self?.semaphore.signal()
+        for number in [SIGINT, SIGTERM] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler { [weak self] in
+                self?.semaphore.signal()
+            }
+            source.resume()
+            sources.append(source)
         }
-        source.resume()
-        self.source = source
     }
 
-    func wait() {
-        semaphore.wait()
+    /// True when a signal arrived within `seconds`.
+    func wait(seconds: Double) -> Bool {
+        semaphore.wait(timeout: .now() + seconds) == .success
     }
 }
 
@@ -121,54 +124,27 @@ extension Sipi {
     struct ListSimulators: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "list-simulators",
-            abstract: "List simulators. Default is JSON; --format axe emits the pipe-table run.md awk consumes."
+            abstract: "List simulators as JSON."
         )
 
-        enum Format: String, ExpressibleByArgument {
-            case json
-            case axe
-        }
-
-        @Option(name: .long, help: "Output format: json (default) or axe (pipe-table).")
-        var format: Format = .json
-
         func run() throws {
-            let driver = NativeDriver()
-            let devices = try driver.devices()
-
-            switch format {
-            case .json:
-                let array: [[String: Any]] = devices.map { d in
-                    [
-                        "udid": d.udid,
-                        "name": d.name,
-                        "state": d.stateString,
-                        "booted": d.booted,
-                        "model": d.model ?? "",
-                        "runtime": d.runtime ?? ""
-                    ]
-                }
-                let data = try JSONSerialization.data(
-                    withJSONObject: array,
-                    options: [.prettyPrinted]
-                )
-                FileHandle.standardOutput.write(data)
-                FileHandle.standardOutput.write(Data("\n".utf8))
-
-            case .axe:
-                // Match `axe list-simulators` byte shape so run.md's
-                //   `awk -F'|' '{print $2}'` (device name) keeps working:
-                //   <udid> | <name> | <state> | <model> | OS '<runtime>'
-                // with a trailing space after the closing quote.
-                var lines: [String] = []
-                for d in devices {
-                    let model = d.model ?? ""
-                    let runtime = d.runtime ?? ""
-                    lines.append("\(d.udid) | \(d.name) | \(d.stateString) | \(model) | OS '\(runtime)' ")
-                }
-                let output = lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
-                FileHandle.standardOutput.write(Data(output.utf8))
+            let devices = try NativeDriver().devices()
+            let array: [[String: Any]] = devices.map { d in
+                [
+                    "udid": d.udid,
+                    "name": d.name,
+                    "state": d.stateString,
+                    "booted": d.booted,
+                    "model": d.model ?? "",
+                    "runtime": d.runtime ?? ""
+                ]
             }
+            let data = try JSONSerialization.data(
+                withJSONObject: array,
+                options: [.prettyPrinted]
+            )
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data("\n".utf8))
         }
     }
 }

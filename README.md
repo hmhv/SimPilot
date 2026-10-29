@@ -2,32 +2,32 @@
 
 Translations: **English** | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Español](README.es.md) | [한국어](README.ko.md) | [Português do Brasil](README.pt-BR.md)
 
-SimPilot is a set of agent skills for iOS app testing and verification on the iOS Simulator, driven by natural language requests in Claude Code or Codex.
+SimPilot lets Claude Code or Codex drive the iOS Simulator from natural language — read the screen, tap, type, fold, capture, put files in the app and read back what it saved — and keeps the Xcode and simulator toolchain behind it installed and clean. How to check a result is left to the agent: it reads the screen, captures it, and reads the app's data in whatever way fits the task.
 
 The top-level README is translated. Skill docs and code remain in English.
 
 ## What it does
 
-- **`/sipi-test`** — UI and adverse-state test automation on the iOS Simulator. The skill turns natural-language intent into explicit v2 JSON specs, then `sipi run-test` / `sipi run-suite` executes them with a deterministic harness. Saved tests can control permissions, deep links, push notifications, location, appearance, Dynamic Type, Increase Contrast, Face ID / Touch ID, the wider accessibility appearance settings, memory-pressure warnings, launch environment, and an explicitly configured network-condition provider.
-- **`/sipi-verify`** — Post-implementation verification on the iOS Simulator. `sipi verify-session` owns screenshots, findings, and report generation.
-
-Results are saved in `.simpilot/` as JSON an agent or CI can read directly. An HTML report for browser viewing is available on request.
+- **Drive the simulator** — `sipi` reads the accessibility tree and acts on it natively and headlessly: taps by label or id, text entry in any script, gestures, hardware buttons, rotation, folding an iPhone Duo, screenshots and video, Face ID / Touch ID, the accessibility appearance settings, and memory-pressure warnings.
+- **Work with app data** — put files into the app's data container, an App Group, or Files.app; inspect what the app saved as text, JSON, plist, or SQLite; snapshot and diff the container; collect the app's crash reports.
+- **Manage Xcode and simulator runtimes** — `sipi xcode list / install / uninstall` show, install and remove Xcode releases, and `sipi runtime list` shows the simulator runtimes Apple offers; installing and removing runtimes and devices go through `xcodebuild` and `simctl`, as the skill describes.
+- **Clean up** — find and remove what Xcode and the simulators leave behind: DerivedData, device support files, preview and test devices, unusable runtimes, old Xcodes. Nothing is removed without approval, and files go to the Trash.
 
 ## Prerequisites
 
-- macOS 15 or later
-- Xcode 26 or later — needed at **runtime** to drive the Simulator (SimPilot loads Xcode's private Simulator frameworks). Not needed to install. Xcode 27 or later additionally enables Face ID / Touch ID, the accessibility appearance settings, and memory-pressure warnings, which go through `xcrun devicectl`, and can act as a keyboard fallback (see [Typing on a simulator that stopped accepting keystrokes](#typing-on-a-simulator-that-stopped-accepting-keystrokes)).
+- Xcode 27.2 or later
+- macOS 26.6 or later
 - [Claude Code](https://claude.com/claude-code) or Codex
 
 ## Installation
 
-SimPilot ships as a single `sipi` binary with the skills embedded. Install it with one command:
+SimPilot ships as a single `sipi` binary with the skill embedded. Install it with one command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh | bash
 ```
 
-The installer downloads the prebuilt `sipi` binary, then `sipi` installs the embedded `sipi-common` / `sipi-test` / `sipi-verify` skills into:
+The installer downloads the prebuilt `sipi` binary, then `sipi` installs the embedded `sipi-common` skill into:
 
 - Claude Code (`~/.claude/skills/`)
 - Codex (`~/.agents/skills/`)
@@ -37,151 +37,65 @@ Verify the simulator capabilities with `sipi doctor`.
 To update and uninstall:
 
 ```bash
-sipi update      # download the latest sipi from GitHub Releases and refresh the skills
-sipi uninstall   # remove the skills, install metadata, and the sipi binary
+sipi update      # download the latest sipi from GitHub Releases and refresh the skill
+sipi uninstall   # remove the skill, install metadata, and the sipi binary
 ```
+
+Updating from 2.x removes the `sipi-test` and `sipi-verify` skills. In your app repositories, `.simpilot/tests/`, `suites/`, `devices/`, `runs/` and `verify/`, and every `config.json` key other than `app` and `build`, are no longer used — delete them when you no longer need them.
 
 ## Quick start
 
 In your iOS app project:
 
-- Claude Code: use slash commands such as `/sipi-test`
-- Codex: mention the skill naturally, for example `Use the sipi-test skill to ...`
+- Claude Code: `/sipi-common` followed by the request, or just ask
+- Codex: mention the skill, for example `Use the sipi-common skill to ...`
 
-**Testing:**
 ```text
-/sipi-test Create a test for switching between the home and settings tabs
-Use the sipi-test skill to create a test for switching between the home and settings tabs
+/sipi-common Build the app and check that the new login flow works on the simulator
+/sipi-common Open settings and turn on notifications
+/sipi-common Put sample.pdf in the app's Inbox and check the import screen
+/sipi-common Show what the app saved after signing in
+/sipi-common Install Xcode 27.2 and the iOS 27.2 runtime
+/sipi-common Clean up Xcode's disk usage
 ```
+
 On first use, SimPilot detects your project, creates `.simpilot/config.json`, and prepares the simulator.
 
-**Verification:**
-```text
-/sipi-verify Check that the new login flow works on the simulator
-Use the sipi-verify skill to verify the dark mode fix looks correct
+## Driving the simulator directly
+
+`sipi` is a plain CLI an agent calls one step at a time. `describe-ui --format compact` prints the accessibility tree as one line per element — type, label, id, value, frame, tap point — at a fraction of the JSON size; `wait-for` polls until a label, id, value, or text appears (or disappears) instead of sleeping; `screenshot --max-pixel 600` returns a capture small enough to look at cheaply; `memory-warning` sends the memory-pressure warning that Simulator.app's Debug menu used to (Xcode 27+); `fold-state` reports which of an iPhone Duo's two screens is lit, `fold --closed|--open|--angle` folds it — something neither simctl nor devicectl can do — and `--display inner|cover` captures the screen that is dark. Run `sipi --help` for the full command set.
+
+`sipi a11y-audit` checks the current screen against any booted simulator — undersized touch targets, unlabeled controls, ambiguous duplicate labels, meaningless labels, truncated text. Xcode's own accessibility audit only runs from inside a UI test target.
+
+The app data commands are described in [App data and evidence commands](docs/data-artifacts.md).
+
+## Xcode and simulator runtimes
+
+```bash
+sipi xcode install 27B48
 ```
 
-## Common tasks
+Pass a build number from `sipi xcode list` (taken from [xcodereleases.com](https://xcodereleases.com)). A window opens on developer.apple.com; sign in there and it closes by itself. The session lives only in memory for that run — nothing is stored. The app is installed as `/Applications/Xcode-<version>.app` (for example `Xcode-27.2.0-release.candidate.app`). Selecting it needs root, so `sipi` prints the `sudo xcode-select -s …` and `sudo xcodebuild -runFirstLaunch` commands to run yourself.
 
-**Create tests:**
-```text
-/sipi-test Create a test for the home screen tab switching
-/sipi-test Create a test that logs in and opens settings
-/sipi-test Create a test that sets the brightness slider to 80% and toggles notifications
-/sipi-test Create a test from the current screen
-```
+`sipi runtime list` shows the simulator runtimes Apple offers, with the installed ones marked — neither `xcodebuild` nor `simctl` can list them. `xcodebuild -downloadPlatform iOS -buildVersion <version> -architectureVariant arm64` installs one, `xcrun simctl runtime delete` removes one, and `xcrun simctl create` makes devices. The skill knows these and runs them for you.
 
-Saved tests drive the full interaction surface — taps, double-taps, toggles, sliders, gestures, drags, long-press, pinch and raw multi-touch, key combos, and rotation — as deterministic steps, not just taps and swipes.
+## Project files
 
-They can also create real Simulator-controlled error preconditions such as denied permissions, deep links, push delivery, simulated coordinates, Face ID / Touch ID match and no-match, the full accessibility appearance surface (reduce motion, reduce transparency, color filters, Liquid Glass opacity), and provider-backed offline/latency profiles. SimPilot does not bundle or imitate a proprietary network conditioner: check `sipi network-condition status` before using a network profile.
-
-Verification goes past text matching: alongside `contains` / `absent` and regular expressions, a step can assert about elements themselves — that a control is disabled, that a list holds exactly five rows, that a value matches a pattern, or that a touch target meets 44pt.
-
-Tests can also install reversible file fixtures into an app data container
-(including `Documents/Inbox`), an App Group, or experimental Files.app storage.
-App data and App Group files can be asserted as text, JSON, plist, SQLite, size,
-or SHA-256 state; Files.app fixtures are verified through the app UI. Each run
-records filtered unified logs, primary app data-container snapshots/diffs, and
-app-specific crash reports as linked evidence.
-See [Test data and evidence artifacts](docs/data-artifacts.md).
-
-**Run tests:**
-```text
-/sipi-test Run the settings-navigation test
-/sipi-test Run the regression suite
-/sipi-test Run tests tagged smoke
-/sipi-test Run the regression suite on iPhone 16 Pro
-/sipi-test Run tests on iPhone 16 and iPhone 15
-/sipi-test Run tests with the regression-profile device set
-```
-
-Test execution is handled by the deterministic `sipi` harness. Build/install the app before running, or point `config.json` at an already-installed bundle ID. Add `--junit` for a `junit.xml` a CI system can ingest, and `--record-video` (or `record-video` in `config.json`) for a per-test `recording.mp4`.
-
-**View results:**
-```text
-/sipi-test Show the latest results
-/sipi-test Show failure details for the settings-toggle test
-/sipi-test Show failure details for all failed tests
-/sipi-test Open the HTML report
-```
-
-Each run writes `summary.json` — status, counts, and the first failing step of each failed test — alongside `run.json` and a `result.json` per test. Results are saved under `.simpilot/runs/`; `keep-runs` in `config.json` prunes the oldest. `report.html` is a browser page for a person to page through; it is written only when asked for, with `--html` on the run or `sipi report <run-dir>` afterwards. `junit.xml` works the same way with `--junit`.
-
-**Drive the simulator directly:**
-
-`sipi` is also a plain CLI an agent can call one step at a time. `describe-ui --format compact` prints the accessibility tree as one line per element — type, label, id, value, frame, tap point — at a fraction of the JSON size; `wait-for` polls until a label, id, value, or text appears (or disappears) instead of sleeping; `screenshot --max-pixel 600` returns a capture small enough to look at cheaply; `memory-warning` sends the memory-pressure warning that Simulator.app's Debug menu used to (Xcode 27+); `fold-state` reports which of an iPhone Duo's two screens is lit, `fold --closed|--open|--angle` folds it — something neither simctl nor devicectl can do — and `--display inner|cover` captures the screen that is dark. Run `sipi --help` for the full command set.
-
-**Manage suites:**
-```text
-/sipi-test Show all tests
-/sipi-test Show tests tagged smoke
-/sipi-test Create a regression suite with app-launch, settings-toggle, and tab-navigation
-```
-
-**Quality audits:**
-```text
-/sipi-test Audit the onboarding and settings screens for accessibility
-/sipi-test Check for missing accessibility labels and identifiers
-/sipi-test Check onboarding in English, Japanese, and German for translation completeness
-/sipi-test Check for untranslated text and text clipping
-/sipi-test Compare the profile screen in Light and Dark mode
-/sipi-test Check the settings flow at large Dynamic Type sizes
-/sipi-test Audit this screen with Reduce Motion and a color filter on
-```
-
-`sipi a11y-audit` runs the mechanical part from the command line against any
-booted simulator — undersized touch targets, unlabeled controls, ambiguous
-duplicate labels, meaningless labels, truncated text — and exits non-zero on an
-error-severity finding, so it can gate CI. Xcode's own accessibility audit only
-runs from inside a UI test target.
-
-## Workspace structure
-
-SimPilot uses a standard directory layout under `.simpilot/`:
+SimPilot keeps two files in your project:
 
 ```text
 .simpilot/
-  config.json                  # Project configuration (app bundle ID, build settings)
-  tests/                       # Test definitions
-    <test-id>.json
-  suites/                      # Test suites
-    <suite-name>.json
-  devices/                     # Device/simulator profiles
-    <profile-name>.json
-  runs/                        # Test run results (sipi-test)
-    <run-id>/
-      run.json                 # Run summary
-      summary.json             # Compact agent/CI summary
-      report.html              # only with --html, or `sipi report`
-      junit.xml                # only with --junit, or `sipi report --junit`
-      <test-id>/
-        result.json            # Test result
-        trace.jsonl            # Per-test event trace
-        step-NNN.png           # Step screenshots
-        step-NNN.describe-before.json
-        step-NNN.describe-after.json
-        recording.mp4          # only with record-video / --record-video
-  verify/                      # Verification results (sipi-verify)
-    <timestamp>_<description>/
-      summary.json             # Status, counts, findings, variant folders
-      checks.json
-      findings.json
-      <variant>/NNN_<check>.png
-      report.html              # only with `finalize --html`, or `sipi verify-report`
+  config.json   # bundle ID and how to build the app
+  notes.md      # app-specific interaction quirks the skill records
 ```
 
-Recommend adding `.simpilot/runs/` and `.simpilot/verify/` to the project's `.gitignore` and keeping the rest tracked: `config.json`, `tests/`, `suites/`, and `notes.md` (app-specific interaction quirks the skills record) are what a teammate or another agent benefits from. Ignoring all of `.simpilot/` works for a solo scratch setup, but nothing in it is then shared.
-
-## Reference
-
-- **[JSON-REFERENCE.md](.claude/skills/sipi-test/references/json-reference.md)** — Complete JSON specification for tests, suites, devices, results, and metadata
+Both are worth committing: a teammate or another agent benefits from them.
 
 ## Known limitations
 
 - Text entry defaults to writing the field's accessibility value (`set-text`), which needs no keyboard and takes any script. Keystroke-level entry (`type`) pastes through the clipboard by default; direct per-key HID typing covers the US keyboard layout only, and types the wrong characters if the guest's active keyboard is a different layout
 - **A long-lived simulator can stop accepting keyboard HID** (measured on Xcode 27.0 beta 6): paste, per-key typing, and select-all+delete are all ignored while touch still works. This follows device age rather than the iOS version, and neither `simctl erase` nor a reboot revives it. `type` detects the condition and fails rather than reporting success; `set-text` is unaffected. `type --xcode-mcp` types through Xcode 27's own service instead, which rescued the device measured — with a cost, see below
 - A tap that resolves to an element the accessibility tree claims is present, but whose visible area is not actually touchable, still reports success. `describe-point` returns the element, so nothing in the stack can tell the difference; Xcode's own tooling behaves the same way
-- Face ID / Touch ID and the accessibility appearance facets beyond light/dark need Xcode 27 — they go through `xcrun devicectl`, which only targets simulators from that release on
 - Contrast ratios and clipped text are out of scope for `sipi a11y-audit`; both need pixel analysis of the rendered frame
 - **iPhone Duo** (measured on Xcode 27.2): taps, swipes, typing and hardware buttons reach both screens. The inner screen answers no accessibility hit-test, so a selector tap there goes to the element's frame unchecked, and `set-text` / `describe-point` work on the cover only. While Device Hub is open it takes the device's input over — the inner screen drops taps, and the Mac's clipboard replaces the simulator's pasteboard, so `type` refuses to paste. `sipi doctor` reports it and `sipi repair-input` reconnects input. Nothing can rotate a Duo simulator from a script; use Device Hub's rotate button
 - Simulator only — physical devices are not supported
@@ -196,8 +110,7 @@ device-interaction service types through a different path, which the affected
 device measured still accepted (a device worn further ignored that one too), and
 that path also ignores the guest's keyboard layout.
 
-`sipi type --xcode-mcp` (or `"input-method": "xcode-mcp"` in a test) selects
-that path. SimPilot never takes it on its own: on iOS 27 one such session leaves
+`sipi type --xcode-mcp` selects that path. SimPilot never takes it on its own: on iOS 27 one such session leaves
 every app launched afterwards on that device with an empty accessibility tree
 until the device restarts (`simctl shutdown` + `boot`), so use it last, or
 restart before the next launch. Everything else in SimPilot works without any of
@@ -206,7 +119,7 @@ this, and `set-text` never needs a keyboard at all.
 Three things must be true before it can be used:
 
 ```bash
-xcode-select -p                    # Xcode 27 or later
+xcode-select -p                    # Xcode 27.2 or later
 sudo xcrun mcp-server enable       # turn headless mode on
 sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>
 ```

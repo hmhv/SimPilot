@@ -1,39 +1,37 @@
 // simskillsgen — build-time generator for EmbeddedSkillsData.swift
 //
 // Invoked by the EmbedSkillsPlugin build-tool plugin on every `swift build`.
-// Walks the three skill trees and emits a Swift source file that defines
+// Walks the skill trees and emits a Swift source file that defines
 // `EmbeddedSkills.entries` as a literal array of (relativePath, base64 bytes,
 // executable bit). Embedding the data this way keeps the sipi binary
 // self-contained: the curl|bash install ships one binary with the current
 // skills baked in.
 //
 // Usage:
-//   simskillsgen <skillsRoot> <outputFile> [skillDir ...]
+//   simskillsgen <skillsRoot> <outputFile> [licenseFile ...]
 //
-//   skillsRoot  Directory that contains the skill subtrees (the in-package
-//               `skills` symlink target, i.e. .claude/skills).
-//   outputFile  Path to write the generated Swift file to.
-//   skillDir    Optional explicit list of top-level skill directories to embed
-//               (defaults to sipi-common, sipi-test, sipi-verify).
+//   skillsRoot   Directory that contains the skill subtrees (the in-package
+//                `skills` symlink target, i.e. .claude/skills).
+//   outputFile   Path to write the generated Swift file to.
+//   licenseFile  License texts embedded for `sipi licenses`, printed in order.
 //
 // Files are captured byte-for-byte; relative paths use POSIX separators so the
 // setup step can recreate the tree on any host. The Unix executable bit is
-// preserved per file so report-generator scripts stay runnable after setup.
+// preserved per file so scripts stay runnable after setup.
 
 import Foundation
 
 let arguments = CommandLine.arguments
 guard arguments.count >= 3 else {
     FileHandle.standardError.write(Data(
-        "simskillsgen: usage: simskillsgen <skillsRoot> <outputFile> [skillDir ...]\n".utf8))
+        "simskillsgen: usage: simskillsgen <skillsRoot> <outputFile> [licenseFile ...]\n".utf8))
     exit(2)
 }
 
 let skillsRoot = arguments[1]
 let outputFile = arguments[2]
-let requestedSkillDirs: [String] = arguments.count > 3
-    ? Array(arguments[3...])
-    : ["sipi-common", "sipi-test", "sipi-verify"]
+let licenseFiles = Array(arguments[3...])
+let requestedSkillDirs = ["sipi-common"]
 
 let fileManager = FileManager.default
 
@@ -155,6 +153,15 @@ for file in allFiles {
     output += "            data: Data(base64Encoded: \"\(base64)\")!,\n"
     output += "            isExecutable: \(file.isExecutable)\n"
     output += "        ),\n"
+}
+
+output += "    ]\n\n    static let licenseTexts: [Data] = [\n"
+for path in licenseFiles {
+    guard let data = fileManager.contents(atPath: path) else {
+        FileHandle.standardError.write(Data("simskillsgen: error: could not read \(path)\n".utf8))
+        exit(1)
+    }
+    output += "        Data(base64Encoded: \"\(data.base64EncodedString())\")!,\n"
 }
 
 output += """

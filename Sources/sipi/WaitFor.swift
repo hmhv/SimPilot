@@ -1,16 +1,12 @@
 // WaitFor.swift
 //
 // `sipi wait-for` — poll the accessibility tree until a condition holds or a
-// deadline passes. The saved-test harness has always had this (a step's verify
-// is re-polled until `wait` seconds elapse); ad-hoc driving and the verify skill
-// did not, so they slept a guessed number of seconds and re-read. A conditional
-// wait finishes the moment the screen is ready and fails loudly when it never
-// is, which is both faster and more honest than `sleep 3`.
+// deadline passes. A conditional wait finishes the moment the screen is ready
+// and fails loudly when it never is, which is both faster and more honest than
+// `sleep 3`.
 //
-// The condition vocabulary is the verify vocabulary, evaluated by the same
-// `VerifyEvaluator` the harness uses — so absence is judged against the deep
-// tree, presence escalates to it only on a miss, and "found" means exactly what
-// a saved test's `verify` would have meant.
+// The condition is evaluated by `VerifyEvaluator`, so absence is judged against
+// the deep tree and presence escalates to it only on a miss.
 
 import ArgumentParser
 import Foundation
@@ -25,9 +21,10 @@ extension Sipi {
             discussion: """
             One condition per call: --label, --id, or --value select an element (exact
             match, both sides trimmed of surrounding whitespace, optionally narrowed
-            with --element-type), --text is a verbatim substring search over the
-            serialized tree — the same test a `contains` verify runs. --absent inverts
-            it and is judged against the deep tree, like an `absent` verify.
+            with --element-type), --text is a substring search for that text in the
+            serialized tree (it is JSON-escaped first, so pass the text as shown on
+            screen, not a JSON fragment). --absent inverts it and is judged against
+            the deep tree.
 
             Prints one JSON object: satisfied, elapsed seconds, and the number of polls.
             The condition is checked once more when the deadline passes, so a call can
@@ -77,8 +74,7 @@ extension Sipi {
         /// Why this combination of selector options cannot be waited on, or nil
         /// when it can. Exactly one selector, and never an empty one: an empty
         /// `--text` would be found in every tree (`contains("")` is always true)
-        /// and report a screen it never tested, which is the same vacuous pass
-        /// `sipi validate` rejects in a saved verify.
+        /// and report a screen it never tested.
         static func selectionProblem(
             label: String?, id: String?, value: String?, text: String?, elementType: String?
         ) -> String? {
@@ -112,6 +108,10 @@ extension Sipi {
                         fast: VerifyEvaluator.Capture(json: try AXNodeJSON.string(for: fast), nodes: fast),
                         deep: {
                             let deep = try ChildTree.nodes(udid: udid, deep: true)
+                            // An empty tree would satisfy every --absent check.
+                            if ChildTree.isDegenerate(deep) {
+                                throw ValidationError("the accessibility tree came back empty")
+                            }
                             return VerifyEvaluator.Capture(json: try AXNodeJSON.string(for: deep), nodes: deep)
                         })
                     if rows.allSatisfy(\.found) {
@@ -158,8 +158,8 @@ extension Sipi {
     }
 }
 
-/// The one condition a `wait-for` call polls, expressed in verify terms so the
-/// evaluation is shared with the harness.
+/// The one condition a `wait-for` call polls, expressed in `VerifyEvaluator`
+/// terms.
 struct WaitCondition {
     var label: String?
     var id: String?

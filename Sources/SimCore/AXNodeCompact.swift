@@ -5,8 +5,8 @@
 // pretty-printed JSON that `describe-ui` emits by default, which spends five
 // lines on a frame and repeats every key name for every node.
 //
-// The JSON form stays the contract — verify grep, `--expect`, and the harness
-// all read it. This form is opt-in (`describe-ui --format compact`) and carries
+// The JSON form stays the contract — grep, `--expect`, and `wait-for` all read
+// it. This form is opt-in (`describe-ui --format compact`) and carries
 // the same facts in a shape that is still grep-friendly: one element per line,
 // indented by depth, with the fields a driver actually acts on.
 //

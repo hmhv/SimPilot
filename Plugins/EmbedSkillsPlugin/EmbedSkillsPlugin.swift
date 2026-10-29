@@ -33,7 +33,8 @@ struct EmbedSkillsPlugin: BuildToolPlugin {
         // Done in a synchronous helper because iterating a DirectoryEnumerator
         // calls makeIterator, which is unavailable from an async context (an error
         // in the Swift 6 language mode) and createBuildCommands is async.
-        let inputFiles = Self.skillInputFiles(under: skillsRoot.string)
+        let licenseFiles = ["LICENSE", "THIRD_PARTY_LICENSES.md"].map { context.package.directory.appending($0) }
+        let inputFiles = Self.skillInputFiles(under: skillsRoot.string) + licenseFiles
 
         return [
             .buildCommand(
@@ -42,7 +43,7 @@ struct EmbedSkillsPlugin: BuildToolPlugin {
                 arguments: [
                     skillsRoot.string,
                     output.string
-                ],
+                ] + licenseFiles.map(\.string),
                 inputFiles: inputFiles,
                 outputFiles: [output]
             )

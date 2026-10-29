@@ -13,29 +13,10 @@
 //               contrast.
 //   voiceover   Whether VoiceOver is on — read only. Setting it is retired; see
 //               the command's own discussion for the measurement behind that.
-//
-// All three degrade with a clear message on a toolchain whose devicectl cannot
-// target simulators (Xcode 26 and earlier), rather than surfacing a raw
-// device-not-found error.
 
 import ArgumentParser
 import Foundation
 import SimShell
-
-/// Shared precondition: devicectl must be able to target simulators. Xcode 27
-/// loads a `SimulatorCoreDevicePlugin`; earlier toolchains list physical devices
-/// only.
-private func requireDeviceCtl(_ feature: String) throws {
-    guard DeviceCtl.isSimulatorCapable() else {
-        throw ValidationError(
-            """
-            \(feature) needs a devicectl that can target simulators, which arrived in Xcode 27. \
-            This toolchain's devicectl lists no SimulatorCoreDevicePlugin \
-            (check `xcrun devicectl list plugins`). Select Xcode 27 or later with xcode-select.
-            """
-        )
-    }
-}
 
 private func emitJSON(_ object: [String: Any]) throws {
     let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
@@ -71,7 +52,7 @@ extension Sipi {
         @Argument(help: "Operation: status, enroll, unenroll, match, no-match.")
         var operation: String
 
-        @Flag(name: .long, help: "Emit the result as JSON.")
+        @Flag(name: .long, help: "Emit the status operation's result as JSON.")
         var json = false
 
         static let operations: Set<String> = ["status", "enroll", "unenroll", "match", "no-match"]
@@ -85,7 +66,6 @@ extension Sipi {
         }
 
         func run() throws {
-            try requireDeviceCtl("sipi biometrics")
             do {
                 switch operation {
                 case "status":
@@ -132,7 +112,7 @@ extension Sipi {
             With no set options this READS the current state; pass any option to WRITE.
             All writes go out in a single devicectl call.
 
-            Reading returns every facet the runtime reports, so a harness can capture a
+            Reading returns every facet the runtime reports, so a caller can capture a
             baseline and restore it afterward. A facet the runtime does not support is
             omitted from the JSON rather than reported as off.
 
@@ -253,7 +233,6 @@ extension Sipi {
         }
 
         func run() throws {
-            try requireDeviceCtl("sipi appearance")
             let writes = settings
             do {
                 if !writes.isEmpty {
@@ -300,10 +279,10 @@ extension Sipi {
             commandName: "voiceover",
             abstract: "Read whether VoiceOver is on.",
             discussion: """
-            Read-only. Setting VoiceOver is retired for now, and so is the `voiceover`
-            test action, because on iOS 27 turning it OFF after it has been ON leaves the
-            accessibility tree empty for every app that comes to the foreground
-            afterwards — only a device restart clears it — and turning it ON buys nothing:
+            Read-only. Setting VoiceOver is retired for now, because on iOS 27 turning it
+            OFF after it has been ON leaves the accessibility tree empty for every app
+            that comes to the foreground afterwards — only a device restart clears it —
+            and turning it ON buys nothing:
             describe-ui returns a byte-identical tree either way (measured on iOS 27.0,
             same node count, same labels). Reading the spoken string or driving the
             VoiceOver cursor needs XCUITest's XCUIVoiceOverService from inside a UI test
@@ -312,8 +291,8 @@ extension Sipi {
             Reading it is still useful: it tells you whether a device someone left with
             VoiceOver on is the reason its accessibility tree looks wrong.
 
-            Revisit when Xcode 27 ships: if the OFF-after-ON breakage is gone, the setter
-            and the test action can come back.
+            Revisit at the next iOS release: if the OFF-after-ON breakage is gone, the
+            setter can come back.
             """
         )
 
@@ -324,7 +303,6 @@ extension Sipi {
         var json = false
 
         func run() throws {
-            try requireDeviceCtl("sipi voiceover")
             do {
                 let enabled = try DeviceCtl.voiceOver(udid: udid)
                 if json {
@@ -379,7 +357,6 @@ extension Sipi {
         }
 
         func run() throws {
-            try requireDeviceCtl("sipi memory-warning")
             do {
                 let target: Int32
                 if let pid {

@@ -14,10 +14,10 @@
 
 import Foundation
 
-/// The three skill trees (sipi-common, sipi-test, sipi-verify) captured at build
-/// time and shipped inside the sipi binary. `all` is the full list of files as
-/// (relativePath, bytes); `executablePaths` marks which of those relative paths
-/// carried a Unix executable bit in the source tree so setup can restore it.
+/// The skill tree (sipi-common) captured at build time and shipped inside the
+/// sipi binary. `all` is the full list of files as (relativePath, bytes);
+/// `executablePaths` marks which of those relative paths carried a Unix
+/// executable bit in the source tree so setup can restore it.
 public enum EmbeddedSkills {
 
     /// One embedded skill file.
@@ -47,9 +47,15 @@ public enum EmbeddedSkills {
     /// executable flag matters; use `all` for plain (path, data) access.
     public static var allEntries: [Entry] { entries }
 
-    /// Relative paths whose source files were executable (e.g. the report
-    /// generator scripts). Setup restores 0o755 on these.
+    /// Relative paths whose source files were executable (scripts). Setup
+    /// restores 0o755 on these.
     public static var executablePaths: [String] {
         entries.filter { $0.isExecutable }.map { $0.path }
+    }
+
+    /// SimPilot's LICENSE followed by THIRD_PARTY_LICENSES.md, which the
+    /// released binary must carry because it contains the code they cover.
+    public static var licenses: String {
+        licenseTexts.map { String(decoding: $0, as: UTF8.self) }.joined(separator: "\n\n")
     }
 }

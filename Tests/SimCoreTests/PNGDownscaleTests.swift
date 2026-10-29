@@ -1,9 +1,7 @@
 // PNGDownscaleTests.swift
 //
-// Locks the two contracts on one resampler: `resized` honours a pixel ceiling
-// whatever the byte count does (the screenshot --max-pixel promise), and
-// `downscaled` additionally refuses a re-encode that is not smaller (the report
-// embedding promise).
+// Locks `resized`: it honours a pixel ceiling whatever the byte count does (the
+// screenshot --max-pixel promise).
 
 import XCTest
 import CoreGraphics
@@ -60,18 +58,5 @@ final class PNGDownscaleTests: XCTestCase {
                                 "a dimension ceiling is met regardless of the byte count")
         let size = try XCTUnwrap(PNGDownscale.pixelSize(of: out))
         XCTAssertEqual(max(size.width, size.height), 50)
-    }
-
-    func testDownscaledOnlyReturnsASmallerEncoding() throws {
-        let noisy = try png(width: 400, height: 400, noisy: true)
-        let shrunk = try XCTUnwrap(PNGDownscale.downscaled(noisy, maxPixel: 100))
-        XCTAssertLessThan(shrunk.count, noisy.count)
-
-        // Whatever `resized` does to a flat image, `downscaled` never hands back
-        // more bytes than it was given.
-        let flat = try png(width: 400, height: 400, noisy: false)
-        if let out = PNGDownscale.downscaled(flat, maxPixel: 50) {
-            XCTAssertLessThan(out.count, flat.count)
-        }
     }
 }

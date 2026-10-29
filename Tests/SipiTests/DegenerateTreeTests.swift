@@ -3,11 +3,10 @@
 // Locks `ChildTree.isDegenerate`, the classifier that separates "the app is not
 // reachable yet" from "the selector is genuinely absent".
 //
-// Two callers depend on it, and both turn a wrong answer into a wrong result:
-// `resolvingRoots` waits the tree out before resolving, and the `optional`
-// pre-resolution refuses to call a target absent while the tree is degenerate.
-// Without that second guard, a launch that has not settled turns an optional
-// step into a passing skip for an element that was simply not up yet.
+// Its callers turn a wrong answer into a wrong result: `ChildTree.nodes`
+// retries a degenerate in-process fetch in a child process, and `a11y-audit`,
+// `wait-for` and `type` treat a degenerate tree as unreadable, which would
+// otherwise read as "no defects", "gone", or "typed".
 
 import XCTest
 @testable import SimCore

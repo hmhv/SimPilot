@@ -4,13 +4,15 @@ This is the developer guide for the SimPilot package. End users do not build fro
 source — see the top-level [README](../README.md) for installation.
 
 SimPilot is a native, headless macOS automation toolkit for the iOS Simulator,
-built as a single SwiftPM package. It ships the `sipi` CLI plus the three
-`sipi-*` agent skills (embedded in the binary) that drive it.
+built as a single SwiftPM package. It ships the `sipi` CLI plus the
+`sipi-common` agent skill (embedded in the binary) that drives it, and installs
+Xcode releases.
 
 `sipi` drives Apple's **private** Simulator frameworks in-process (accessibility,
 HID, framebuffer capture) and **shells out to the public `xcrun simctl`** for
 everything that does not require private APIs (app / file / lifecycle). It runs
-headless: no GUI, no Node runtime, and no spawned helper process.
+headless — no GUI and no Node runtime — except `sipi xcode install`, which opens
+a sign-in window.
 
 ## Posture
 
@@ -21,17 +23,15 @@ headless: no GUI, no Node runtime, and no spawned helper process.
   from the user's own Xcode. The full inventory of undocumented symbols, magic
   constants, and their runtime guards is in
   [`private-symbols.md`](private-symbols.md).
-- **Public-tooling shell-out for the rest.** App install/launch/terminate/uninstall,
-  boot/shutdown/erase, addmedia, privacy, openurl, `ui appearance`, status bar,
-  pasteboard, `record-video`, `log stream`, and the guest `launchctl list` (to
-  turn a bundle id into a pid) all go through typed `Process()` wrappers over
-  `xcrun simctl` — no private APIs (see `SimShell`). `DeviceCtl` wraps
+- **Public-tooling shell-out for the rest.** App install/terminate/uninstall,
+  shutdown/erase, app containers, `ui appearance`, pasteboard, `record-video`,
+  and the guest `launchctl list` (to turn a bundle id into a pid) go through
+  typed `Process()` wrappers over `xcrun simctl` — no private APIs (see
+  `SimShell`). Everything else simctl already does, the skill runs directly. `DeviceCtl` wraps
   `xcrun devicectl` the same way for the facets simctl never exposed: face-up /
   face-down orientation, biometric enrollment and match events, reading
   VoiceOver, the full accessibility appearance surface, and per-process memory
-  warnings. devicectl only
-  targets simulators from Xcode 27 on, so every call site checks
-  `DeviceCtl.isSimulatorCapable()` and degrades with an explicit message.
+  warnings.
 
 ## Package layout
 
@@ -40,23 +40,23 @@ so the private-framework surface stays in one place:
 
 ```
 SimPilot
-├── SimBridge     Objective-C. The ONLY target that touches private symbols /
-│                 dlopen. Exposes SPSimBridge / SPFrameCapture to Swift via
+├── SimBridge     Objective-C. The only target that touches private symbols /
+│                 dlopen (apart from the guest-side hinge helper SimShell builds). Exposes SPSimBridge / SPFrameCapture to Swift via
 │                 include/SimBridge.h. Links public AppKit / QuartzCore /
 │                 IOSurface / CoreImage / CoreVideo only.
-├── SimCore       Pure Foundation. No SimBridge, no Process(), no private FW.
+├── SimCore       Public system frameworks only (Foundation, CoreGraphics, ImageIO, CryptoKit).
+│                 No SimBridge, no Process(), no private FW.
 │                 AX node model + describe-ui JSON encoder, the SimDriver
 │                 protocol + value types, the resolver / poller / KeyCode /
 │                 TapResolution / gesture+slider geometry / orientation math
 │                 (ported from AXe — see ../THIRD_PARTY_LICENSES.md), plus
-│                 report generation, result validation, and the embedded-skill
-│                 install flow.
+│                 the embedded-skill install flow.
 ├── SimNative     The SimDriver implementation. Wires SimCore value types to
 │                 SimBridge's Objective-C APIs.
 ├── SimShell      Typed Process() wrappers over public `xcrun simctl` and
 │                 `xcrun devicectl`.
-├── SimSkills     The three skill trees, embedded into the binary at build time.
-└── sipi          The swift-argument-parser CLI for the `sipi-*` skills.
+├── SimSkills     The sipi-common skill tree, embedded into the binary at build time.
+└── sipi          The swift-argument-parser CLI the sipi-common skill drives.
 ```
 
 `SimCore` is framework-agnostic so it stays unit-testable with a mock driver
@@ -77,8 +77,7 @@ simulator; they no-op unless `SIPI_TEST_UDID` names a booted device UDID.
 
 ## How the skills are embedded
 
-The three skills (`sipi-common`, `sipi-test`, `sipi-verify`) live under
-`.claude/skills` and are compiled into the `sipi` binary, so the install ships a
+The `sipi-common` skill lives under `.claude/skills` and is compiled into the `sipi` binary, so the install ships a
 single self-contained download.
 
 The wiring is the `EmbedSkillsPlugin` build-tool plugin
@@ -86,7 +85,9 @@ The wiring is the `EmbedSkillsPlugin` build-tool plugin
 it runs the `simskillsgen` generator, pointing it at the in-package `skills`
 symlink (`Sources/SimSkills/skills` → `../../.claude/skills`) and generating
 `EmbeddedSkillsData.swift` (base64 file bytes + executable bits), which SwiftPM
-then compiles into `SimSkills`.
+then compiles into `SimSkills`. It also embeds `LICENSE` and
+`THIRD_PARTY_LICENSES.md`, which `sipi licenses` prints, so the released binary
+carries the notices for the code it contains.
 
 Every skill file is declared as an `inputFiles` of the build command, so SwiftPM
 re-runs the generator whenever any skill changes — the embedded payload can
@@ -95,17 +96,16 @@ never go stale relative to the source tree. `SimCore` depends on `SimSkills`, so
 
 ## `sipi` CLI
 
-`sipi` is the sole CLI; the skills drive it directly through the `ui_*` /
-`native_*` shell helpers in
-[`ui-driver.md`](../.claude/skills/sipi-common/docs/ui-driver.md).
+`sipi` is the sole CLI; the skill calls it directly, as
+[`ui-driver.md`](../.claude/skills/sipi-common/docs/ui-driver.md) describes.
 
 ### Perception
 
 ```sh
 sipi describe-ui <udid> [--deep] [--expect "Text"]   # AX tree (default fast; grid on --deep/auto)
 sipi describe-ui <udid> --format compact   # same tree, one element per line (type, label, id, value, frame, hit)
-sipi describe-point <udid> -x <x> -y <y>   # single objectAtPoint hit-test (cheap, no grid)
-sipi wait-for <udid> --label "Text" [--timeout 10] [--absent]   # poll until a verify-style condition holds; exit 1 at the deadline
+sipi describe-point <udid> [--pixel] -x <x> -y <y>   # single objectAtPoint hit-test (cheap, no grid; normalized unless --pixel)
+sipi wait-for <udid> --label "Text" [--timeout 10] [--absent]   # poll until a condition holds; exit 1 at the deadline
 sipi a11y-audit <udid>                     # mechanical accessibility rules over the same tree
 ```
 
@@ -123,17 +123,17 @@ sipi pinch <udid> <in|out>           # interpolated two-finger pinch over multit
 sipi slider <udid> ...               # resolve + drag + AXValue verify
 sipi button <udid> <name>            # hardware button (home/lock/side_button/...)
 sipi crown <udid> <delta>            # Digital Crown rotation (Apple Watch only)
-sipi orientation <udid> [--set name] # native READ; SET (PurpleEvent → devicectl → osascript); --json --physical adds the flat states
+sipi orientation <udid> [--set name] # native READ; SET (PurpleEvent → devicectl); --json --physical adds the flat states
 ```
 
 ### Accessibility and device state
 
 ```sh
 sipi a11y-audit <udid>               # mechanical audit: touch targets, labels, truncation (--fast, --rules, --min-touch-target, --fail-on)
-sipi biometrics <udid> <op>          # status | enroll | unenroll | match | no-match      (devicectl, Xcode 27+)
-sipi appearance <udid> [facets]      # read/write reduce-motion, color filters, Liquid Glass, … (devicectl, Xcode 27+)
-sipi voiceover <udid>                # READ VoiceOver state; setting it is retired        (devicectl, Xcode 27+)
-sipi memory-warning <udid> --bundle-id <id>   # memory-pressure warning to a running app  (devicectl, Xcode 27+)
+sipi biometrics <udid> <op>          # status | enroll | unenroll | match | no-match      (devicectl)
+sipi appearance <udid> [facets]      # read/write reduce-motion, color filters, Liquid Glass, … (devicectl)
+sipi voiceover <udid>                # READ VoiceOver state; setting it is retired        (devicectl)
+sipi memory-warning <udid> --bundle-id <id>   # memory-pressure warning to a running app  (devicectl)
 ```
 
 ### Capture
@@ -143,18 +143,18 @@ sipi screenshot <udid> <path> [--max-pixel N]   # zero-copy IOSurface PNG; --max
 sipi record-video <udid> <path>      # simctl io recordVideo --codec h264 (background + SIGINT)
 ```
 
-### Test data and evidence
+### App data and evidence
 
 ```sh
 sipi container ...                   # safe app data/App Group copy, inspect, snapshot, diff, cleanup
 sipi files-app ...                   # experimental File Provider Storage discovery/copy/cleanup
 sipi xcappdata ...                   # create/validate; install with simctl directly
-sipi crash-evidence ...              # collect app-specific crash reports in a time range
+sipi crash-evidence ...              # collect app-specific crash reports created since a timestamp
 ```
 
 These are not aliases for existing simctl commands. See
-[`data-artifacts.md`](data-artifacts.md) for the path-safety contract, fixture
-JSON, persistent-state assertions, and automatic run evidence.
+[`data-artifacts.md`](data-artifacts.md) for the path-safety contract and the
+inspection formats.
 
 ### Devices
 
@@ -163,73 +163,24 @@ sipi devices                         # JSON device list (native CoreSimulator)
 sipi list-simulators                 # device list for skills
 ```
 
-### Reports and validation
+### Xcode
 
 ```sh
-sipi run-test <test-json> [--html] [--junit] [--record-video]   # deterministic v2 test harness
-sipi run-suite <suite-json> [--html] [--junit] [--record-video] # deterministic v2 suite harness
-sipi verify-session ...               # init/capture/sheet/finding/finalize verification artifacts
-sipi report <run-dir> [--junit]      # generate report.html (and junit.xml) for a sipi-test run
-sipi verify-report <verify-dir>      # generate report.html for a sipi-verify run
-sipi validate <workspace>            # validate the JSON files in a .simpilot workspace
+sipi xcode list                      # Xcode releases Apple offers (from xcodereleases.com)
+sipi xcode install <build>           # download from Apple (sign-in window) + install into /Applications
+sipi xcode uninstall <build>         # move an installed Xcode to the Trash (not the selected one)
+sipi runtime list [--platform iOS]   # simulator runtimes Apple offers, installed ones marked
 ```
 
-`run.json`, `summary.json`, and each `result.json` are always written. `--html`
-adds `report.html`; `--junit` adds `junit.xml` (one `<testcase>` per test, the
-first failed step as `<failure>`); `--record-video`, or `record-video` in
-`config.json`, records each test to `<test-id>/recording.mp4` and names it in
-the result's `video` field. `keep-runs` in `config.json` prunes the oldest
-harness-named run directories after a run that landed in the default `runs/`
-location.
-
-Execution and report generation live **inside** the binary (`run-test`,
-`run-suite`, `verify-session`, `report`, `verify-report`, `validate`) so a
-single-binary install stays self-contained.
-
-The v2 test `action.type` vocabulary spans the same input surface as the ad-hoc
-CLI: `tap`, `double-tap`, `long-press`, `type`, `set-text`, `key`, `key-combo`,
-`key-sequence`, `button`, `swipe`, `drag`, `gesture`, `pinch`, `multitouch`,
-`slider`, `orientation`, `crown`, `wait`. So toggles, sliders, gestures, pinches,
-modifier combos, and rotation are all expressible as deterministic saved steps —
-each case in `Harness.perform(action:)` reuses the same `NativeDriver` call as
-the matching CLI command.
-
-Beyond input, the harness owns simulator state: `open-url`, `privacy`, `push`,
-`location`, `appearance`, `content-size`, `increase-contrast`, `status-bar`,
-`launch`, `terminate`, `network-condition` (simctl / provider), plus
-`display-state`, `biometrics`, and `memory-warning` (devicectl, Xcode 27+). The `voiceover` action is
-retired — see `.claude/skills/sipi-common/docs/troubleshooting.md`.
-
-Cleanup runs between tests and at end of run, but it is **not** uniform across
-that list, and specs have to plan around the difference:
-
-- **Restored to a captured baseline** — `appearance`, `content-size`,
-  `increase-contrast`, `display-state`, `biometrics` enrollment.
-  The baseline is captured before the first write and a step fails when it
-  cannot be read, or when a facet it wants to change could not be put back.
-- **Cleared only** — `location`, `status-bar`, `network-condition`. Reset to "no
-  override"; a value the device already had is not returned.
-- **Not touched** — `privacy`, `open-url`, `push`, `launch`, `terminate`. These
-  need recovery steps in the spec itself. `memory-warning` is a one-off event
-  with no device state behind it, so there is nothing to clean.
-
-A facet has exactly one owning action: `display-state` deliberately cannot set
-light/dark, text size, or Increase Contrast, because two mechanisms capturing two
-baselines for one facet would restore whichever ran last.
-
-The tier table, the colour-filter restore limits, and the recovery guidance are
-in
-[adverse-state-testing.md](../.claude/skills/sipi-test/references/adverse-state-testing.md).
-
-The full per-action JSON shapes are in
-[json-reference.md](../.claude/skills/sipi-test/references/json-reference.md).
+Everything else about Xcode, runtimes, and cleanup is plain `xcode-select` /
+`xcodebuild` / `simctl`; the skill's `xcode.md` and `clean.md` describe it.
 
 ### Diagnostics and lifecycle
 
 ```sh
 sipi doctor [--json]                 # probe native capabilities; exit 0 only if all present
 sipi version [--json]                # print the sipi version
-sipi open-ui [--json|--print-only]   # open Device Hub (Xcode 27+) / Simulator.app (<=26)
+sipi open-ui [--json|--print-only]   # open Device Hub
 sipi repair-input <udid>             # reconnect touch/keys after Device Hub took them over (restarts SpringBoard)
 sipi setup                           # install the embedded skills into Claude Code + Codex
 sipi update                          # download the latest release binary + refresh skills
@@ -240,8 +191,8 @@ sipi uninstall                       # remove skills, install metadata, and the 
 private frameworks, the key classes/symbols each needs, the active Xcode, and any
 booted devices, and exits non-zero if any core capability is missing. The exact
 exit-code and output contract is pinned in
-[`sipi-doctor-contract.md`](sipi-doctor-contract.md); `preflight.md` and the CI
-matrix gate on it.
+[`sipi-doctor-contract.md`](sipi-doctor-contract.md); `preflight.md` gates on
+it.
 
 ### describe-ui JSON shape
 
@@ -250,7 +201,7 @@ matrix gate on it.
 `AXLabel`, `AXValue`, `role_description`, `role`, `subrole`, `type`,
 `AXUniqueId`, `enabled`, `frame{x,y,width,height}`, `hitPoint{x,y}`,
 `onscreen`, and `children`. The default path is frontmost + recursive (fast,
-~0.1s); the 16pt `objectAtPoint` grid pass that surfaces System UI
+~0.2s); the 16pt `objectAtPoint` grid pass that surfaces System UI
 (PhotosPicker, status bar, cross-process overlays) is opt-in via `--deep` or
 auto-triggered when an `--expect`ed string is missing.
 
@@ -282,7 +233,7 @@ the locally-built `.build/release/sipi`.
 
 ## Requirements
 
-- macOS with Xcode 26+ (private Simulator frameworks loaded from the active Xcode
+- macOS with Xcode 27.2+ (private Simulator frameworks loaded from the active Xcode
   / system; override with `DEVELOPER_DIR`).
 - A booted Simulator for perception / input / capture commands.
 

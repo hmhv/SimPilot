@@ -1,9 +1,8 @@
 // PNGDownscale.swift
 //
-// Re-encode a PNG so its longest side fits a pixel budget. Shared by the HTML
-// reports (which embed every step screenshot and would otherwise ship each one
-// at device resolution) and by `sipi screenshot --max-pixel`, where a reader
-// that pays per image token wants a thumbnail rather than a 3x capture.
+// Re-encode a PNG so its longest side fits a pixel budget, for
+// `sipi screenshot --max-pixel`, where a reader that pays per image token wants
+// a thumbnail rather than a 3x capture.
 //
 // ImageIO does the resampling; the result keeps the PNG container so every
 // consumer that could read the original can read the copy.
@@ -16,9 +15,9 @@ public enum PNGDownscale {
     /// caller whose contract is the dimension: `screenshot --max-pixel`.
     ///
     /// Returns nil when the image cannot be read or is already within the
-    /// limit — the caller keeps the original bytes. Unlike `downscaled`, a
-    /// resized encoding that happens to be larger in bytes is still returned,
-    /// because the ceiling asked for is in pixels.
+    /// limit — the caller keeps the original bytes. A resized encoding that
+    /// happens to be larger in bytes is still returned, because the ceiling
+    /// asked for is in pixels.
     public static func resized(_ data: Data, maxPixel: Int) -> Data? {
         guard maxPixel > 0,
               let source = CGImageSourceCreateWithData(data as CFData, nil),
@@ -42,17 +41,6 @@ public enum PNGDownscale {
         CGImageDestinationAddImage(dest, thumb, nil)
         guard CGImageDestinationFinalize(dest) else { return nil }
         return out as Data
-    }
-
-    /// `resized`, for a caller whose contract is the byte count: the HTML
-    /// reports embed either this or the original, whichever is smaller.
-    ///
-    /// Returns nil when the image cannot be read, is already within the limit,
-    /// or the re-encode did not actually come out smaller — every one of those
-    /// cases means the caller should keep the original bytes.
-    public static func downscaled(_ data: Data, maxPixel: Int) -> Data? {
-        guard let shrunk = resized(data, maxPixel: maxPixel), shrunk.count < data.count else { return nil }
-        return shrunk
     }
 
     /// The pixel dimensions ImageIO reads from `data`, or nil when it is not an

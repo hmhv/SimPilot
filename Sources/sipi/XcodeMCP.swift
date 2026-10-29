@@ -26,7 +26,7 @@
 // device-interaction session leaves every app launched afterwards on that
 // device with an empty accessibility tree until the device restarts.
 //
-// Requires Xcode 27 or later with headless mode enabled
+// Requires Xcode 27.2 or later with headless mode enabled
 // (`sudo xcrun mcp-server enable`), and a one-time approval of this agent.
 
 import CryptoKit
@@ -48,7 +48,7 @@ enum XcodeMCP {
         var description: String {
             switch self {
             case .toolMissing:
-                return "Xcode's MCP service is not present in the selected developer directory (it needs Xcode 27 or later)."
+                return "Xcode's MCP service is not present in the selected developer directory (it needs Xcode 27.2 or later)."
             case .notEnabled:
                 return "Xcode's MCP service is not enabled. Run `sudo xcrun mcp-server enable`."
             case .notAnswering:
@@ -60,24 +60,6 @@ enum XcodeMCP {
             case .failed(let detail):
                 return "Xcode's MCP service failed: \(detail)"
             }
-        }
-
-        /// See `XcodeMCP.isBeforeTyping`.
-        var isBeforeTyping: Bool { XcodeMCP.isBeforeTyping(self) }
-    }
-
-    /// Whether this failure happened before any character could have reached the
-    /// guest, and so is safe for the harness to retry.
-    ///
-    /// Only a failure of the typing command itself is ambiguous: the service may
-    /// have delivered the text and failed afterwards, and a retried step would
-    /// type it twice.
-    static func isBeforeTyping(_ reason: Unavailable) -> Bool {
-        switch reason {
-        case .toolMissing, .notEnabled, .notAnswering, .notApproved, .approvalPending:
-            return true
-        case .failed(let detail):
-            return !detail.hasPrefix("DeviceInteractionSynthesize")
         }
     }
 
@@ -359,7 +341,7 @@ enum XcodeMCP {
     ///
     ///     {"permission": {"enabled": true, "unsafeAlwaysAllowAllAgents": false,
     ///                     "permittedAgents": [{"id": "...", "trust": {"unsigned": {
-    ///                         "path": "/Users/u/.local/bin/sipi", "sha256": "1f09…", "expiration": 810774804.0}}}],
+    ///                         "path": "<path>", "sha256": "<sha256>", "expiration": <seconds>}}}],
     ///                     "permittedFolders": [...]},
     ///      "running": true, "openWorkspaces": []}
     ///
@@ -406,12 +388,6 @@ enum XcodeMCP {
         return grants
     }
 
-    /// Whether a text `mcp-server status` listing carries a grant that could be
-    /// this executable's. See `Grants.match`.
-    static func hasGrant(in status: String, executable: String? = Bundle.main.executablePath) -> Bool {
-        grants(fromText: status).match(executable: executable, sha256: nil) != .none
-    }
-
     /// `path` with symlinks resolved, for comparing two spellings of one file.
     static func canonicalPath(_ path: String) -> String {
         URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
@@ -429,7 +405,7 @@ enum XcodeMCP {
     ///
     /// A line reads:
     ///
-    ///     <uuid>: unsigned /Users/u/.local/bin/sipi c8182f6627b4… (expires ...)
+    ///     <uuid>: unsigned <path> <sha256 prefix>… (expires ...)
     ///
     /// The path is compared whole rather than by substring, so a different
     /// binary whose path merely contains this one — `/usr/local/bin/sipi` beside

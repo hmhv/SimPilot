@@ -1,8 +1,8 @@
 // VerifyEvaluatorTests.swift
 //
-// Locks the verify-evaluation correctness rules that used to live (buggy) inside
-// the harness: `absent` must be judged against the deep tree, `contains` must
-// escalate to deep on demand, and the deep tree must not be fetched needlessly.
+// Locks the evaluation correctness rules: `absent` must be judged against the
+// deep tree, `contains` must escalate to deep on demand, and the deep tree must
+// not be fetched needlessly.
 
 import XCTest
 @testable import SimCore
@@ -16,7 +16,7 @@ final class VerifyEvaluatorTests: XCTestCase {
         let fast = "{app: Home, Settings}"
         let deep = fast + " {system-ui: Error dialog}"
         let rows = VerifyEvaluator.evaluate(
-            contains: ["Home"], absent: ["Error dialog"], fastJSON: fast, deepJSON: { deep }
+            contains: ["Home"], absent: ["Error dialog"], fast: .init(json: fast), deep: { .init(json: deep) }
         )
         XCTAssertEqual(rows.count, 2)
         XCTAssertTrue(rows[0].found, "contains 'Home' should be found")
@@ -26,7 +26,7 @@ final class VerifyEvaluatorTests: XCTestCase {
 
     func testAbsentStringTrulyGoneReportsAbsent() {
         let rows = VerifyEvaluator.evaluate(
-            contains: [], absent: ["Error"], fastJSON: "Home Settings", deepJSON: { "Home Settings" }
+            contains: [], absent: ["Error"], fast: .init(json: "Home Settings"), deep: { .init(json: "Home Settings") }
         )
         XCTAssertEqual(rows.count, 1)
         XCTAssertTrue(rows[0].found)
@@ -35,7 +35,7 @@ final class VerifyEvaluatorTests: XCTestCase {
 
     func testContainsEscalatesToDeepTree() {
         let rows = VerifyEvaluator.evaluate(
-            contains: ["Dashboard"], absent: [], fastJSON: "Home", deepJSON: { "Home Dashboard" }
+            contains: ["Dashboard"], absent: [], fast: .init(json: "Home"), deep: { .init(json: "Home Dashboard") }
         )
         XCTAssertTrue(rows[0].found)
         XCTAssertEqual(rows[0].grepMatch, "Dashboard")
@@ -44,8 +44,8 @@ final class VerifyEvaluatorTests: XCTestCase {
     func testDeepTreeNotFetchedWhenFastSatisfiesAndNoAbsent() {
         var deepCalls = 0
         let rows = VerifyEvaluator.evaluate(
-            contains: ["Home", "Dashboard"], absent: [], fastJSON: "Home Dashboard",
-            deepJSON: { deepCalls += 1; return "unused" }
+            contains: ["Home", "Dashboard"], absent: [], fast: .init(json: "Home Dashboard"),
+            deep: { deepCalls += 1; return .init(json: "unused") }
         )
         XCTAssertEqual(deepCalls, 0, "deep tree must not be fetched when it is not needed")
         XCTAssertTrue(rows.allSatisfy { $0.found })
@@ -54,63 +54,18 @@ final class VerifyEvaluatorTests: XCTestCase {
     func testDeepTreeFetchedWhenAbsentPresentEvenIfContainsInFast() {
         var deepCalls = 0
         _ = VerifyEvaluator.evaluate(
-            contains: ["Home"], absent: ["X"], fastJSON: "Home",
-            deepJSON: { deepCalls += 1; return "Home" }
+            contains: ["Home"], absent: ["X"], fast: .init(json: "Home"),
+            deep: { deepCalls += 1; return .init(json: "Home") }
         )
         XCTAssertEqual(deepCalls, 1, "any absent condition must force a deep fetch")
     }
 
     func testContainsNotFoundHasNilGrepMatch() {
         let rows = VerifyEvaluator.evaluate(
-            contains: ["Missing"], absent: [], fastJSON: "Home", deepJSON: { "Home" }
+            contains: ["Missing"], absent: [], fast: .init(json: "Home"), deep: { .init(json: "Home") }
         )
         XCTAssertFalse(rows[0].found)
         XCTAssertNil(rows[0].grepMatch)
-    }
-
-    // MARK: - regex conditions
-
-    func testMatchesCondition() {
-        let rows = VerifyEvaluator.evaluate(
-            matches: ["Total: \\d+ items"],
-            fast: .init(json: "{label: Total: 42 items}"),
-            deep: { .init(json: "unused") }
-        )
-        XCTAssertTrue(rows[0].found)
-    }
-
-    func testMatchesEscalatesToDeepTree() {
-        var deepCalls = 0
-        let rows = VerifyEvaluator.evaluate(
-            matches: ["Dash\\w+"],
-            fast: .init(json: "Home"),
-            deep: { deepCalls += 1; return .init(json: "Home Dashboard") }
-        )
-        XCTAssertTrue(rows[0].found)
-        XCTAssertEqual(deepCalls, 1)
-    }
-
-    /// Absence via regex has the same false-PASS hazard as `absent`: it must be
-    /// judged against the deep tree.
-    func testNotMatchesForcesDeepFetch() {
-        var deepCalls = 0
-        let rows = VerifyEvaluator.evaluate(
-            notMatches: ["Error \\d+"],
-            fast: .init(json: "Home"),
-            deep: { deepCalls += 1; return .init(json: "Home Error 500") }
-        )
-        XCTAssertEqual(deepCalls, 1, "not-matches must force a deep fetch")
-        XCTAssertFalse(rows[0].found, "a pattern present only in the deep tree must fail not-matches")
-    }
-
-    func testInvalidRegexFailsInsteadOfPassing() {
-        let rows = VerifyEvaluator.evaluate(
-            matches: ["[unclosed"],
-            fast: .init(json: "anything"),
-            deep: { .init(json: "anything") }
-        )
-        XCTAssertFalse(rows[0].found)
-        XCTAssertEqual(rows[0].grepMatch, "invalid regular expression")
     }
 
     // MARK: - element conditions
@@ -119,29 +74,19 @@ final class VerifyEvaluatorTests: XCTestCase {
         VerifyEvaluator.Capture(json: (try? AXNodeJSON.string(for: nodes)) ?? "", nodes: nodes)
     }
 
-    private func button(_ label: String, enabled: Bool = true) -> AXNode {
-        AXNode(AXLabel: label, role: "AXButton", type: "Button", enabled: enabled,
+    private func button(_ label: String) -> AXNode {
+        AXNode(AXLabel: label, role: "AXButton", type: "Button", enabled: true,
                frame: AXNode.Frame(x: 0, y: 0, width: 80, height: 44))
     }
 
     func testElementConditionEvaluatesAgainstNodes() {
         let rows = VerifyEvaluator.evaluate(
-            elements: [ElementCondition(label: "Sign In", enabled: true)],
+            elements: [ElementCondition(label: "Sign In")],
             fast: tree([button("Sign In")]),
             deep: { self.tree([]) }
         )
         XCTAssertTrue(rows[0].found)
         XCTAssertTrue(rows[0].check.contains("label=Sign In"))
-    }
-
-    func testFailingElementConditionCarriesTheObservedValue() {
-        let rows = VerifyEvaluator.evaluate(
-            elements: [ElementCondition(label: "Sign In", enabled: true)],
-            fast: tree([button("Sign In", enabled: false)]),
-            deep: { self.tree([self.button("Sign In", enabled: false)]) }
-        )
-        XCTAssertFalse(rows[0].found)
-        XCTAssertEqual(rows[0].grepMatch, "expected enabled=true, found enabled=false")
     }
 
     func testElementConditionEscalatesToDeepTree() {
@@ -173,13 +118,12 @@ final class VerifyEvaluatorTests: XCTestCase {
         let rows = VerifyEvaluator.evaluate(
             contains: ["Home"],
             absent: ["Error"],
-            matches: ["Ho\\w+"],
             elements: [ElementCondition(label: "Home")],
             fast: tree([button("Home")]),
             deep: { deepCalls += 1; return self.tree([self.button("Home")]) }
         )
         XCTAssertEqual(deepCalls, 1, "the deep capture must be fetched at most once")
-        XCTAssertEqual(rows.count, 4)
+        XCTAssertEqual(rows.count, 3)
         XCTAssertTrue(rows.allSatisfy { $0.found }, "\(rows)")
     }
 }

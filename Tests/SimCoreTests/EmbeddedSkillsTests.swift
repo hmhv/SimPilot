@@ -1,7 +1,7 @@
 // EmbeddedSkillsTests.swift
 //
 // Locks the build-time skill embedding (STAGE EMBED). The sipi binary must ship
-// the three skill trees baked in so the curl|bash install is a single
+// the skill tree baked in so the curl|bash install is a single
 // self-contained download. These assertions fail if the EmbedSkillsPlugin /
 // simskillsgen generation stops producing the current skill files — e.g. a
 // broken symlink, an empty tree, or a lost relative-path / executable bit.
@@ -21,18 +21,8 @@ final class EmbeddedSkillsTests: XCTestCase {
         let paths = Set(EmbeddedSkills.all.map { $0.path })
         XCTAssertTrue(paths.contains("sipi-common/SKILL.md"),
                       "expected sipi-common/SKILL.md to be embedded")
-        XCTAssertTrue(paths.contains("sipi-test/docs/run.md"),
-                      "expected sipi-test/docs/run.md to be embedded")
-        XCTAssertTrue(paths.contains("sipi-verify/SKILL.md"),
-                      "expected sipi-verify/SKILL.md to be embedded")
-    }
-
-    func testAllThreeSkillTreesArePresent() {
-        let paths = EmbeddedSkills.all.map { $0.path }
-        for skill in ["sipi-common", "sipi-test", "sipi-verify"] {
-            XCTAssertTrue(paths.contains { $0.hasPrefix("\(skill)/") },
-                          "expected at least one file under \(skill)/")
-        }
+        XCTAssertTrue(paths.contains("sipi-common/docs/ui-driver.md"),
+                      "expected sipi-common/docs/ui-driver.md to be embedded")
     }
 
     func testEntriesCarryNonEmptyData() {
@@ -53,19 +43,6 @@ final class EmbeddedSkillsTests: XCTestCase {
         let common = try text(at: "sipi-common/SKILL.md")
         XCTAssertTrue(common.contains("sipi --help"))
         XCTAssertTrue(common.contains("sipi help container"))
-
-        let testSkill = try text(at: "sipi-test/SKILL.md")
-        XCTAssertTrue(testSkill.contains("reversible file fixtures"))
-        XCTAssertTrue(testSkill.contains("primary app data-container snapshots/diffs"))
-
-        let jsonReference = try text(at: "sipi-test/references/json-reference.md")
-        XCTAssertTrue(jsonReference.contains("`container-files`"))
-        XCTAssertTrue(jsonReference.contains("`evidence-warnings`"))
-        XCTAssertTrue(jsonReference.contains("There is no Files.app target"))
-        XCTAssertTrue(jsonReference.contains("including `describe-ui` and\n`container-files`"))
-
-        let actions = try text(at: "sipi-test/references/actions.md")
-        XCTAssertFalse(actions.contains(#""arguments": ["--fixture"]"#))
     }
 
     func testRelativePathsUsePosixSeparators() {
@@ -73,20 +50,6 @@ final class EmbeddedSkillsTests: XCTestCase {
             XCTAssertFalse(path.hasPrefix("/"), "\(path) must be relative")
             XCTAssertFalse(path.contains("\\"), "\(path) must use POSIX separators")
         }
-    }
-
-    func testReportScriptsNoLongerEmbedded() {
-        // Report/validate generation moved INTO the sipi binary as the
-        // `report` / `verify-report` / `validate` subcommands (SimCore
-        // ReportGenerator / ResultValidator). The loose interpreter scripts were
-        // deleted from the skill trees, so they must no longer be embedded.
-        let paths = Set(EmbeddedSkills.all.map { $0.path })
-        XCTAssertFalse(paths.contains("sipi-test/scripts/generate_test_report.swift"),
-                       "generate_test_report.swift must no longer be embedded (folded into `sipi report`)")
-        XCTAssertFalse(paths.contains("sipi-verify/scripts/generate_verify_report.swift"),
-                       "generate_verify_report.swift must no longer be embedded (folded into `sipi verify-report`)")
-        XCTAssertFalse(paths.contains("sipi-test/scripts/validate_simpilot_results.swift"),
-                       "validate_simpilot_results.swift must no longer be embedded (folded into `sipi validate`)")
     }
 
     private func text(at path: String) throws -> String {

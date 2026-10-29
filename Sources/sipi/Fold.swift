@@ -46,7 +46,7 @@ extension Sipi {
         )
         var over: Double?
 
-        @Flag(name: .long, help: "Emit the resulting fold state as JSON, as `fold-state` would.")
+        @Flag(name: .long, help: "Emit the resulting state as JSON.")
         var json = false
 
         func validate() throws {

@@ -41,7 +41,18 @@ public enum AXNodeJSON {
     /// colons — the verify-form contract skills grep against.
     public static func data(for nodes: [AXNode]) throws -> Data {
         let array = nodes.map { dictionary(for: $0) }
-        return try JSONSerialization.data(withJSONObject: array, options: [.prettyPrinted])
+        return try JSONSerialization.data(withJSONObject: array, options: options)
+    }
+
+    private static let options: JSONSerialization.WritingOptions = [.prettyPrinted, .withoutEscapingSlashes]
+
+    /// `text` as it appears inside a string in this JSON, so a substring search
+    /// over the serialized tree finds a label holding `"` or `\`.
+    public static func escaped(_ text: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed, .withoutEscapingSlashes]),
+              data.count >= 2
+        else { return text }
+        return String(decoding: data.dropFirst().dropLast(), as: UTF8.self)
     }
 
     /// Pretty-printed describe-ui JSON string for a node array.

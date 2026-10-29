@@ -41,57 +41,6 @@ final class DataArtifactCommandTests: XCTestCase {
         ])
     }
 
-    func testContainerFileAssertionComparesEverySupportedValue() {
-        let inspection = FileInspection(
-            exists: true,
-            size: 3,
-            sha256: String(repeating: "a", count: 64),
-            value: "1"
-        )
-        XCTAssertTrue(ContainerFileAssertion.matches(
-            inspection,
-            exists: true,
-            size: 3,
-            sha256: String(repeating: "A", count: 64),
-            value: 1
-        ))
-        XCTAssertFalse(ContainerFileAssertion.matches(
-            inspection, exists: true, size: 4, sha256: nil, value: nil))
-        XCTAssertFalse(ContainerFileAssertion.matches(
-            inspection, exists: true, size: nil, sha256: nil, value: true))
-    }
-
-    func testValueAssertionTrimsSurroundingWhitespace() throws {
-        let trailingNewline = FileInspection(exists: true, size: 6, value: "hello\n")
-        XCTAssertTrue(ContainerFileAssertion.matches(
-            trailingNewline, exists: true, size: nil, sha256: nil, value: "hello"))
-        XCTAssertTrue(ContainerFileAssertion.matches(
-            FileInspection(exists: true, value: "  hello  "),
-            exists: true, size: nil, sha256: nil, value: "hello"))
-        // Trimming is only about surrounding whitespace, not about the value.
-        XCTAssertFalse(ContainerFileAssertion.matches(
-            trailingNewline, exists: true, size: nil, sha256: nil, value: "hell"))
-        // A file whose text could not be decoded never satisfies a value.
-        XCTAssertFalse(ContainerFileAssertion.matches(
-            FileInspection(exists: true, size: 3, sha256: nil, value: nil),
-            exists: true, size: nil, sha256: nil, value: ""))
-    }
-
-    func testHarnessJSONValuePreservesLargeIntegers() throws {
-        let value = try JSONDecoder().decode(
-            HarnessJSONValue.self, from: Data("1234567890123456789".utf8))
-        XCTAssertEqual(
-            ContainerOperations.canonicalString(value.foundationValue),
-            "1234567890123456789"
-        )
-        let unsigned = try JSONDecoder().decode(
-            HarnessJSONValue.self, from: Data("18446744073709551615".utf8))
-        XCTAssertEqual(
-            ContainerOperations.canonicalString(unsigned.foundationValue),
-            "18446744073709551615"
-        )
-    }
-
     func testCleanupManifestRestoresOneSelectedRootAtATime() throws {
         let work = try temporaryDirectory()
         let firstRoot = try temporaryDirectory()
@@ -169,38 +118,6 @@ final class DataArtifactCommandTests: XCTestCase {
             path: manifestPath, selectedRoot: root))
         XCTAssertTrue(FileManager.default.fileExists(atPath: victim.path))
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "fixture")
-    }
-
-    func testLogSanitizerProducesStrictNDJSONAndDetectsEmptyCapture() throws {
-        let banner = "Filtering the log data using \"subsystem == app\"\n\n"
-        let event = #"{"eventMessage":"saved","timestamp":"2026-08-20T00:00:00+09:00"}"#
-        let footer = #"{"count":1,"finished":1}"#
-        let result = LogNDJSONSanitizer.sanitize(
-            Data((banner + event + "\n" + footer + "\n").utf8))
-        XCTAssertEqual(result.recordCount, 1)
-        XCTAssertTrue(result.unexpectedLines.isEmpty)
-        for line in String(decoding: result.data, as: UTF8.self).split(separator: "\n") {
-            XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(line.utf8)))
-        }
-
-        let empty = LogNDJSONSanitizer.sanitize(Data((banner + #"{"count":0,"finished":1}"#).utf8))
-        XCTAssertEqual(empty.recordCount, 0)
-        XCTAssertTrue(empty.data.isEmpty)
-    }
-
-    func testEvidencePlanIncludesPerTestAppOverrides() {
-        let bundleIDs = HarnessEvidence.bundleIDs(
-            primary: "com.example.primary",
-            testOverrides: ["com.example.secondary", "com.example.primary"])
-        XCTAssertEqual(bundleIDs, ["com.example.primary", "com.example.secondary"])
-
-        let predicate = HarnessEvidence.logPredicate(bundleIDs: bundleIDs) { bundleID in
-            bundleID == "com.example.primary" ? "PrimaryApp" : "SecondaryApp"
-        }
-        XCTAssertTrue(predicate.contains(#"subsystem == "com.example.primary""#))
-        XCTAssertTrue(predicate.contains(#"subsystem == "com.example.secondary""#))
-        XCTAssertTrue(predicate.contains(#"process == "PrimaryApp""#))
-        XCTAssertTrue(predicate.contains(#"process == "SecondaryApp""#))
     }
 
     private func temporaryDirectory() throws -> URL {

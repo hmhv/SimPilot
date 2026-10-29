@@ -70,8 +70,7 @@ public protocol SimDriver {
     /// Native READ of the current physical UI orientation.
     func uiOrientation(_ udid: String) throws -> UIOrientation
     /// SET the device orientation: native PurpleEvent SET first, then devicectl
-    /// (the only headless path to face-up / face-down), then the osascript menu
-    /// on toolchains that still ship Simulator.app.
+    /// (the only headless path to face-up / face-down).
     func setOrientation(_ name: OrientationSetName, udid: String) throws
     /// Two-finger touch phase at two normalized 0...1 points (pinch / multitouch).
     /// `phase` 1 = begin/move, 2 = end.

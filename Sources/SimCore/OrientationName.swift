@@ -2,11 +2,9 @@
 //
 // Pure-logic mapping for the orientation SET path. Maps the orientation names
 // the CLI accepts to: (a) the UIDeviceOrientation 1...4 set the native
-// PurpleEvent SET can express, (b) the `devicectl device orientation set` name,
-// which covers all six orientations headlessly on Xcode 27+, and (c) the
-// Simulator "Device > Orientation" menu item label used by the legacy osascript
-// fallback. Face-up / face-down are unreachable via PurpleEvent, so they resolve
-// through devicectl first and osascript only on pre-27 toolchains.
+// PurpleEvent SET can express, and (b) the `devicectl device orientation set`
+// name, which covers all six orientations headlessly. Face-up / face-down are
+// unreachable via PurpleEvent, so they go through devicectl.
 //
 // No SimBridge, no Process(), no private frameworks — this stays unit-testable
 // and keeps the name canonicalization in one place shared by the READ and SET.
@@ -47,7 +45,7 @@ public enum OrientationSetName: Equatable, Sendable {
 
     /// Whether the native PurpleEvent SET can express this orientation. PurpleEvent
     /// covers only UIDeviceOrientation 1...4, so face-up / face-down always go
-    /// through devicectl (or, on pre-27 toolchains, the osascript menu path).
+    /// through devicectl.
     public var isNativeExpressible: Bool {
         switch self {
         case .portrait, .portraitUpsideDown, .landscapeLeft, .landscapeRight:
@@ -71,8 +69,8 @@ public enum OrientationSetName: Equatable, Sendable {
     }
 
     /// The name `devicectl device orientation set` accepts. devicectl covers all
-    /// six orientations without a GUI app, which is the only headless way to
-    /// reach face-up / face-down now that Xcode 27 removed Simulator.app.
+    /// six orientations without a GUI app, the only headless way to reach
+    /// face-up / face-down.
     public var deviceCtlName: String {
         switch self {
         case .portrait: return "portrait"
@@ -81,19 +79,6 @@ public enum OrientationSetName: Equatable, Sendable {
         case .landscapeRight: return "landscapeRight"
         case .faceUp: return "faceUp"
         case .faceDown: return "faceDown"
-        }
-    }
-
-    /// The Simulator "Device > Orientation" submenu item label used by the
-    /// legacy osascript fallback (Xcode 26 and earlier).
-    public var menuItemName: String {
-        switch self {
-        case .portrait: return "Portrait"
-        case .portraitUpsideDown: return "Portrait Upside Down"
-        case .landscapeLeft: return "Landscape Left"
-        case .landscapeRight: return "Landscape Right"
-        case .faceUp: return "Face Up"
-        case .faceDown: return "Face Down"
         }
     }
 

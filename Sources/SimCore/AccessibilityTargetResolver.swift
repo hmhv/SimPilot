@@ -82,14 +82,6 @@ public enum AccessibilityTargetResolver {
     private static let wideSwitchActivationWidthThreshold = 100.0
     private static let switchTrailingActivationInset = 31.0
 
-    public static func resolveTapPoint(
-        roots: [AXNode],
-        query: AccessibilityQuery,
-        elementType: String? = nil
-    ) throws -> Point {
-        try resolveTap(roots: roots, query: query, elementType: elementType).point
-    }
-
     public static func resolveElement(
         roots: [AXNode],
         query: AccessibilityQuery,

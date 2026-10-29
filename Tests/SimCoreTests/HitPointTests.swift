@@ -205,8 +205,8 @@ final class HitPointTests: XCTestCase {
 }
 
 /// The root node's frame is what every caller reads as "the screen": HitPoints
-/// clips with it, `describe-point` and `--pixel` convert through it, and the
-/// harness sizes pixel-unit steps by it. Where it disagrees with the screen it
+/// clips with it, `describe-point` and `--pixel` convert through it, and
+/// pixel-unit coordinates are sized by it. Where it disagrees with the screen it
 /// has to be corrected at the source, or those consumers end up with two
 /// different ideas of how big the screen is.
 final class ScreenFrameCorrectionTests: XCTestCase {
@@ -237,7 +237,7 @@ final class ScreenFrameCorrectionTests: XCTestCase {
         XCTAssertEqual(HitPoints.withScreenFrame(tree, screen: screen), tree)
     }
 
-    /// No screen reading (Xcode 26, a device still coming up) leaves the tree
+    /// No screen reading (a device still coming up) leaves the tree
     /// exactly as it arrived rather than inventing a rectangle.
     func testAnUnknownScreenChangesNothing() {
         let tree = [node("Application", .init(x: 0, y: 0, width: 669, height: 951))]

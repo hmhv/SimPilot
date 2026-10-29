@@ -114,35 +114,4 @@ public enum OrientationMath {
         guard physical.width > 0, physical.height > 0 else { return Point(x: nx, y: ny) }
         return Point(x: p.x / physical.width, y: p.y / physical.height)
     }
-
-    /// Map a point from the logical (letterboxed) layout into the physical screen
-    /// rect. Used when a landscape-only app is presented scaled + centered inside
-    /// a portrait physical screen: `scale`/`offsetX`/`offsetY` come from
-    /// `letterboxParameters`.
-    public static func letterboxToPhysical(
-        x: Double,
-        y: Double,
-        scale: Double,
-        offsetX: Double,
-        offsetY: Double
-    ) -> Point {
-        Point(x: offsetX + x * scale, y: offsetY + y * scale)
-    }
-
-    /// Aspect-fit parameters for placing a logical rect inside a physical rect:
-    /// the uniform `scale` plus the centering `offsetX`/`offsetY`. Returns a unit
-    /// scale and zero offsets when either logical extent is non-positive (no
-    /// usable letterbox).
-    public static func letterboxParameters(
-        logicalWidth: Double,
-        logicalHeight: Double,
-        physicalWidth: Double,
-        physicalHeight: Double
-    ) -> (scale: Double, offsetX: Double, offsetY: Double) {
-        guard logicalWidth > 0, logicalHeight > 0 else { return (1, 0, 0) }
-        let scale = min(physicalWidth / logicalWidth, physicalHeight / logicalHeight)
-        let offsetX = (physicalWidth - logicalWidth * scale) / 2
-        let offsetY = (physicalHeight - logicalHeight * scale) / 2
-        return (scale, offsetX, offsetY)
-    }
 }

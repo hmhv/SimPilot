@@ -10,10 +10,6 @@
 // Everything here is public tooling — no private frameworks, no SimBridge. Each
 // call shells out to `xcrun devicectl` and, where a value is read back, parses
 // the stable `--json-output -` document rather than the human-readable text.
-//
-// Availability: devicectl only speaks to simulators from Xcode 27 on. Callers
-// that need a graceful degradation path check `isSimulatorCapable()` first
-// instead of treating a missing subcommand as a hard failure.
 
 import Foundation
 import SimCore
@@ -90,92 +86,10 @@ public struct AppearanceState: Equatable, Sendable {
         self.largerAccessibilitySizes = largerAccessibilitySizes
     }
 
-    /// Whether any facet is set. An all-nil state means the probe found nothing
-    /// usable, which callers treat as "cannot restore" rather than "restore to
-    /// defaults".
-    public var isEmpty: Bool { self == AppearanceState() }
-
-    /// The captured look and feel as the token `settings appearance` accepts, or
-    /// nil when it cannot be written back.
-    ///
-    /// devicectl reports a display name ("Clear Liquid Glass") but accepts a
-    /// short token ("clear"). A runtime whose only look is plain "Liquid Glass"
-    /// (iOS 27) has no token to restore to, so this yields nil rather than
-    /// guessing — writing the wrong token would change state the test never
-    /// touched.
-    public var restorableLookAndFeel: String? {
-        guard let lookAndFeel else { return nil }
-        let lowered = lookAndFeel.lowercased()
-        if lowered.hasPrefix("clear") { return "clear" }
-        if lowered.hasPrefix("tinted") { return "tinted" }
-        return nil
-    }
-
     /// Whether this runtime can actually switch look and feel. When it cannot,
     /// devicectl still exits 0 for `--look-and-feel`, so callers must check this
     /// to avoid reporting a change that never happened.
     public var supportsLookAndFeelSwitching: Bool { supportedLooksAndFeels.count > 1 }
-
-    /// Why this state's colour filter could not be put back after a run that
-    /// changes the facets named by the flags — or nil when it can.
-    ///
-    /// Restorability is a property of the baseline AND of what the run touches,
-    /// not of the baseline alone. A facet the run never writes is still sitting
-    /// on the device afterward, so it needs nothing from the restore: a run that
-    /// only toggles the filter off and on leaves an out-of-range stored intensity
-    /// exactly as it found it, and refusing that run would block a safe
-    /// operation.
-    ///
-    /// For a facet the run DOES change, the restore has to write the baseline
-    /// value back, so the baseline must both HAVE that value and be able to take
-    /// it back:
-    ///
-    /// - `colorFilterType` needs a reported value; without one the run's kind
-    ///   stays.
-    /// - `colorFilterIntensity` needs a reported value inside 0.25...1.0, the
-    ///   range devicectl accepts.
-    ///
-    /// With the filter OFF in the baseline none of this applies: the restore
-    /// switches it off and the screen matches, whatever is configured behind it.
-    ///
-    /// A `grayscale` baseline blocks an intensity change, because devicectl
-    /// refuses an intensity alongside grayscale and the restore is a single
-    /// batch. A staged restore (write the intensity under a temporary
-    /// non-grayscale kind, then set grayscale) might lift that, but the ordering
-    /// is unverified against a real runtime, so this refuses rather than guesses.
-    public func colorFilterRestoreBlocker(
-        changingType: Bool,
-        changingIntensity: Bool
-    ) -> String? {
-        guard colorFilterEnabled == true else { return nil }
-        if changingType, colorFilterType == nil {
-            return "this runtime does not report the current colour-filter type, so the run's kind "
-                + "would stay on the device and the screen would not go back to how it looked"
-        }
-        if changingIntensity {
-            // Grayscale first, and deliberately: it decides the CONSEQUENCE, and
-            // the checks below would otherwise answer for it with the wrong one.
-            // Here the kind is restorable and grayscale ignores intensity, so the
-            // screen does come back — only the stored value leaks. Saying "the
-            // screen would keep the run's intensity" would be false.
-            if colorFilterType == "grayscale" {
-                return "the colour filter is set to grayscale and devicectl refuses an intensity "
-                    + "alongside it, so the original intensity could not be written back. The screen "
-                    + "would return to grayscale, but the run's intensity would persist in the "
-                    + "device's stored settings"
-            }
-            guard let colorFilterIntensity else {
-                return "this runtime does not report the current colour-filter intensity, so the "
-                    + "run's intensity would stay and the screen would not go back to how it looked"
-            }
-            guard (0.25...1.0).contains(colorFilterIntensity) else {
-                return "the current colour-filter intensity (\(colorFilterIntensity)) is outside the "
-                    + "0.25...1.0 range devicectl accepts, so it could not be written back and the "
-                    + "filter would return at the run's intensity instead"
-            }
-        }
-        return nil
-    }
 
     /// A stable dictionary for JSON emission and result diffing. Nil fields are
     /// omitted so consumers can tell "unsupported" from "false".
@@ -242,7 +156,7 @@ public enum AppearanceSetting: Equatable, Sendable {
 public enum DeviceCtl {
     /// Orientation names `devicectl device orientation set` accepts. Unlike the
     /// native PurpleEvent SET (UIDeviceOrientation 1...4) this covers face-up and
-    /// face-down, and unlike the osascript menu path it needs no GUI app.
+    /// face-down.
     public static let orientationNames = [
         "portrait", "portraitUpsideDown", "landscapeLeft", "landscapeRight", "faceUp", "faceDown"
     ]
@@ -306,37 +220,11 @@ public enum DeviceCtl {
         return (root["result"] as? [String: Any]) ?? root
     }
 
-    // MARK: - Availability
-
-    /// Whether this toolchain's devicectl can drive simulators. Xcode 27 loads a
-    /// `SimulatorCoreDevicePlugin`; earlier toolchains list physical devices only,
-    /// so every simulator-targeting call would fail with a device-not-found error.
-    ///
-    /// Only a DEFINITIVE answer is cached — one where devicectl ran and reported
-    /// its plugin list. A launch failure, a timeout, or a non-zero exit says
-    /// nothing about the toolchain (a loaded machine, a coredevice daemon still
-    /// starting), and caching it would disable the whole device-state surface for
-    /// the life of the process over one bad moment. Those retry on the next call;
-    /// the answer that cannot change is the only one worth keeping.
-    public static func isSimulatorCapable() -> Bool {
-        if let cached = simulatorCapableCache { return cached }
-        guard let result = try? run(["list", "plugins"], timeout: 20), result.succeeded else {
-            return false
-        }
-        let capable = result.stdout.contains("SimulatorCoreDevicePlugin")
-        simulatorCapableCache = capable
-        return capable
-    }
-
-    private nonisolated(unsafe) static var simulatorCapableCache: Bool?
-
     // MARK: - Orientation
 
     /// Set the device orientation through devicectl. `name` must be one of
     /// `orientationNames`. This is the headless, locale-independent path for
-    /// face-up / face-down, which the native PurpleEvent SET cannot express and
-    /// which previously required clicking Simulator.app's menu — an app Xcode 27
-    /// removed entirely.
+    /// face-up / face-down, which the native PurpleEvent SET cannot express.
     public static func setOrientation(udid: String, name: String) throws {
         try runChecked(["device", "orientation", "set", "--device", udid, name], timeout: 30)
     }
@@ -475,9 +363,8 @@ public enum DeviceCtl {
 
     /// Turn VoiceOver on or off.
     ///
-    /// Nothing calls this today. `sipi voiceover` reads only and the `voiceover`
-    /// test action is retired, because on iOS 27 turning VoiceOver off after it
-    /// has been on empties the accessibility tree for every app foregrounded
+    /// Nothing calls this today. `sipi voiceover` reads only, because on iOS 27
+    /// turning VoiceOver off after it has been on empties the accessibility tree for every app foregrounded
     /// afterwards until the device restarts — and turning it on changes nothing
     /// `describe-ui` reports. Kept so the capability can come back if Xcode 27's
     /// release build fixes that; delete it if it does not.
@@ -490,9 +377,7 @@ public enum DeviceCtl {
 
     // MARK: - Appearance / accessibility state
 
-    /// Read the full appearance + accessibility state. Used both by
-    /// `sipi appearance` and by the harness to capture a baseline it can
-    /// restore after a run.
+    /// Read the full appearance + accessibility state for `sipi appearance`.
     public static func appearanceState(udid: String) throws -> AppearanceState {
         let result = try runJSON(["device", "info", "appearance", "--device", udid], timeout: 30)
 

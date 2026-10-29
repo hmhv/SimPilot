@@ -12,7 +12,7 @@
 //
 // NOTE: KeyCode's table assumes a US keyboard layout, so characters outside it
 // are unsupported here. This path is used only for keyboard-mode `type`
-// (`--keyboard` / `"input-method": "keyboard"`); the default `type` pastes text
+// (`--keyboard`); the default `type` pastes text
 // via `simctl pbcopy` + Cmd+V, which is layout/IME independent.
 
 import Foundation

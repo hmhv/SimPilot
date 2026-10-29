@@ -7,26 +7,27 @@ link here rather than restating them.
 
 | Problem | Solution |
 |---------|----------|
-| `sipi: command not found` / `sipi doctor` fails | Install sipi (`curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh \| bash`), or from a checkout `swift build -c release` and use `.build/release/sipi`. `sipi doctor` confirms the core capabilities (CoreSimulator, SimulatorKit HID, AccessibilityPlatformTranslation) |
-| install / `swift build` failure | `sudo xcode-select -s /Applications/Xcode.app`, verify with `xcodebuild -version` |
-| Simulator not detected | `xcrun simctl boot "iPhone 16 Pro"` — booting needs no window, sipi drives headlessly |
-| "Where is the simulator window?" | `sipi open-ui` opens Device Hub (Xcode 27+) or Simulator.app (Xcode ≤26). Do NOT use `open -a Simulator`: Xcode 27 removed Simulator.app, so it fails even while the device is booted and driveable |
-| Simulator unresponsive | `xcrun simctl shutdown <udid>; sleep 2; xcrun simctl boot <udid>` |
+| `sipi: command not found` | Install sipi (`curl -fsSL https://raw.githubusercontent.com/hmhv/SimPilot/main/install.sh \| bash`), or from a checkout `swift build -c release` and use `.build/release/sipi` |
+| `sipi doctor` fails | Usually the selected developer directory: `xcode-select -p` must be an Xcode 27.2 or later, not the Command Line Tools. Ask the user to run `sudo xcode-select -s <path to Xcode.app>` (see `xcode.md`; `sipi xcode install` if none is installed) |
+| install / `swift build` failure | `sudo xcode-select -s /Applications/<your Xcode>.app` (the user runs it; see `xcode.md`), verify with `xcodebuild -version` |
+| Simulator not detected | Boot one as in `preflight.md` step 2 — booting needs no window, sipi drives headlessly |
+| "Where is the simulator window?" | `sipi open-ui` opens Device Hub. Do NOT use `open -a Simulator`: Xcode 27 removed Simulator.app, so it fails even while the device is booted and driveable |
+| Simulator unresponsive | `xcrun simctl shutdown <udid>; xcrun simctl boot <udid>; xcrun simctl bootstatus <udid> -b` |
 | Installed `sipi` behaves like an older build | `sipi doctor` notes report the running binary, its timestamp, and warn when the checkout's HEAD is newer. Rebuild + reinstall before concluding a fix does not work |
-| Insufficient disk space | Delete old runs, `xcrun simctl delete unavailable`, reduce keep-runs |
+| Insufficient disk space | Free space as in `clean.md` |
 
 ## Interaction & Detection
 
 | Problem | Solution |
 |---------|----------|
-| tap has no effect / element not found | Re-read with `describe-ui` → try `--id` or coordinates. Close any overlay first. Before a blind coordinate tap, confirm what is there with `sipi describe-point --pixel` |
+| tap has no effect / element not found | Re-read with `describe-ui` → try `--id` or coordinates. Close any overlay first. Before a blind coordinate tap, confirm what is there with `sipi describe-point $UDID --pixel -x .. -y ..` |
 | tap succeeds but no state change | Toggle / Menu / DisclosureGroup → use the method in `patterns.md` |
 | Screenshot is black | Confirm Booted. Locked → `sipi button $UDID home`. Still launching → wait longer |
-| App crashed | Check the home screen with `describe-ui` → relaunch with `xcrun simctl launch $UDID $BUNDLE_ID` → mark the step FAIL |
+| App crashed | Check the home screen with `describe-ui` → relaunch with `xcrun simctl launch $UDID $BUNDLE_ID`; `sipi crash-evidence $UDID $BUNDLE_ID <out-dir> --since <a time before the crash, with offset>` collects the report |
 | Keyboard not shown / `type` has no effect | Use `sipi set-text $UDID "text" --id <id>` — no keyboard, focus, or pasteboard needed. Reach for `sipi type` only when the keystrokes are the subject; then tap the field to focus it first |
 | Cannot interact with alert | Confirm labels with `describe-ui`. Wait ~0.5s. Fall back to coordinates |
 | Scroll position off | Use `sipi swipe` to control the amount. Re-read with `describe-ui` after scrolling |
-| v2 selector doesn't resolve | Prefer `selector.id`; the runner tries the fast AX tree, then the deep grid. Confirm the id/label with `describe-ui`. `sipi validate` and `run-test` reject a selector that is not exactly one of id / label / value |
+| Selector doesn't resolve | Prefer `--id`; sipi tries the fast AX tree, then the deep grid. Confirm the id/label with `describe-ui` |
 | `wait-for` exits 1 | The screen never reached the state within `--timeout`; the JSON on stdout names the unmet condition and the last reason. Read the tree before retrying with a longer timeout — a wrong label times out exactly like a slow screen |
 | `memory-warning` says the app is not running | The pid is looked up in the guest launchd job table, so a suspended or never-launched app has none. `xcrun simctl launch "$UDID" "$BUNDLE_ID"` first, or pass `--pid` for a process that is not a UIKit app |
 
@@ -35,9 +36,8 @@ link here rather than restating them.
 Two different causes. Tell them apart by waiting.
 
 **1. Right after an app launch** — the app has not published its tree yet. Wait and
-re-read (the harness `launch` step and the pre-test launch already wait for the
-foreground to reach an app that is neither the one it replaced nor the home screen,
-and then for that tree to be non-degenerate and to stop changing between two reads); measured on iOS 27.0 (24A5423a), three launches in a row read a partial
+re-read (`sipi wait-for` on text the app renders; see `ui-driver.md` § Waiting).
+Measured on iOS 27.0 (24A5423a), three launches in a row read a partial
 tree at 1s (5 of 11 nodes) and the full tree from 3s on. The 24A5408d and the
 release 24A434 runtimes read a single empty root at 1s instead (24A434: n=3, full
 15-node tree at 3s), so how the early read looks varies by runtime build; the wait
@@ -51,7 +51,7 @@ time or an app relaunch. SpringBoard keeps reading fine, which makes this look
 like an app problem when it is device-wide. **Only a device restart recovers it:**
 
 ```bash
-xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
+xcrun simctl shutdown "$UDID"; xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
 ```
 
 Turning VoiceOver back ON also reads fine — it is specifically the OFF state after
@@ -73,8 +73,7 @@ reads its 4 nodes instead of yours — dismiss it (`sipi tap "$UDID" --label OK`
 before reading anything else. It does not come back once dismissed.
 
 **sipi cannot put the device in that state any more, and that is deliberate.**
-Setting VoiceOver is retired, along with the `voiceover` test action, precisely
-because of case 2 — earlier revisions of this document even recommended toggling it
+Setting VoiceOver is retired precisely because of case 2 — earlier revisions of this document even recommended toggling it
 to "re-prime the bridge", which is what breaks the tree. Turning VoiceOver ON also
 buys nothing: `describe-ui` returns a byte-identical tree either way (re-measured
 on iOS 27.0 24A5423a — the key-sorted JSON matches exactly with VoiceOver on and
@@ -94,16 +93,16 @@ throughout, so that check does not identify this cause. Treat `--xcode-mcp` like
 a VoiceOver toggle: run it last, or restart the device before the next launch. `sipi voiceover "$UDID"` reads the state, which is how you
 confirm that is what you are looking at:
 
-- reads `enabled: true` — leave it on and read the tree; it works while enabled
-- reads `enabled: false` on a device whose apps all report an empty root — it was
-  turned off after being on. Restart:
+- reads `enabled` — leave it on and read the tree; it works while enabled
+- reads `disabled` on a device whose apps all report an empty root — it was
+  turned off after being on, or an Xcode device-interaction session ran. Restart:
 
   ```bash
-  xcrun simctl shutdown "$UDID" && xcrun simctl boot "$UDID"
+  xcrun simctl shutdown "$UDID"; xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
   ```
 
 Note the setting itself survives shutdown/boot (measured: enable, shutdown, boot,
-and the state still reads `enabled: true`), so a restart recovers the tree without
+and the state still reads `enabled`), so a restart recovers the tree without
 changing whether VoiceOver is on.
 
 Still present in Xcode 27.0 RC (27A266a / iOS 27.0 24A434, re-measured
@@ -111,15 +110,15 @@ Still present in Xcode 27.0 RC (27A266a / iOS 27.0 24A434, re-measured
 (27B5019j / iOS 27.2 24B5084k, re-measured 2026-09-17 on a fresh iPhone 17:
 control 16, VoiceOver ON 23, ON→OFF then relaunch **1**, a second app **1**,
 SpringBoard 14, restart 16 — the same signature on a new runtime). Revisit at the
-next iOS release: if OFF-after-ON no longer empties the tree, the setter and the
-test action can come back.
+next iOS release: if OFF-after-ON no longer empties the tree, the setter can
+come back.
 
 **Do not try to recover this with anything short of a device restart.** All three
 lighter resets were measured on iOS 27.2 and none of them works:
 
 | Attempt | Result |
 |---|---|
-| `launchctl kickstart -k system/com.apple.AccessibilityUIServer` | `102: Operation not supported on socket` (`kickstart` is unsupported on the simulator; it also warns about rdar://78126471). `user/foreground/...` fails the same way |
+| `launchctl kickstart -k system/com.apple.AccessibilityUIServer` | `102: Operation not supported on socket` (this job cannot be kickstarted on the simulator). `user/foreground/...` fails the same way |
 | `kill -9` the `AccessibilityUIServer` pid | It does not respawn, and the tree stays empty |
 | `launchctl kickstart -k system/com.apple.SpringBoard` | **Bricks the device.** SpringBoard is killed and never comes back, so every `describe-ui` fails with `frontmostApplicationWithDisplayId returned nil` until you restart the device anyway |
 
@@ -141,16 +140,17 @@ afterward is the device-age problem below.
 
 ### `type` failures
 
-The three messages mean different things, and the right response differs:
+The four messages mean different things, and the right response differs:
 
 | Message | Meaning | Safe to retry? |
 |---|---|---|
 | `text entry not attempted` | Checked BEFORE anything is typed: no text-entry element in the fast or deep tree, or the tree could not be read at all | **Yes** — nothing was sent |
 | `text entry had no effect` | The field's content did not change; the keystrokes did not land | Yes, but expect the same result until the cause is fixed |
 | `could not verify text entry` | The text WAS sent but the tree could not be read back | **No** — a blind retry can enter the text twice |
+| `clear had no effect` | `type "" --clear` left the field unchanged: Cmd+A and delete did not land (or the field was already empty) | Yes — or empty it with `set-text $UDID "" --id <id> --no-verify` |
 
 For *not attempted*: tap the field first; a game or custom canvas that exposes no
-text element needs `--no-verify` / `"verify-effect": false`. If the tree itself
+text element needs `--no-verify`. If the tree itself
 was unreadable, treat it as the empty-root case above — wait and re-read, or
 restart the device if VoiceOver was toggled off. There is no "re-prime" step.
 
@@ -185,14 +185,16 @@ For *had no effect* — three measured causes:
      guaranteed rescue: on Xcode 27.0 RC a device worn further ignored that path
      too (`text entry had no effect (xcode-mcp)`), while the same path typed
      fine into a fresh device — at that point only `set-text` or a replacement
-     device is left. sipi never takes this path on its own: `--xcode-mcp` /
-     `"input-method": "xcode-mcp"` selects it, and one session leaves every app
+     device is left. sipi never takes this path on its own: `--xcode-mcp`
+     selects it, and one session leaves every app
      launched afterwards on that device unreadable until it restarts (see the
-     empty-root section above), so use it last. Enable it once with:
+     empty-root section above), so use it last. Enabling it needs the user
+     twice: ask them to run `! sudo xcrun mcp-server enable` (sudo), then run
+     the approve step yourself and tell them to accept the prompt Xcode shows:
 
      ```sh
-     sudo xcrun mcp-server enable
-     sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace>
+     sudo xcrun mcp-server enable                                   # the user
+     sipi xcode-mcp --approve <path to an .xcodeproj or .xcworkspace> # waits for the user's click
      ```
 
      The grant is tied to the exact binary, so `sipi update` or a rebuild needs
@@ -206,12 +208,12 @@ For *had no effect* — three measured causes:
 2. **Non-Latin IME, or simply a different keyboard layout.** `--keyboard` maps
    characters to US-keyboard scancodes, so the guest's active keyboard decides
    what actually appears: under a Japanese keyboard, "hello" arrives as "へっぉ"
-   and the step still passes, because the field did change. Paste and
+   and the command still succeeds, because the field did change. Paste and
    `--xcode-mcp` are both layout-independent. Beyond layout, `--keyboard` text
    can stay an uncommitted composition
    (`abc` → `あbc`, discarded when the composition is dismissed). `describe-ui`
-   reports composing text in AXValue, so a `verify` can pass on text the field
-   never committed.
+   reports composing text in AXValue, so a `wait-for` can pass on text the
+   field never committed.
 3. **`--clear` against a pending composition.** Cmd+A goes to the IME and only
    one character is deleted, leaving the old text (`あbc` + clear + `world`
    measured as `あb world`). Send `sipi key 41 "$UDID"` (Escape) first to discard
@@ -222,17 +224,8 @@ On a healthy device with no IME, *had no effect* means the field was not focused
 ### Typed text lands appended to what was already there
 
 `sipi set-text` replaces the whole value — no clear step needed. With `sipi type`,
-`--clear` (or `"clear": true`) selects-all and deletes first, but only when no IME
+`--clear` selects-all and deletes first, but only when no IME
 composition is pending — see cause 3 above.
-
-### A device-state command fails with *needs a devicectl that can target simulators*
-
-`sipi biometrics` / `appearance` / `voiceover` (read), and the `biometrics` /
-`display-state` test actions, go through `xcrun devicectl`, which
-only speaks to simulators from Xcode 27 on. Check with
-`xcrun devicectl list plugins` — it must list `SimulatorCoreDevicePlugin`. Select
-Xcode 27 or later with `xcode-select`, or use the simctl-backed actions
-(`appearance`, `content-size`, `increase-contrast`) instead.
 
 ### A screenshot comes back black, or the tree is 466x678 instead of 951x669
 
@@ -287,16 +280,15 @@ Nothing was pasted. Close Device Hub (and boot the device again), or use
 | Build error is unclear | Re-run the same build without `-quiet` for the full log |
 | Signing error | Add `CODE_SIGN_IDENTITY="" CODE_SIGNING_ALLOWED=NO` |
 | Unknown scheme | `xcodebuild -list -project MyApp.xcodeproj` |
-| SPM dependency resolution failed | `swift package resolve` |
+| SPM dependency resolution failed | `xcodebuild -resolvePackageDependencies` with the build's `-project`/`-workspace` (none for a `Package.swift` package) and `-scheme` |
 
 ## Execution
 
 | Problem | Solution |
 |---------|----------|
-| Execution stalls midway | In an ad-hoc Bash call, do not `&&`-chain `sipi` commands — one non-zero exit short-circuits the rest. Use `;` or `\|\|`. Saved tests are unaffected: `run-test` / `run-suite` own the step loop |
-| result.json missing | Verify each test writes on completion |
-| iPad launches slowly | iPhone ~2s → iPad ~4s |
+| Execution stops midway | `&&` stops at the first non-zero exit. Separate independent `sipi` commands with `;`; keep `&&` where the next step only makes sense if the previous one worked (a screenshot after `wait-for`) |
+| iPad launches slowly | An iPhone app's content appears ~3.5s after launch (`ui-driver.md` § Waiting); an iPad takes longer — wait with `wait-for`, not a fixed sleep |
 | Section header uppercase | Match case-insensitively (`grep -qi`) |
-| Dark Mode verify fails | Wait 2-3s after changing the setting; iOS 18 applies it slowly |
+| Dark Mode not applied yet | Wait 2-3s after changing the setting; iOS 18 applies it slowly |
 | System UI won't close | Tap a visible label first. PhotosPicker multiple: `sipi key 40 $UDID` confirms, keycode `41` cancels. FileImporter: `41`. Share Sheet: downward `sipi swipe`. ColorPicker: touch the close button |
 | `.borderless` Button fake success (iOS 26+) | All tap methods give fake success inside a List. Remove `.borderless`, or tap the whole row |

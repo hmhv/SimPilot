@@ -94,9 +94,7 @@ enum SetTextOutcome {
     }
 }
 
-/// Confirm a `set-text` write landed, from the guest's own point of view. Shared
-/// by the `set-text` command and the harness action so both judge a write the
-/// same way.
+/// Confirm a `set-text` write landed, from the guest's own point of view.
 ///
 /// Polls rather than reading once: the write crosses an XPC boundary into the
 /// app, so an immediate read can still see the previous value, and a single
@@ -145,8 +143,7 @@ enum ChildTree {
     /// A serialized tree is "degenerate" when it is empty or a single root with
     /// no children and no label — the shape the pre-fix second in-process fetch
     /// produced. Used to decide whether to fall back to the child-process spawn,
-    /// and by the harness to tell "the app is not reachable yet" from "the
-    /// selector is genuinely absent".
+    /// and by `a11y-audit` to refuse an empty tree.
     static func isDegenerate(_ roots: [AXNode]) -> Bool {
         guard let root = roots.first, roots.count == 1 else { return roots.isEmpty }
         let label = root.AXLabel ?? ""
@@ -264,7 +261,7 @@ extension Sipi {
         @Argument(help: "Simulator UDID.")
         var udid: String
 
-        @Flag(name: .long, help: "Force the full-screen grid pass (sees System UI; ~1.0s).")
+        @Flag(name: .long, help: "Force the full-screen grid pass (sees System UI; ~1.6s).")
         var deep = false
 
         @Option(name: .long, help: "Auto-trigger --deep when the fast tree does not contain this text.")
@@ -289,7 +286,7 @@ extension Sipi {
             // `--expect` is checked against the JSON text whatever the output
             // format: it is the same "is this string anywhere in the tree" test
             // a later grep would run, so the escalation decision stays identical.
-            if !deep, let expect, !expect.isEmpty, !json.contains(expect) {
+            if !deep, let expect, !expect.isEmpty, !json.contains(AXNodeJSON.escaped(expect)) {
                 emitError("[sipi] fast describe-ui missed expected text '\(expect)' — running --deep")
                 nodes = try ChildTree.nodes(udid: udid, deep: true)
                 json = try AXNodeJSON.string(for: nodes)
@@ -445,9 +442,7 @@ extension Sipi {
 /// Coordinates and a selector are mutually exclusive, not a preference order.
 /// Accepting both and silently taking the coordinates makes a typo'd selector
 /// look like it resolved — the command reports `ok` having acted somewhere the
-/// caller did not ask for. The saved-test harness has always required exactly
-/// one (`(selector != nil) == (point != nil)` is a validation error); this is
-/// the same rule for the CLI.
+/// caller did not ask for, so exactly one is required.
 ///
 /// `--element-type` is part of the selector, not an independent filter: it only
 /// narrows which element a label/id/value resolves to. Alongside coordinates it
@@ -660,8 +655,7 @@ extension Sipi {
     }
 }
 
-/// The double-tap timing policy, shared by the CLI and the saved-test harness so
-/// both produce the same gesture.
+/// The double-tap timing policy.
 enum DoubleTapInput {
     /// Gap between the two taps. iOS treats successive taps as a double-tap when
     /// they land within ~0.3s of each other; 80 ms is comfortably inside that

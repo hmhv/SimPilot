@@ -1,8 +1,8 @@
 # Repository Rules
 
 - Skill docs and code are in English
-- Test JSON ids use kebab-case
-- Run/result timestamps must be ISO 8601 with timezone offset
+- Scope: drive the iOS Simulator, and manage the Xcode and simulator toolchain around it (installing Xcode, simulator runtimes, cleaning up Xcode and simulator data). No saved tests, verification runs, or reports; App Store Connect work belongs in a separate app
+- Timestamps sipi writes must be ISO 8601 with timezone offset
 - Target Xcode 27.2 RC and later. Do not keep, branch on, or document Xcode 27.1 behaviour; state measured facts as measured on 27.2
 
 ## 最優先の行動原則（他のどの指針よりも優先）

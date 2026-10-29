@@ -2,16 +2,16 @@
 //
 // Shared lifecycle logic for `sipi setup` / `sipi update` / `sipi uninstall`.
 //
-// SimPilot ships as a single prebuilt binary with the three skill trees
-// (sipi-common, sipi-test, sipi-verify) embedded inside it (see EmbeddedSkills /
-// the EmbedSkillsPlugin). `setup` materializes those embedded trees onto disk
+// SimPilot ships as a single prebuilt binary with the sipi-common skill tree
+// embedded inside it (see EmbeddedSkills / the EmbedSkillsPlugin). `setup`
+// materializes that embedded tree onto disk
 // into BOTH ~/.claude/skills (Claude Code) and ~/.agents/skills (Codex); the
 // binary is otherwise self-contained, so there is no git clone, no swift build,
 // and no make on the user machine.
 //
-// CLEAN-FIRST: for each of the three skills, the existing on-disk directory is
-// removed and recreated from the embedded files — and ONLY those three skills
-// are touched. Other directories living alongside ours (e.g. AutoStore
+// CLEAN-FIRST: the existing on-disk skill directory is removed and recreated
+// from the embedded files, and the skills earlier versions shipped are removed
+// — and ONLY those skills are touched. Other directories living alongside ours (e.g. AutoStore
 // sipi-shots / publish) are never read, removed, or modified.
 //
 // No SimBridge, no Process(), no private frameworks — pure Foundation so the
@@ -26,11 +26,15 @@ import SimSkills
 /// `sipi setup`, `sipi update`, and `sipi uninstall` subcommands.
 public enum SkillInstaller {
 
-    /// The three skills SimPilot owns. ONLY these directories are ever created,
-    /// cleaned, or removed under ~/.claude/skills and ~/.agents/skills. Any other
-    /// directory (e.g. AutoStore's sipi-shots / publish) is out of scope and must
-    /// never be touched.
-    public static let skillNames = ["sipi-common", "sipi-test", "sipi-verify"]
+    /// The skills SimPilot owns. ONLY these directories, plus
+    /// `retiredSkillNames`, are ever created, cleaned, or removed under
+    /// ~/.claude/skills and ~/.agents/skills. Any other directory (e.g.
+    /// AutoStore's sipi-shots / publish) is out of scope and must never be touched.
+    public static let skillNames = ["sipi-common"]
+
+    /// Skills that versions before 3.0.0 installed. Setup and uninstall remove
+    /// them so an update does not leave them behind.
+    public static let retiredSkillNames = ["sipi-test", "sipi-verify"]
 
     // MARK: - Well-known paths
 
@@ -88,9 +92,9 @@ public enum SkillInstaller {
     /// write install metadata. CLEAN-FIRST and idempotent: re-running produces
     /// the same on-disk state.
     ///
-    /// For each of the three skills, in each root, the existing
-    /// `<root>/<skill>` is removed (only those three) and recreated from the
-    /// embedded files, restoring the Unix executable bit on scripts.
+    /// In each root, the existing `<root>/<skill>` is removed and recreated from
+    /// the embedded files, restoring the Unix executable bit on scripts. Retired
+    /// skills are removed and not recreated.
     @discardableResult
     public static func setup(version: String) throws -> SetupResult {
         let fileManager = FileManager.default
@@ -99,10 +103,17 @@ public enum SkillInstaller {
         for root in skillsRoots {
             try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
 
-            // CLEAN: remove only our three skill directories under this root.
+            for skill in retiredSkillNames {
+                let skillDir = root.appendingPathComponent(skill, isDirectory: true)
+                if entryExists(skillDir) {
+                    try fileManager.removeItem(at: skillDir)
+                }
+            }
+
+            // CLEAN: remove only our skill directories under this root.
             for skill in skillNames {
                 let skillDir = root.appendingPathComponent(skill, isDirectory: true)
-                if fileManager.fileExists(atPath: skillDir.path) {
+                if entryExists(skillDir) {
                     try fileManager.removeItem(at: skillDir)
                 }
                 try fileManager.createDirectory(at: skillDir, withIntermediateDirectories: true)
@@ -140,7 +151,7 @@ public enum SkillInstaller {
     }
 
     /// Write `~/.local/share/simpilot/install.json` with the version, an ISO 8601
-    /// install timestamp (with timezone offset), and the three skill names.
+    /// install timestamp (with timezone offset), and the skill names.
     /// Returns the absolute path written.
     @discardableResult
     private static func writeInstallMetadata(version: String) throws -> String {
@@ -172,20 +183,21 @@ public enum SkillInstaller {
         public var removed: [String]
     }
 
-    /// Remove exactly what setup created: the three skill directories from both
-    /// agent roots, the ~/.local/share/simpilot data directory, and the sipi
-    /// binary (~/.local/bin/sipi and, if different, the running executable path).
-    /// Only our three skills are removed; sibling directories are left intact.
+    /// Remove exactly what setup created: the skill directories (current and
+    /// retired) from both agent roots, the ~/.local/share/simpilot data
+    /// directory, and the sipi binary (~/.local/bin/sipi and, if different, the
+    /// running executable path).
+    /// Only our skills are removed; sibling directories are left intact.
     @discardableResult
     public static func uninstall(runningExecutable: URL?) throws -> UninstallResult {
         let fileManager = FileManager.default
         var removed: [String] = []
 
-        // 1. Our three skill directories in both roots (only ours).
+        // 1. Our skill directories in both roots (only ours).
         for root in skillsRoots {
-            for skill in skillNames {
+            for skill in skillNames + retiredSkillNames {
                 let skillDir = root.appendingPathComponent(skill, isDirectory: true)
-                if fileManager.fileExists(atPath: skillDir.path) {
+                if entryExists(skillDir) {
                     try fileManager.removeItem(at: skillDir)
                     removed.append(skillDir.path)
                 }
@@ -218,6 +230,12 @@ public enum SkillInstaller {
         }
 
         return UninstallResult(removed: removed)
+    }
+
+    /// Unlike `fileExists(atPath:)`, true for a symlink whose target is gone —
+    /// older installs linked skills into a checkout that no longer has them.
+    private static func entryExists(_ url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
     }
 
     // MARK: - PATH advice

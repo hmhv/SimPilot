@@ -1,7 +1,6 @@
 // ContainerArtifacts.swift
 //
-// Pure filesystem models and operations shared by the container CLI and the
-// deterministic harness. This file never invokes simctl: SimShell resolves the
+// Pure filesystem models and operations behind the container CLI. This file never invokes simctl: SimShell resolves the
 // simulator-owned roots, then hands those roots to these path-safe primitives.
 
 import CryptoKit

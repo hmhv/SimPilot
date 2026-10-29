@@ -79,7 +79,9 @@ struct BuildInfo {
             var warning = "warning: this binary predates the SimPilot checkout at \(checkout.root)"
             warning += " (HEAD \(checkout.head), committed \(BuildInfo.iso8601(checkout.headDate)))."
             warning += " Rebuild and reinstall before trusting a source change:"
-            warning += " swift build -c release && cp .build/release/sipi \"$(command -v sipi)\""
+            let dst = binaryPath.map { "\"\($0)\"" } ?? "\"$(command -v sipi)\""
+            warning += " swift build -c release --package-path \"\(checkout.root)\" && dst=\(dst)"
+                + " && cp \"\(checkout.root)/.build/release/sipi\" \"$dst.new\" && mv -f \"$dst.new\" \"$dst\""
             return warning
         }
         if checkout.sourcesDirty {

@@ -39,17 +39,10 @@ public enum SimShell {
     /// writes `stdin` to the child's standard input first. Throws on launch
     /// failure; a non-zero exit is reported via `SimShellResult.exitCode` so
     /// callers can decide how to handle it.
-    private static func run(
-        _ args: [String],
-        stdin: Data? = nil,
-        environment: [String: String] = [:]
-    ) throws -> SimShellResult {
+    private static func run(_ args: [String], stdin: Data? = nil) throws -> SimShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["simctl"] + args
-        if !environment.isEmpty {
-            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
-        }
 
         let outPipe = Pipe()
         let errPipe = Pipe()
@@ -90,12 +83,8 @@ public enum SimShell {
     /// Run `xcrun simctl <args>` and throw `SimShellError.nonZeroExit` on a
     /// non-zero exit. Returns the captured stdout for callers that want it.
     @discardableResult
-    private static func runChecked(
-        _ args: [String],
-        stdin: Data? = nil,
-        environment: [String: String] = [:]
-    ) throws -> String {
-        let result = try run(args, stdin: stdin, environment: environment)
+    private static func runChecked(_ args: [String], stdin: Data? = nil) throws -> String {
+        let result = try run(args, stdin: stdin)
         guard result.succeeded else {
             throw SimShellError.nonZeroExit(
                 command: "xcrun simctl " + args.joined(separator: " "),
@@ -121,125 +110,12 @@ public enum SimShell {
     }
 
     /// Ensure `udid` is booted before an operation that requires it. Throws
-    /// `SimShellError.notBooted` otherwise. The setup/capture wrappers that need
-    /// a live device call this first so callers get an actionable error instead
-    /// of an opaque simctl failure (boot-before-use ordering, §6.7).
+    /// `SimShellError.notBooted` otherwise, so callers get an actionable error
+    /// instead of an opaque simctl failure.
     public static func requireBooted(_ udid: String) throws {
         guard isBooted(udid) else {
             throw SimShellError.notBooted(udid: udid)
         }
-    }
-
-    // MARK: - Lifecycle (boot/shutdown/erase)
-
-    /// Boot `udid`. No-op if already booted (simctl reports a benign error that
-    /// is swallowed when the device is in fact booted).
-    public static func boot(udid: String) throws {
-        if isBooted(udid) { return }
-        try runChecked(["boot", udid])
-    }
-
-    /// Shut down `udid`.
-    public static func shutdown(udid: String) throws {
-        try runChecked(["shutdown", udid])
-    }
-
-    /// Erase `udid` back to a clean state. The device must be shut down first;
-    /// callers that want a clean booted device should shutdown -> erase -> boot.
-    public static func erase(udid: String) throws {
-        try runChecked(["erase", udid])
-    }
-
-    // MARK: - App lifecycle (install/launch/terminate/uninstall)
-
-    /// Install the app bundle at `path` onto `udid` (must be booted).
-    public static func install(udid: String, appPath: String) throws {
-        try requireBooted(udid)
-        try runChecked(["install", udid, appPath])
-    }
-
-    /// Launch `bundleID` on `udid` (must be booted). Returns simctl's stdout
-    /// (typically `<bundleID>: <pid>`).
-    @discardableResult
-    public static func launch(
-        udid: String,
-        bundleID: String,
-        arguments: [String] = [],
-        environment: [String: String] = [:],
-        terminateRunning: Bool = false
-    ) throws -> String {
-        try requireBooted(udid)
-        let childEnvironment = Dictionary(uniqueKeysWithValues: environment.map {
-            ("SIMCTL_CHILD_" + $0.key, $0.value)
-        })
-        let options = terminateRunning ? ["--terminate-running-process"] : []
-        return try runChecked(
-            ["launch"] + options + [udid, bundleID] + arguments,
-            environment: childEnvironment
-        )
-    }
-
-    /// Terminate `bundleID` on `udid` (must be booted).
-    public static func terminate(udid: String, bundleID: String) throws {
-        try requireBooted(udid)
-        try runChecked(["terminate", udid, bundleID])
-    }
-
-    /// Uninstall `bundleID` from `udid` (must be booted).
-    public static func uninstall(udid: String, bundleID: String) throws {
-        try requireBooted(udid)
-        try runChecked(["uninstall", udid, bundleID])
-    }
-
-    // MARK: - Setup (addmedia / privacy / openurl / ui appearance / status_bar)
-
-    /// Add media files (photos/videos) to `udid`'s library (must be booted).
-    public static func addMedia(udid: String, paths: [String]) throws {
-        try requireBooted(udid)
-        try runChecked(["addmedia", udid] + paths)
-    }
-
-    /// Grant a privacy permission for `bundleID` on `udid` (must be booted).
-    /// `service` is a simctl privacy service such as `photos`, `camera`,
-    /// `location`, `contacts`.
-    public static func grantPrivacy(udid: String, service: String, bundleID: String) throws {
-        try requireBooted(udid)
-        try runChecked(["privacy", udid, "grant", service, bundleID])
-    }
-
-    /// Revoke a privacy permission for `bundleID` on `udid`.
-    public static func revokePrivacy(udid: String, service: String, bundleID: String) throws {
-        try requireBooted(udid)
-        try runChecked(["privacy", udid, "revoke", service, bundleID])
-    }
-
-    /// Reset a privacy permission. `bundleID` is optional only for reset, matching simctl.
-    public static func resetPrivacy(udid: String, service: String, bundleID: String? = nil) throws {
-        try requireBooted(udid)
-        var args = ["privacy", udid, "reset", service]
-        if let bundleID, !bundleID.isEmpty { args.append(bundleID) }
-        try runChecked(args)
-    }
-
-    /// Open `url` on `udid` (must be booted) — deep links, https, etc.
-    public static func openURL(udid: String, url: String) throws {
-        try requireBooted(udid)
-        try runChecked(["openurl", udid, url])
-    }
-
-    /// Send an inline APNs JSON payload to an installed simulator app.
-    public static func push(udid: String, bundleID: String, payload: Data) throws {
-        try requireBooted(udid)
-        try runChecked(["push", udid, bundleID, "-"], stdin: payload)
-    }
-
-    /// Path to an installed app's `.app` bundle on `udid` via
-    /// `simctl get_app_container <udid> <bundle-id> app`. Returns nil when the app
-    /// is not installed, the device is not booted, or simctl cannot resolve the
-    /// container — callers use this for advisory inspection, so absence must not
-    /// be fatal.
-    public static func appBundlePath(udid: String, bundleID: String) -> String? {
-        try? appContainerPath(udid: udid, bundleID: bundleID, container: "app")
     }
 
     /// Resolve one installed app container through simctl. `container` is
@@ -264,93 +140,6 @@ public enum SimShell {
             throw SimShellError.launchFailed("simctl returned an empty container path")
         }
         return path
-    }
-
-    /// `UIBackgroundModes` declared by the installed app's `Info.plist`, or nil
-    /// when the plist cannot be read. An installed app with no declaration yields
-    /// an empty array, which is distinct from nil (unknown).
-    public static func appBackgroundModes(udid: String, bundleID: String) -> [String]? {
-        guard let bundlePath = appBundlePath(udid: udid, bundleID: bundleID) else { return nil }
-        let plistPath = (bundlePath as NSString).appendingPathComponent("Info.plist")
-        guard let data = FileManager.default.contents(atPath: plistPath),
-              let plist = try? PropertyListSerialization.propertyList(
-                  from: data, options: [], format: nil) as? [String: Any]
-        else { return nil }
-        guard let modes = plist["UIBackgroundModes"] else { return [] }
-        return (modes as? [String]) ?? []
-    }
-
-    /// Set one simulated coordinate.
-    public static func setLocation(udid: String, latitude: Double, longitude: Double) throws {
-        try requireBooted(udid)
-        let coordinate = String(format: "%.8f,%.8f", locale: Locale(identifier: "en_US_POSIX"), latitude, longitude)
-        try runChecked(["location", udid, "set", coordinate])
-    }
-
-    /// Clear the active simulated location or route.
-    public static func clearLocation(udid: String) throws {
-        try requireBooted(udid)
-        try runChecked(["location", udid, "clear"])
-    }
-
-    /// Set the UI appearance (`light` / `dark`) on `udid`. Note: `appearance` is
-    /// a sub-option of `simctl ui`, not a top-level subcommand (§6.7).
-    public static func setAppearance(udid: String, appearance: String) throws {
-        try requireBooted(udid)
-        try runChecked(["ui", udid, "appearance", appearance])
-    }
-
-    /// Read the current UI appearance (`light` / `dark`) of `udid` via
-    /// `simctl ui <udid> appearance`.
-    public static func appearance(udid: String) throws -> String {
-        try requireBooted(udid)
-        return try runChecked(["ui", udid, "appearance"])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Set the preferred content size category used by Dynamic Type.
-    public static func setContentSize(udid: String, contentSize: String) throws {
-        try requireBooted(udid)
-        try runChecked(["ui", udid, "content_size", contentSize])
-    }
-
-    /// Read the preferred content size category.
-    public static func contentSize(udid: String) throws -> String {
-        try requireBooted(udid)
-        return try runChecked(["ui", udid, "content_size"])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Enable or disable Increase Contrast.
-    public static func setIncreaseContrast(udid: String, enabled: Bool) throws {
-        try requireBooted(udid)
-        try runChecked(["ui", udid, "increase_contrast", enabled ? "enabled" : "disabled"])
-    }
-
-    /// Read Increase Contrast as `enabled`, `disabled`, `unsupported`, or `unknown`.
-    public static func increaseContrast(udid: String) throws -> String {
-        try requireBooted(udid)
-        return try runChecked(["ui", udid, "increase_contrast"])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Override the status bar on `udid` (must be booted). `arguments` are the
-    /// raw `simctl status_bar <udid> override` flags (e.g. `--time`, `--batteryLevel`).
-    public static func statusBarOverride(udid: String, arguments: [String]) throws {
-        try requireBooted(udid)
-        try runChecked(["status_bar", udid, "override"] + arguments)
-    }
-
-    /// Clear any status bar overrides on `udid` (must be booted).
-    public static func statusBarClear(udid: String) throws {
-        try requireBooted(udid)
-        try runChecked(["status_bar", udid, "clear"])
-    }
-
-    /// Return simctl's current status-bar override description.
-    public static func statusBarList(udid: String) throws -> String {
-        try requireBooted(udid)
-        return try runChecked(["status_bar", udid, "list"])
     }
 
     // MARK: - Pasteboard (`type` paste path)
@@ -383,7 +172,7 @@ public enum SimShell {
     /// answers with a non-zero exit while it is still coming up (a freshly booted
     /// device, a just-installed app, a device under load). Because the whole
     /// default `type` path depends on this call, a lone transient failure would
-    /// fail an otherwise-good test step, so retry briefly before giving up. The
+    /// fail an otherwise-good `type`, so retry briefly before giving up. The
     /// final failure still carries simctl's stderr.
     public static func pbcopy(_ text: String, udid: String) throws {
         try retrying(attempts: pasteboardAttempts, delay: pasteboardRetryDelay) {
@@ -400,8 +189,8 @@ public enum SimShell {
 
     /// Total attempts (1 initial + retries) for the pasteboard calls.
     static let pasteboardAttempts = 3
-    /// Gap between pasteboard attempts. Short enough to stay invisible in a step's
-    /// timing, long enough to outlast a service that is mid-launch.
+    /// Gap between pasteboard attempts. Short enough to go unnoticed, long enough
+    /// to outlast a service that is mid-launch.
     static let pasteboardRetryDelay: TimeInterval = 0.15
 
     /// Run `body`, retrying up to `attempts` times while it throws. Returns the
@@ -470,7 +259,7 @@ public enum SimShell {
     /// simctl names a device after its runtime — "iPhone Duo (27.2)" — when the
     /// plain name is already taken on another runtime. Reading left to right took `27.2` as
     /// the UDID, so `isBooted` answered false for a device that was booted, and
-    /// the harness then tried to boot it and failed with "Unable to boot device
+    /// a caller then tried to boot it and failed with "Unable to boot device
     /// in current state: Booted" — on every run against that device.
     ///
     /// Returns an array so the caller can `append(contentsOf:)` a non-match
@@ -492,33 +281,19 @@ public enum SimShell {
         return [BootedDevice(udid: udid, name: name, runtime: runtime)]
     }
 
-    // MARK: - Background processes (record-video, log stream)
+    // MARK: - Background processes (record-video)
 
-    /// A long-running `xcrun simctl` child (e.g. `io recordVideo`,
-    /// `spawn log stream`). The process keeps running until `stop()` sends SIGINT
-    /// (so the child can finalize cleanly — matches the `axe record-video … &;
-    /// kill -INT` pattern in run.md:193). The child's stdout/stderr are inherited
-    /// from the parent so its output streams through unchanged.
+    /// A long-running `xcrun simctl` child (`io recordVideo`). The process keeps
+    /// running until `stop()` sends SIGINT, so the child can finalize cleanly.
+    /// The child's stdout/stderr are inherited from the parent so its output
+    /// streams through unchanged.
     public final class BackgroundProcess {
         private let process: Process
-        /// Handles this object owns for a child that writes to a file rather than
-        /// inheriting our streams. The child holds its own descriptors, so these
-        /// are closed once it exits instead of waiting for ARC to release us.
-        private let ownedHandles: [FileHandle]
-        private var handlesClosed = false
         public let command: String
-        public let stderrPath: String?
 
-        fileprivate init(
-            process: Process,
-            command: String,
-            stderrPath: String? = nil,
-            ownedHandles: [FileHandle] = []
-        ) {
+        fileprivate init(process: Process, command: String) {
             self.process = process
             self.command = command
-            self.stderrPath = stderrPath
-            self.ownedHandles = ownedHandles
         }
 
         /// PID of the running child.
@@ -536,10 +311,6 @@ public enum SimShell {
                 kill(process.processIdentifier, SIGINT)
                 process.waitUntilExit()
             }
-            if !handlesClosed {
-                handlesClosed = true
-                for handle in ownedHandles { try? handle.close() }
-            }
             return process.terminationStatus
         }
 
@@ -556,8 +327,7 @@ public enum SimShell {
     /// prints "Recording started" to stderr once the capture pipeline is live;
     /// this method tees stderr so it can gate on that line (with a timeout) before
     /// returning, so callers do not race the start of recording. Finalize the
-    /// recording with `BackgroundProcess.stop()` (SIGINT), matching the
-    /// `axe record-video … &; kill -INT` pattern (run.md:193). The output is
+    /// recording with `BackgroundProcess.stop()` (SIGINT). The output is
     /// written to `path` as requested; note simctl writes a QuickTime-branded
     /// container even for a `.mp4` name (acceptable — §6.8).
     /// The simctl command line for a recording.
@@ -672,69 +442,5 @@ public enum SimShell {
         }
 
         return BackgroundProcess(process: process, command: command)
-    }
-
-    /// Start `xcrun simctl spawn <udid> log stream <extraArgs...>` as a background
-    /// process whose stdout/stderr are inherited from the parent. Note: log
-    /// streaming is `simctl spawn <dev> log stream`, NOT a `simctl log`
-    /// subcommand (§6.7). Stop it with `BackgroundProcess.stop()`.
-    public static func logStream(udid: String, extraArgs: [String] = []) throws -> BackgroundProcess {
-        try requireBooted(udid)
-
-        let args = ["simctl", "spawn", udid, "log", "stream"] + extraArgs
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = args
-
-        do {
-            try process.run()
-        } catch {
-            throw SimShellError.launchFailed(error.localizedDescription)
-        }
-
-        return BackgroundProcess(process: process, command: "xcrun " + args.joined(separator: " "))
-    }
-
-    /// Start a structured log stream and write it directly to an artifact file.
-    /// This is harness plumbing, not a public simctl-alias command.
-    public static func logStream(
-        udid: String,
-        outputPath: String,
-        predicate: String? = nil,
-        stderrPath: String? = nil
-    ) throws -> BackgroundProcess {
-        try requireBooted(udid)
-        let outputURL = URL(fileURLWithPath: outputPath)
-        try FileManager.default.createDirectory(
-            at: outputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: outputURL)
-        let errorURL = URL(fileURLWithPath: stderrPath ?? outputPath + ".stderr.txt")
-        FileManager.default.createFile(atPath: errorURL.path, contents: nil)
-        let errorHandle = try FileHandle(forWritingTo: errorURL)
-        var args = ["simctl", "spawn", udid, "log", "stream", "--level", "debug", "--style", "ndjson"]
-        if let predicate, !predicate.isEmpty {
-            args += ["--predicate", predicate]
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = args
-        process.standardOutput = handle
-        process.standardError = errorHandle
-        do {
-            try process.run()
-        } catch {
-            try? handle.close()
-            try? errorHandle.close()
-            throw SimShellError.launchFailed(error.localizedDescription)
-        }
-        return BackgroundProcess(
-            process: process,
-            command: "xcrun " + args.joined(separator: " "),
-            stderrPath: errorURL.path,
-            ownedHandles: [handle, errorHandle]
-        )
     }
 }

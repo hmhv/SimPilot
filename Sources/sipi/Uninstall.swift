@@ -1,7 +1,7 @@
 // Uninstall.swift
 //
 // `sipi uninstall` — remove everything `setup` installed, natively (no external
-// scripts). Removes the three skill directories from both ~/.claude/skills and
+// scripts). Removes the skill directories from both ~/.claude/skills and
 // ~/.agents/skills (only ours — sibling dirs like AutoStore sipi-shots/publish
 // are left intact), the ~/.local/share/simpilot data directory, and the sipi
 // binary itself (~/.local/bin/sipi and, if different, the running executable

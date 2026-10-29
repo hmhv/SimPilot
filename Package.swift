@@ -31,7 +31,7 @@ let package = Package(
                 .linkedFramework("CoreVideo")
             ]
         ),
-        // The three skill trees (sipi-common, sipi-test, sipi-verify) embedded
+        // The sipi-common skill tree, embedded
         // into the binary at build time so the curl|bash install ships a single
         // self-contained download. The EmbedSkillsPlugin build-tool plugin runs
         // simskillsgen on every `swift build`, reading the real skill files via
@@ -60,8 +60,8 @@ let package = Package(
             dependencies: ["simskillsgen"],
             path: "Plugins/EmbedSkillsPlugin"
         ),
-        // Foundation library (plus ImageIO, for downscaling the screenshots the
-        // HTML reports embed). No SimBridge import, no Process(), no private
+        // Foundation library (plus ImageIO and CoreGraphics, for resizing and
+        // rotating screenshots). No SimBridge import, no Process(), no private
         // frameworks. Holds the framework-agnostic SimDriver seam and value
         // types so SimCore stays unit-testable with a mock driver and a future
         // FB backend can be added behind the same protocol. Depends on SimSkills
@@ -79,8 +79,8 @@ let package = Package(
             dependencies: ["SimCore", "SimSkills"],
             path: "Tests/SimCoreTests"
         ),
-        // Filesystem-only contract tests for private-framework path resolution.
-        // These do not load the private frameworks or require a simulator.
+        // Contract tests for private-framework path resolution. These do not
+        // load the private frameworks or require a simulator.
         .testTarget(
             name: "SimBridgeTests",
             dependencies: ["SimBridge"],

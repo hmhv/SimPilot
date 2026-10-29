@@ -11,9 +11,7 @@
 // SET (`sipi orientation <udid> --set <name>`): rotates the device. The native
 // PurpleEvent SET is tried first (headless, locale-independent, covers
 // UIDeviceOrientation 1...4), then `devicectl device orientation set`, which is
-// headless too and is the only supported way to express face-up / face-down now
-// that Xcode 27 removed Simulator.app. The osascript menu path remains as a
-// last resort for Xcode 26 and earlier.
+// headless too and is the only supported way to express face-up / face-down.
 
 import ArgumentParser
 import Foundation
@@ -31,7 +29,7 @@ extension Sipi {
         @Argument(help: "Simulator UDID.")
         var udid: String
 
-        @Flag(name: .long, help: "Emit the orientation as JSON ({ orientation, raw }).")
+        @Flag(name: .long, help: "When reading, emit the orientation as JSON ({ orientation, raw }).")
         var json = false
 
         @Option(name: .long, help: "Set the orientation instead of reading it: \(OrientationSetName.acceptedNames).")
@@ -41,8 +39,8 @@ extension Sipi {
             name: .long,
             help: """
             Also report the physical orientation via devicectl, which detects the \
-            face-up / face-down states SimulatorKit cannot express. Costs one \
-            process spawn.
+            face-up / face-down states SimulatorKit cannot express. Requires --json. \
+            Costs one process spawn.
             """
         )
         var physical = false
@@ -75,7 +73,7 @@ extension Sipi {
                     "raw": orientation.rawValue
                 ]
                 if physical {
-                    let reading = DeviceCtl.isSimulatorCapable() ? try? DeviceCtl.orientation(udid: udid) : nil
+                    let reading = try? DeviceCtl.orientation(udid: udid)
                     // NSNull, not an omitted key: "devicectl says upright" and
                     // "devicectl could not be asked" must not look identical.
                     object["flat"] = reading?.flat ?? NSNull()
