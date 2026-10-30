@@ -83,7 +83,10 @@ extension Sipi {
                 }
                 FileHandle.standardError.write(Data("Xcode \(release.displayName) (\(release.build)): \(release.url.absoluteString)\n".utf8))
 
-                let stage = URL(fileURLWithPath: "/Applications/.sipi-xcode-\(UUID().uuidString)")
+                // A fixed name, so a run killed by a signal (which skips the defer)
+                // is cleaned up by the next one.
+                let stage = URL(fileURLWithPath: "/Applications/.sipi-xcode-install")
+                try? FileManager.default.removeItem(at: stage)
                 try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false)
                 defer { try? FileManager.default.removeItem(at: stage) }
                 let cookies = try AppleSignInWindow.signIn()
@@ -129,7 +132,10 @@ extension Sipi.XcodeCommand {
                 || URL(fileURLWithPath: $0).resolvingSymlinksInPath().path == appPath }) {
                 throw ValidationError("\(app.path) is the selected Xcode; select another one first")
             }
-            if NSWorkspace.shared.runningApplications.contains(where: { $0.bundleURL?.resolvingSymlinksInPath().path.hasPrefix(appPath) == true }) {
+            if NSWorkspace.shared.runningApplications.contains(where: {
+                guard let path = $0.bundleURL?.resolvingSymlinksInPath().path else { return false }
+                return path == appPath || path.hasPrefix(appPath + "/")
+            }) {
                 throw ValidationError("\(app.path) is running; quit it first")
             }
             do {
@@ -164,7 +170,8 @@ func systemDeveloperDir() -> String? {
 
 func installedXcodes() -> [URL] {
     ((try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: "/Applications"), includingPropertiesForKeys: nil)) ?? [])
-        .filter { $0.pathExtension == "app" && $0.lastPathComponent.hasPrefix("Xcode") }
+        .filter { $0.pathExtension == "app" && $0.lastPathComponent.hasPrefix("Xcode")
+            && (try? $0.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true }
 }
 
 func installedBuild(of app: URL) -> String? {
@@ -247,7 +254,9 @@ struct XcodeRelease {
                   // The catalog is third-party and its strings reach the agent.
                   number.range(of: "^[0-9.]+$", options: .regularExpression) != nil,
                   build.range(of: "^[0-9A-Za-z]+$", options: .regularExpression) != nil,
-                  channel.range(of: "^[a-zA-Z]+$", options: .regularExpression) != nil
+                  channel.range(of: "^[a-zA-Z]+$", options: .regularExpression) != nil,
+                  (entry["requires"] as? String)?.range(of: "^[0-9.]+$", options: .regularExpression) != nil
+                      || entry["requires"] == nil
             else { return nil }
             let day = entry["date"] as? [String: Int]
             let date = day.map { String(format: "%04d-%02d-%02d", $0["year"] ?? 0, $0["month"] ?? 0, $0["day"] ?? 0) } ?? ""
@@ -375,7 +384,7 @@ enum XcodeArchive {
             throw ValidationError("the archive holds a different build than \(build)")
         }
         let signature = try run("/usr/bin/codesign", ["-dv", "--verbose=4", app.path], in: directory)
-        guard signature.contains("TeamIdentifier=\(appleTeamID)") else {
+        guard signature.split(separator: "\n").contains("TeamIdentifier=\(appleTeamID)") else {
             throw ValidationError("\(app.lastPathComponent) is not signed by Apple")
         }
         FileHandle.standardError.write(Data("checking the signature with Gatekeeper\n".utf8))

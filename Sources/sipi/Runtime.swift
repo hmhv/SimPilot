@@ -59,7 +59,8 @@ extension Sipi {
                           let build = simulator["buildUpdate"] as? String
                     else { continue }
                     let isInstalled = installed.contains(build)
-                    guard beta || isInstalled || !Self.isBeta(build) else { continue }
+                    let isBeta = (item["name"] as? String)?.contains(" beta") ?? false
+                    guard beta || isInstalled || !isBeta else { continue }
                     let architectures = item["architectures"] as? [String]
                     guard architectures?.contains("arm64") ?? true, seen.insert("\(name) \(build)").inserted else { continue }
                     let size = String(format: "%.1f GB", Double(item["fileSize"] as? Int ?? 0) / 1_000_000_000)
@@ -88,12 +89,6 @@ extension Sipi {
                 for row in newestFirst {
                     print(row.line)
                 }
-            }
-
-            /// Beta builds end in a letter after four digits (24B5084k); releases
-            /// do not (24B114, 23E254a).
-            static func isBeta(_ build: String) -> Bool {
-                build.range(of: "[0-9]{4}[a-z]$", options: .regularExpression) != nil
             }
 
             private func installedBuilds() -> Set<String> {
