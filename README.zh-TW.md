@@ -97,7 +97,7 @@ SimPilot 會在你的專案中保留兩個檔案:
 - **長期使用的 simulator 可能不再接受鍵盤 HID**（在 Xcode 27.0 beta 6 上實測）：貼上、逐鍵輸入與全選+刪除都會被忽略，而觸控輸入正常。這取決於裝置的使用時間而非 iOS 版本，`simctl erase` 與重新啟動都無法恢復。`type` 會偵測到這一點並直接失敗，而不是回報成功；`set-text` 不受影響。`type --xcode-mcp` 會改由 Xcode 27 內建的服務輸入，在實測的裝置上由此成功，但有代價（見下文）
 - 無障礙樹宣稱存在、但實際無法觸控的元素，點擊後仍會回報成功。`describe-point` 也會回傳該元素，因此任何一層都無法分辨；Xcode 自身的工具也是相同行為
 - 對比度與文字裁切不在 `sipi a11y-audit` 的範圍內；兩者都需要對算繪後的影格做像素分析
-- **iPhone Duo**（在 Xcode 27.2 上實測）：點擊、滑動、文字輸入和硬體按鈕都能到達兩塊螢幕。內螢幕對無障礙 hit-test 不回傳任何結果，因此依選擇器的點擊會不經確認地送到元素的位置，`set-text` / `describe-point` 只能在外螢幕使用。Device Hub 開啟期間會接管裝置的輸入：內螢幕的點擊被丟棄，模擬器的剪貼板被 Mac 的剪貼簿覆蓋，因此 `type` 會拒絕貼上。`sipi doctor` 會回報這種狀態，`sipi repair-input` 可恢復輸入。無法透過腳本旋轉 Duo simulator，請使用 Device Hub 的旋轉按鈕
+- **iPhone Duo**（在 Xcode 27.2 上實測）：點擊、滑動、文字輸入和硬體按鈕都能到達兩塊螢幕。內螢幕對無障礙 hit-test 不回傳任何結果，因此依選擇器的點擊會不經確認地送到元素的位置，`set-text` / `describe-point` 只能在外螢幕使用。Device Hub 開啟期間會接管裝置的輸入：內螢幕的點擊被丟棄，模擬器的剪貼板被 Mac 的剪貼簿覆蓋，因此 `type` 會拒絕貼上。`sipi doctor` 會回報這種狀態，`sipi repair-input` 可恢復輸入。無法透過腳本旋轉 Duo simulator（`sipi orientation --set` 會拒絕 Duo），請使用 Device Hub 的旋轉按鈕
 - 僅支援 simulator，不支援實機
 
 ## 對不再接受按鍵輸入的 simulator 輸入文字
