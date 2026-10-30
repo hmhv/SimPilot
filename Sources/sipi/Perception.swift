@@ -261,7 +261,7 @@ extension Sipi {
         @Argument(help: "Simulator UDID.")
         var udid: String
 
-        @Flag(name: .long, help: "Force the full-screen grid pass (sees System UI; ~1.6s).")
+        @Flag(name: .long, help: "Force the full-screen grid pass (sees System UI; ~2s).")
         var deep = false
 
         @Option(name: .long, help: "Auto-trigger --deep when the fast tree does not contain this text.")

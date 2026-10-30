@@ -52,6 +52,9 @@ extension Sipi {
                 guard let name = OrientationSetName(set) else {
                     throw ValidationError("Unknown orientation '\(set)'. Valid: \(OrientationSetName.acceptedNames).")
                 }
+                if DisplayResolver.displays(udid: udid).count > 1 {
+                    throw ValidationError(DuoScreens.noRotation)
+                }
                 try driver.setOrientation(name, udid: udid)
                 print("ok")
                 return

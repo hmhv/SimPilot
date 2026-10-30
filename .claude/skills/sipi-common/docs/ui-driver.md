@@ -100,16 +100,17 @@ evidence — the screen never reached the state — worth reporting rather than
 retrying with a longer sleep.
 
 **Never write a `sleep` you cannot justify with a number you measured.** These are
-the measured costs on an M-series host (Xcode 27.2 beta, iPhone 17, iOS 27.2), and
+the measured costs on an M-series host (Xcode 27.2 27B52, iPhone 18 Pro, iOS 27.2 24B8117), and
 they are what a guessed wait is competing against:
 
 | Step | Measured |
 |---|---|
-| `describe-ui` | 0.22s |
-| `describe-ui --deep` | 1.62s — don't reach for it just to count nodes |
-| `screenshot`, `voiceover` | ~0.5s |
-| `simctl launch` → tree stops changing | **3.1–3.6s** |
-| `shutdown` + `boot` + `bootstatus -b`, warm | **6.8s** (22s on a device's first cold boot) |
+| `describe-ui` | 0.36s |
+| `describe-ui --deep` | 2.0s — don't reach for it just to count nodes |
+| `screenshot` | 0.36s |
+| `voiceover` | 0.15s |
+| `simctl launch` → tree stops changing | **1–4s** |
+| `shutdown` + `boot` + `bootstatus -b`, warm | **3.1s** |
 
 A run built from 5–10s guesses spends most of its wall clock asleep: the same
 VoiceOver experiment took about 4 minutes with guessed sleeps and 42s written
@@ -124,11 +125,11 @@ sipi wait-for "$UDID" --text "Settings" --timeout 6 --interval 0.25
 ```
 
 That bounds the wait at the timeout and still returns early if the state recovers.
-While the text stays missing, each poll also runs the deep pass (~1.6s), as
+While the text stays missing, each poll also runs the deep pass (~2s), as
 `--absent` would, and the interval is added after every miss.
 
 Booting is cheap enough to prefer over cleverness. When a simulator is in a state
-only a restart clears, restart it — 6.8s warm — instead of hunting for a lighter
+only a restart clears, restart it — 3.1s warm — instead of hunting for a lighter
 reset. Restarting individual simulator daemons does not work: see
 `troubleshooting.md`.
 
@@ -236,7 +237,7 @@ text. Only `missing-label` is an error — it is decidable; the rest are warning
 because they are inferences from the tree. The missing-label and generic-label
 rules cover DISABLED controls too (VoiceOver still announces them); the
 hit-region (touch-target) and duplicate-label rules do not. It runs the deep
-grid pass by default (~1.6s per screen) so System UI
+grid pass by default (~2s per screen) so System UI
 and overlays are audited too — `--fast` skips it. It exits non-zero on an
 error-severity finding, so it can gate a check directly; `--fail-on none`
 inspects without failing, `--json` gives structured output, `--rules` runs a

@@ -83,7 +83,9 @@ So case 2 now only happens when VoiceOver was switched by hand, in Settings or o
 another tool's behalf — **or after any Xcode device-interaction session**:
 `type --xcode-mcp`, or an agent calling Xcode's MCP `DeviceInteraction*` tools
 directly (sipi never takes that path unasked). AXe — the driver inside
-XcodeBuildMCP — does the same after a single tap (measured on Xcode 27.2). Measured on
+XcodeBuildMCP — does the same after a single tap (measured on Xcode 27.2), and so
+does an XCUITest run (`xcodebuild test`; measured on Xcode 27.2 27B52, on an iPhone
+Duo and an iPhone 18 Pro: 5 lines before, an empty root after, Settings too). Measured on
 Xcode 27.0 RC / iOS 27.0 24A434 with a
 control: one such session typed fine and left the running app readable (16 nodes),
 and every app launched afterwards read a single empty root (5s and 10s) while
@@ -95,7 +97,7 @@ confirm that is what you are looking at:
 
 - reads `enabled` — leave it on and read the tree; it works while enabled
 - reads `disabled` on a device whose apps all report an empty root — it was
-  turned off after being on, or an Xcode device-interaction session ran. Restart:
+  turned off after being on, or an Xcode device-interaction session or a UI test ran. Restart:
 
   ```bash
   xcrun simctl shutdown "$UDID"; xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
@@ -122,7 +124,7 @@ lighter resets were measured on iOS 27.2 and none of them works:
 | `kill -9` the `AccessibilityUIServer` pid | It does not respawn, and the tree stays empty |
 | `launchctl kickstart -k system/com.apple.SpringBoard` | **Bricks the device.** SpringBoard is killed and never comes back, so every `describe-ui` fails with `frontmostApplicationWithDisplayId returned nil` until you restart the device anyway |
 
-A warm `shutdown` + `boot` + `bootstatus -b` costs about 6.8s, which is cheaper
+A warm `shutdown` + `boot` + `bootstatus -b` costs about 3s, which is cheaper
 than any of these is worth. Restart and move on.
 
 ### Taps return `ok` but nothing happens, on EVERY device
@@ -244,7 +246,7 @@ To CHANGE the pose: `sipi fold "$UDID" --open` / `--closed`.
 
 ### A command on an iPhone Duo is refused, or a tap returns ok and does nothing
 
-Measured on Xcode 27.2 RC / iOS 27.2. Run `sipi fold-state "$UDID"` first.
+Measured on Xcode 27.2 (27B52) / iOS 27.2. Run `sipi fold-state "$UDID"` first.
 
 **Open (inner screen lit).** Taps by point and by selector, swipes, typing and
 buttons work. The inner screen answers no accessibility hit-test, so:
@@ -263,7 +265,11 @@ tap (the cover still takes them). `sipi doctor` says so. Reconnect with:
 sipi repair-input "$UDID"   # restarts SpringBoard; running apps close
 ```
 
-Then relaunch the app. Quitting Device Hub instead shuts the simulator down.
+Then relaunch the app, and light the inner screen again with `sipi fold "$UDID"
+--closed` followed by `--open`: after the repair the device shows its cover
+while the hinge still reads 180°, so `--open` alone changes nothing. The first
+`devicectl device orientation set` after a boot takes input over the same way.
+Quitting Device Hub instead shuts the simulator down.
 
 **`type` fails with *the simulator's pasteboard did not keep the text*.** Device
 Hub is open and is putting the Mac's clipboard over the simulator's pasteboard.
@@ -287,7 +293,7 @@ Nothing was pasted. Close Device Hub (and boot the device again), or use
 | Problem | Solution |
 |---------|----------|
 | Execution stops midway | `&&` stops at the first non-zero exit. Separate independent `sipi` commands with `;`; keep `&&` where the next step only makes sense if the previous one worked (a screenshot after `wait-for`) |
-| iPad launches slowly | An iPhone app's content appears ~3.5s after launch (`ui-driver.md` § Waiting); an iPad takes longer — wait with `wait-for`, not a fixed sleep |
+| iPad launches slowly | An iPhone app's content appears within ~4s of launch (`ui-driver.md` § Waiting); an iPad takes longer — wait with `wait-for`, not a fixed sleep |
 | Section header uppercase | Match case-insensitively (`grep -qi`) |
 | Dark Mode not applied yet | Wait 2-3s after changing the setting; iOS 18 applies it slowly |
 | System UI won't close | Tap a visible label first. PhotosPicker multiple: `sipi key 40 $UDID` confirms, keycode `41` cancels. FileImporter: `41`. Share Sheet: downward `sipi swipe`. ColorPicker: touch the close button |

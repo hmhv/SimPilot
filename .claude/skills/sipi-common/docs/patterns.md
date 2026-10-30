@@ -82,7 +82,7 @@ only while expanded.
 
 ### App Launch
 
-- Wait for the app's own content with `sipi wait-for` (it appears ~3.5s after
+- Wait for the app's own content with `sipi wait-for` (it appears within ~4s of
   launch; see `ui-driver.md` § Waiting). On iPad iOS 18.x the app may not come forward — tap it
   on SpringBoard with `sipi tap $UDID --label "AppName"`.
 - iPad iOS 26+: terminate+launch may return `DockFolderViewService`. Avoid

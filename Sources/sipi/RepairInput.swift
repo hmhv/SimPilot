@@ -6,6 +6,7 @@
 
 import ArgumentParser
 import Foundation
+import SimNative
 import SimShell
 
 extension Sipi {
@@ -29,6 +30,10 @@ extension Sipi {
             try SimShell.requireBooted(udid)
             if try SimShell.repairDeviceHubInput(udid: udid) {
                 print("Input repaired. SpringBoard restarted and running apps were closed; relaunch the app.")
+                if DisplayResolver.displays(udid: udid).count > 1 {
+                    print("This Duo now shows its cover whatever the hinge reads; run `sipi fold \(udid) --closed` "
+                        + "then `--open` to light the inner screen again.")
+                }
             } else {
                 print("Input is not held by Device Hub; nothing changed.")
             }

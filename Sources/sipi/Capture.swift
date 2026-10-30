@@ -36,8 +36,7 @@ extension Sipi {
             help: """
             Which built-in screen to record: \(DisplaySelection.selectorSyntax). \
             Defaults to whichever screen the device is lighting. Only a foldable \
-            (iPhone Duo) has more than one, and simctl's own default there is the \
-            screen it calls primary — the COVER — so an open device would record black.
+            (iPhone Duo) has more than one, and simctl refuses to pick one there.
             """
         )
         var display: String = "active"

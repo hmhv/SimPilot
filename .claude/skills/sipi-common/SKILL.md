@@ -26,8 +26,8 @@ When Xcode's MCP server is also connected, split the work like this:
 - **Do not call Xcode's `DeviceInteraction*` tools on a simulator yourself.** Any
   such session — one tap is enough — leaves every app launched afterwards with
   an empty accessibility tree until the device restarts (measured on Xcode
-  27.2). The tools also take coordinates only, and on an iPhone Duo they reach
-  the cover only.
+  27.2). The tools also take coordinates only, and on an iPhone Duo their taps
+  reach the cover only.
 - **Reach Xcode's service only through sipi's opt-in route**, last in the
   session or followed by `xcrun simctl shutdown` + `boot`:
   `sipi type --xcode-mcp` for a simulator that stopped accepting keyboard HID.

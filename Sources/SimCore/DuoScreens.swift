@@ -2,8 +2,9 @@
 //
 // What sipi can and cannot do on each of iPhone Duo's two screens.
 //
-// Measured on Xcode 27.2 RC (27B48) / iOS 27.2 (24B91014), driving Settings and
-// Safari, with touches sent to the lit screen's own digitizer:
+// Measured on Xcode 27.2 RC (27B48) / iOS 27.2 (24B91014) and again on Xcode 27.2
+// (27B52) / 24B91016s, driving Settings and Safari, with touches sent to the lit
+// screen's own digitizer:
 //
 //   cover  Taps by point and by selector, swipes, long presses, typing,
 //          set-text, the hit-test and hardware buttons all work, upright and
@@ -14,8 +15,8 @@
 //          set-text and describe-point — both built on the hit-test — cannot
 //          work at all.
 //
-// On both, rotation cannot be scripted (Device Hub's rotate button can), and
-// Xcode's device-interaction service reaches the cover only.
+// On both, rotation cannot be scripted (Device Hub's rotate button can). Xcode's
+// device-interaction service types into either screen but taps only the cover.
 
 import Foundation
 
@@ -35,6 +36,13 @@ public enum DuoScreens {
     /// on the inner screen: there, every element answers that way.
     public static let innerHitTest = "an iPhone Duo's inner screen answers no accessibility hit-test"
 
+    /// Why `orientation --set` refuses a two-screen device. The first
+    /// `devicectl device orientation set` after a boot also takes the device's
+    /// input over the way Device Hub does (measured on Xcode 27.2, 27B52).
+    public static let noRotation = "orientation --set cannot rotate an iPhone Duo: neither screen turns when "
+        + "asked (Device Hub's rotate button can), and devicectl's route takes the inner screen's taps away "
+        + "until `sipi repair-input`."
+
     /// One line per screen, for `sipi doctor`.
     public static let summary: [String] = [
         "cover: taps by point or selector, swipes, long presses, typing, set-text, "
@@ -42,7 +50,7 @@ public enum DuoScreens {
         "inner: taps by point, swipes, long presses, typing and hardware buttons work. "
             + "A selector tap goes to the element's frame unchecked, because \(innerHitTest); "
             + "for the same reason set-text and describe-point do not work there — fold it shut for those.",
-        "both: rotation cannot be scripted (Device Hub's rotate button can), and "
-            + "`type --xcode-mcp` reaches the cover only."
+        "both: rotation cannot be scripted (Device Hub's rotate button can); "
+            + "`type --xcode-mcp` types into either screen."
     ]
 }

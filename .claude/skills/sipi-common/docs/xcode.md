@@ -72,6 +72,19 @@ It refuses the selected Xcode (`xcode-select -p` or `DEVELOPER_DIR`) and a
 running one. When two apps hold the same
 build, pass the app's path instead of the build number.
 
+## Xcode's own agent skills
+
+Xcode 27.2 carries agent skills of its own (device-interaction, app-resizability,
+swiftui-specialist, xctrace, …). Ask the user where they should go, then:
+
+```bash
+xcrun agent skills export <dir>                       # one folder per skill
+xcrun agent skills export --replace-existing <dir>    # overwrite ones already there
+```
+
+It talks to the selected Xcode; a skill folder that already exists is skipped
+unless `--replace-existing` is passed.
+
 ## Simulator runtimes
 
 | Need | Command |

@@ -19,8 +19,8 @@ extension Sipi {
             cannot: a simulator that has stopped accepting keyboard HID, where
             paste, per-key typing and select-all all leave the field untouched
             while this service may still type into it (it also ignores the guest
-            keyboard layout, which per-key HID does not). It cannot reach a Duo's
-            inner screen.
+            keyboard layout, which per-key HID does not). It types into either of a
+            Duo's screens.
 
             It is only ever used when asked for (`sipi type --xcode-mcp`). On iOS 27
             one session leaves every app launched afterwards on that device with an
