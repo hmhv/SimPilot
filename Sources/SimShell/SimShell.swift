@@ -348,11 +348,9 @@ public enum SimShell {
         return args
     }
 
-    /// `screenID` records that screen instead of the one simctl picks by
-    /// default. Only a foldable has more than one to choose from, and simctl
-    /// defaults to the screen it calls primary — which on iPhone Duo is the
-    /// COVER, so a recording of an open device would be a black rectangle
-    /// unless the caller names the inner screen.
+    /// `screenID` records that screen. Only a foldable has more than one, and
+    /// there simctl refuses to record without one ("Cannot choose between 2
+    /// displays").
     public static func recordVideo(
         udid: String,
         outputPath: String,

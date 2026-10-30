@@ -276,7 +276,7 @@ private struct DoctorReport {
         // and key with ok and acts on none of them.
         for udid in bootedUDIDs where (try? SimShell.isInputShadowedByDeviceHub(udid: udid)) == true {
             notes.append(
-                "\(udid): Device Hub has taken over this device's input, so sipi's taps and keys "
+                "\(udid): Device Hub (or a devicectl orientation set) has taken over this device's input, so sipi's taps and keys "
                 + "may report ok and do nothing. `sipi repair-input \(udid)` reconnects them; it "
                 + "restarts SpringBoard and closes running apps."
             )

@@ -65,8 +65,8 @@ accessibility tree describing a screen nobody is looking at. Two habits follow:
   ```
 
   It prints the screen the device actually lit (`inner 669x951pt`), not the one
-  asked for, and does not return until the screen handover has landed — so the
-  next command sees the new screen. Jumping from either end, 82° and below shows
+  asked for, and outside 83–87° does not return until the screen handover has
+  landed — so the next command sees the new screen. Jumping from either end, 82° and below shows
   the cover and 88° and above the inner screen; in between it depends on the
   direction (opening from 0° hands over at 83°, closing from 180° at 87°), and
   `fold` does not wait there: it returns at once with the old screen, which a
@@ -198,7 +198,9 @@ TEXT="<text only the settled layout shows>"
 vertical-bar button and look at the controls the app draws itself.
 
 In long sessions a Duo can drop to Shutdown, and after a reboot the first launch
-can sit behind the home screen — launch again. Never run `simctl bootstatus`
+can sit behind the home screen — launch again. A `fold` sent straight after
+`bootstatus -b` returns can be ignored too (it prints the cover); a few seconds
+later it works. Never run `simctl bootstatus`
 without `-b` on a shut-down device; it waits forever.
 `xcrun simctl launch --console-pty "$UDID" <bundle-id>` to a file captures
 `print` output, another way to watch the sizes a fold delivers.

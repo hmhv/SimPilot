@@ -167,12 +167,12 @@ So when a probe must be sure it is reading the app it just launched, poll until 
 root `AXLabel` is that app's display name — a relaunch passes through `" "` on
 the way — or simply poll for a string only that app renders.
 
-What is left after that is iOS, not sipi: the app's content appears in the tree at
-**~3.5s**, consistently, warm or cold. The screen changes at 1.78s and the
+What is left after that is iOS, not sipi: the app's content appears in the tree
+within **~4s** (the table above). The screen changes at 1.78s and the
 `describe-ui` call spanning the transition itself blocks for ~2.2s.
 `UIAnimationDragCoefficient` does not shorten it (3.53s / 3.56s at 0.1 against
 3.62s unset — noise). So the way to make a probe faster is **fewer launches**, not
-shorter waits: budget ~3.5s for each one and drop the launches the result does not
+shorter waits: budget ~4s for each one and drop the launches the result does not
 need. Rewriting a 5-launch probe with guessed sleeps (~4 min) as a 3-launch probe
 with these polls brought it to 26.5s for the same conclusions.
 
