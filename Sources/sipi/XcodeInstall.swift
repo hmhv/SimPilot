@@ -81,7 +81,20 @@ extension Sipi {
                 guard !FileManager.default.fileExists(atPath: destination.path) else {
                     throw ValidationError("\(destination.path) already exists")
                 }
-                FileHandle.standardError.write(Data("Xcode \(release.displayName) (\(release.build)): \(release.url.absoluteString)\n".utf8))
+                // Only the fields parse() narrowed: the URL's path is the catalog's
+                // free text and would reach the agent.
+                FileHandle.standardError.write(Data("Xcode \(release.displayName) (\(release.build))\n".utf8))
+
+                // Held until exit, so a second install cannot wipe the stage of one
+                // still downloading or expanding. The kernel drops it with the process.
+                let lockPath = FileManager.default.temporaryDirectory.appendingPathComponent("sipi-xcode-install.lock").path
+                let lock = open(lockPath, O_RDONLY | O_CREAT | O_EXLOCK | O_NONBLOCK, 0o600)
+                guard lock >= 0 else {
+                    throw ValidationError(errno == EWOULDBLOCK
+                        ? "another sipi xcode install is running; wait for it to finish"
+                        : "could not lock \(lockPath): \(String(cString: strerror(errno)))")
+                }
+                defer { close(lock) }
 
                 // A fixed name, so a run killed by a signal (which skips the defer)
                 // is cleaned up by the next one.
@@ -91,7 +104,9 @@ extension Sipi {
                 defer { try? FileManager.default.removeItem(at: stage) }
                 let cookies = try AppleSignInWindow.signIn()
 
-                let archive = stage.appendingPathComponent(release.url.lastPathComponent)
+                // Not the URL's last component: it is percent-decoded, so %2F
+                // would turn into a path out of the stage.
+                let archive = stage.appendingPathComponent("Xcode.xip")
                 try AppleDownload.download(release.url, to: archive, cookies: cookies)
                 try XcodeArchive.expand(archive, in: stage)
                 try FileManager.default.removeItem(at: archive)
