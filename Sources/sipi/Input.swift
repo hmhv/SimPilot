@@ -96,7 +96,7 @@ extension Sipi {
             first. --clear only clears reliably when no IME composition is pending: with
             one, the guest gives Cmd+A to the IME and the delete removes a single
             character, leaving the old text (measured under a Japanese keyboard). Send
-            `sipi key 41 <udid>` (Escape) first to discard a composition, or use `sipi set-text`,
+            `sipi key <udid> 41` (Escape) first to discard a composition, or use `sipi set-text`,
             which replaces the whole value without touching the keyboard.
 
             A simulator can stop delivering keyboard HID entirely — paste, --keyboard
@@ -227,11 +227,11 @@ extension Sipi {
             abstract: "Press a single key by HID keycode (e.g. 40 = Return, 42 = Backspace)."
         )
 
-        @Argument(help: "The HID keycode to press (0...255).")
-        var keycode: Int
-
         @Argument(help: "Simulator UDID.")
         var udid: String
+
+        @Argument(help: "The HID keycode to press (0...255).")
+        var keycode: Int
 
         @Option(name: .long, help: "Seconds to hold the key (0 < duration <= 10).")
         var duration: Double?
@@ -543,14 +543,20 @@ extension Sipi {
     struct Gesture: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "gesture",
-            abstract: "Perform a preset gesture (scroll-up/down/left/right, swipe-from-*-edge) over the swipe primitive."
+            abstract: "Perform a preset gesture (scroll-up/down/left/right, swipe-from-*-edge) over the swipe primitive.",
+            discussion: """
+            Scroll preset names describe the finger's direction, not the destination
+            in a list: scroll-up swipes upward to reveal later rows below;
+            scroll-down swipes downward to return toward earlier rows above.
+            scroll-left reveals content to the right, and scroll-right to the left.
+            """
         )
-
-        @Argument(help: "The gesture preset: scroll-up | scroll-down | scroll-left | scroll-right | swipe-from-left-edge | swipe-from-right-edge | swipe-from-top-edge | swipe-from-bottom-edge.")
-        var preset: String
 
         @Argument(help: "Simulator UDID.")
         var udid: String
+
+        @Argument(help: "The gesture preset: scroll-up | scroll-down | scroll-left | scroll-right | swipe-from-left-edge | swipe-from-right-edge | swipe-from-top-edge | swipe-from-bottom-edge.")
+        var preset: String
 
         @Option(name: .long, help: "Duration of the gesture in seconds (uses the preset default if omitted).")
         var duration: Double?

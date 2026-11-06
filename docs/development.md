@@ -215,7 +215,9 @@ everything else gets the centre of the frame clipped to the display.
 `onscreen` is false for an element with no visible area at all, and such an
 element carries no `hitPoint` — there is no honest point to offer for
 something that cannot be touched. Selector-based `tap` scrolls those into view
-before touching them, and fails if it cannot.
+before touching them, and fails if it cannot. `positionUnknown` marks an
+element the grid could not place at all — a widget button answers hit-tests far
+outside itself — and a selector tap on it fails without touching the screen.
 
 Grid discovery sweeps points in the tree's LOGICAL space but hands them to a
 hit-test that reads PHYSICAL portrait coordinates. Those agree only in

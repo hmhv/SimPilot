@@ -370,7 +370,7 @@ enum TextInput {
                 never arrived. On a simulator that has stopped delivering keyboard HID, use \
                 `sipi set-text <udid> "" --id <id> --no-verify`, which empties the field through the \
                 accessibility bridge. A pending IME composition also swallows the select-all — send \
-                `sipi key 41 <udid>` (Escape) first. Pass --no-verify to skip this check.
+                `sipi key <udid> 41` (Escape) first. Pass --no-verify to skip this check.
                 """)
         }
         throw TextInputError(description:

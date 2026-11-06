@@ -38,6 +38,7 @@ public enum ElementResolutionError: Error, CustomStringConvertible, Equatable {
     case multipleMatches(count: Int, kind: String, value: String, hasUniqueIDs: Bool)
     case invalidFrame(reason: String)
     case multipleSwitchDescendants(count: Int, selectorDescription: String)
+    case positionUnknown(selectorDescription: String)
 
     public var description: String {
         let tip = AccessibilityTargetResolver.describeUITip
@@ -53,6 +54,8 @@ public enum ElementResolutionError: Error, CustomStringConvertible, Equatable {
             return "\(reason) \(tip)"
         case .multipleSwitchDescendants(let count, let selectorDescription):
             return "Matched element for \(selectorDescription) contains multiple (\(count)) switch/toggle controls. Target the switch more specifically with --id when available, or use coordinates. \(tip)"
+        case .positionUnknown(let selectorDescription):
+            return "The element matched by \(selectorDescription) has no known position on the screen — it is inside a view (a widget, or another app's view) that reports positions in its own space. Find it in a screenshot, confirm the point with `sipi describe-point`, and tap that point."
         }
     }
 
@@ -135,6 +138,9 @@ public enum AccessibilityTargetResolver {
             allowSiblingRedirection: query.allowsSiblingRedirection
         )
 
+        if activationElement.positionUnknown == true {
+            throw ElementResolutionError.positionUnknown(selectorDescription: match.selectorDescription)
+        }
         guard let frame = activationElement.frame else {
             throw ElementResolutionError.invalidFrame(reason: "Matched element has no frame.")
         }
@@ -143,14 +149,41 @@ public enum AccessibilityTargetResolver {
         }
 
         let screen = applicationFrame(from: roots)
+        let point = activationPoint(for: activationElement, frame: frame, screen: screen)
+        let occluder = self.occluder(of: activationElement, at: point, roots: roots, screen: screen)
         return TapResolution(
-            point: activationPoint(for: activationElement, frame: frame, screen: screen),
+            point: point,
             isSwitchLikeControl: activationElement.isSwitchLikeControl,
-            isOnScreen: isReachable(activationElement, frame: frame, screen: screen),
+            isOnScreen: isReachable(activationElement, frame: frame, screen: screen) && occluder == nil,
             frame: frame,
             identifier: activationElement.AXUniqueId,
-            label: activationElement.AXLabel
+            label: activationElement.AXLabel,
+            occluder: occluder
         )
+    }
+
+    /// Tree order is drawing order: an element after the target's whole subtree
+    /// is drawn over it. Layers of half the screen or more hold every point and
+    /// say nothing.
+    static func occluder(of target: AXNode, at point: Point, roots: [AXNode], screen: AXNode.Frame?) -> AXNode.Frame? {
+        var order: [(node: AXNode, end: Int)] = []
+        func walk(_ node: AXNode) {
+            let index = order.count
+            order.append((node, index))
+            node.children?.forEach(walk)
+            order[index].end = order.count - 1
+        }
+        roots.forEach(walk)
+        guard let index = order.firstIndex(where: { $0.node == target }) else { return nil }
+        let limit = screen.map { $0.width * $0.height / 2 } ?? .infinity
+        for (node, _) in order[(order[index].end + 1)...] {
+            // A frame without its own hit point inside it is not in screen space
+            // (a share sheet or widget reports frames local to its view).
+            guard let frame = node.frame, let hit = node.hitPoint, frame.contains(hit) else { continue }
+            let area = frame.width * frame.height
+            if area > 0, area < limit, frame.contains(AXNode.Frame.Point(x: point.x, y: point.y)) { return frame }
+        }
+        return nil
     }
 
     /// Whether the element can be touched at all right now: some part of it is

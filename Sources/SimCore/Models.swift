@@ -135,6 +135,9 @@ public struct AXNode: Codable, Equatable, Sendable {
     /// elements are still listed (they exist, they are just scrolled away), but
     /// they cannot be touched until they are scrolled into view.
     public var onscreen: Bool?
+    /// The driver could not place it on the screen: its frame is local to a
+    /// remote view (a widget) and hit-tests did not narrow it down.
+    public var positionUnknown: Bool?
     public var children: [AXNode]?
 
     public struct Frame: Codable, Equatable, Sendable {
@@ -184,6 +187,7 @@ public struct AXNode: Codable, Equatable, Sendable {
         frame: Frame? = nil,
         hitPoint: Frame.Point? = nil,
         onscreen: Bool? = nil,
+        positionUnknown: Bool? = nil,
         children: [AXNode]? = nil
     ) {
         self.AXLabel = AXLabel
@@ -197,6 +201,7 @@ public struct AXNode: Codable, Equatable, Sendable {
         self.frame = frame
         self.hitPoint = hitPoint
         self.onscreen = onscreen
+        self.positionUnknown = positionUnknown
         self.children = children
     }
 }

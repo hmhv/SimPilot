@@ -48,7 +48,7 @@ private func normalized(_ point: Point, in frame: AXNode.Frame) -> Point? {
     )
 }
 
-/// The accessibility value the GUEST currently reports for the element at
+/// The element the GUEST currently reports at
 /// `logical` (a point in describe-ui coordinates), read in a fresh child process.
 ///
 /// `set-text` uses this to decide whether a write actually took. It must not read
@@ -56,11 +56,11 @@ private func normalized(_ point: Point, in frame: AXNode.Frame) -> Point? {
 /// element back, which makes an ignored write look successful (a `StaticText`
 /// accepts the setter, echoes the value, and drops it). Returns nil when the
 /// child read fails or finds nothing at the point.
-///
-/// Pass `screen` when the caller already fetched a tree (resolving the target
-/// does), so this does not pay for another tree fetch just to learn the screen
-/// frame; the geometry cannot change inside one action.
-func guestValue(udid: String, at logical: Point, screen: AXNode.Frame? = nil) -> String? {
+private func guestElement(
+    udid: String,
+    at logical: Point,
+    screen: AXNode.Frame? = nil
+) -> AXNode? {
     let frame: AXNode.Frame?
     if let screen {
         frame = screen
@@ -74,22 +74,62 @@ func guestValue(udid: String, at logical: Point, screen: AXNode.Frame? = nil) ->
           ),
           let node = nodes.first
     else { return nil }
-    return node.AXValue
+    return node
+}
+
+/// Follow the field's identity when available: setting a value can focus and
+/// move it, leaving a different element at its old point. Anonymous or initially
+/// ambiguous fields retain point readback. All readers use fresh processes in
+/// production. Reader seams let tests
+/// exercise tree misses, duplicate identities and point fallback without IPC.
+func guestValue(
+    udid: String,
+    at logical: Point,
+    screen: AXNode.Frame? = nil,
+    identity: TextEntryIdentity? = nil,
+    readTree: ((Bool) throws -> [AXNode])? = nil,
+    readPoint: (() -> AXNode?)? = nil
+) -> String? {
+    let pointRead = readPoint ?? { guestElement(udid: udid, at: logical, screen: screen) }
+    guard let identity else { return pointRead()?.AXValue }
+    let treeRead = readTree ?? { try ChildTree.spawnNodes(udid: udid, deep: $0) }
+    for deep in [false, true] {
+        if let roots = try? treeRead(deep), let field = identity.element(in: roots) {
+            return field.AXValue
+        }
+    }
+    guard let field = pointRead(), identity.allowsPointReadback(of: field) else { return nil }
+    return field.AXValue
 }
 
 /// What the guest reports after a `set-text` write.
-enum SetTextOutcome {
+enum SetTextOutcome: Equatable {
     case matched
-    /// The app reports something else — nil when the element could not be read.
-    case mismatch(observed: String?)
+    case mismatch(observed: String)
+    /// The final read did not identify the field or could not obtain its value.
+    case unreadable
 
     /// The value to show a human, or a marker when nothing could be read.
     var observedDescription: String {
         switch self {
         case .matched: return "(matched)"
-        case .mismatch(let observed):
-            guard let observed else { return "(unreadable)" }
-            return "'\(observed)'"
+        case .mismatch(let observed): return "'\(observed)'"
+        case .unreadable: return "(unreadable)"
+        }
+    }
+
+    func failureMessage(expected: String, udid: String) -> String? {
+        switch self {
+        case .matched: return nil
+        case .unreadable:
+            return "Warning: the accessibility write was sent, but its value could not be read back. "
+                + "Check the field with `sipi describe-ui \(udid)` before retrying; "
+                + "this does not establish that the write had no effect."
+        case .mismatch:
+            return "Warning: the value did not take. Wrote '\(expected)', "
+                + "the app reports \(observedDescription). Only editable text elements accept "
+                + "a value write; if this field intentionally reports something else (secure field, "
+                + "formatter), pass --no-verify."
         }
     }
 }
@@ -105,15 +145,21 @@ func verifySetText(
     at logical: Point,
     expected: String,
     screen: AXNode.Frame? = nil,
+    identity: TextEntryIdentity? = nil,
     attempts: Int = 3,
-    delay: TimeInterval = 0.2
+    delay: TimeInterval = 0.2,
+    readValue: (() -> String?)? = nil
 ) -> SetTextOutcome {
+    let read = readValue ?? {
+        guestValue(udid: udid, at: logical, screen: screen, identity: identity)
+    }
     var observed: String?
     for attempt in 1...max(1, attempts) {
-        observed = guestValue(udid: udid, at: logical, screen: screen)
+        observed = read()
         if observed == expected { return .matched }
         if attempt < attempts { Thread.sleep(forTimeInterval: delay) }
     }
+    guard let observed else { return .unreadable }
     return .mismatch(observed: observed)
 }
 
@@ -704,11 +750,16 @@ extension Sipi {
             does not exercise per-character behaviour — prefer `type` when the typing
             itself is under test.
 
-            The write is verified by re-reading the element afterward, and the command
-            fails when the value did not take. Pass --no-verify for a field that
+            The write is verified in a fresh process. When the field can be identified
+            uniquely by its identifier or label and type, readback follows it even if
+            the keyboard moves it. Otherwise it re-reads the original point. A different
+            value and an unreadable field are reported separately; both exit nonzero.
+            Pass --no-verify for a field that
             deliberately reports something else: a secure field shows bullets, a
             formatter rewrites the value, and an EMPTY write reads back as the field's
-            placeholder (so clearing a field always needs --no-verify).
+            placeholder (so clearing a field always needs --no-verify). A multi-line
+            text view (TextArea/TextView) always fails after the write: a SwiftUI
+            TextEditor shows the value while the app's own value stays unchanged.
 
             Because nothing is typed, a field that filters input as it is typed (a
             length cap, a character whitelist) can end up holding a value a user could
@@ -773,15 +824,21 @@ extension Sipi {
             // read runs in a child process on purpose — see guestValue().
             if !noVerify {
                 let outcome = verifySetText(
-                    udid: udid, at: target.point, expected: text, screen: target.screen
+                    udid: udid, at: target.point, expected: text, screen: target.screen,
+                    identity: target.identity
                 )
-                if case .mismatch = outcome {
+                if let message = outcome.failureMessage(expected: text, udid: udid) {
+                    emitError(message)
+                    throw ExitCode.failure
+                }
+                // Measured with a SwiftUI TextEditor: the view shows the value
+                // while the app's binding stays empty, and nothing readable
+                // tells the two apart.
+                if target.type == "TextArea" || target.type == "TextView" {
                     emitError(
-                        "Warning: the value did not take. Wrote '\(text)', "
-                        + "the app reports \(outcome.observedDescription). Only editable text elements accept "
-                        + "a value write; if this field intentionally reports something else (secure field, "
-                        + "formatter), pass --no-verify."
-                    )
+                        "Warning: the text view shows the value, but set-text cannot confirm that the app received it "
+                        + "(a SwiftUI TextEditor keeps its own value unchanged). Use `sipi type`, or pass --no-verify "
+                        + "when the app's own output will confirm it.")
                     throw ExitCode.failure
                 }
             }
@@ -793,6 +850,17 @@ extension Sipi {
         /// explicit -x/-y point. Carries the screen frame it already fetched so the
         /// verification read does not fetch another tree for it.
         private func resolveLogicalPoint(driver: NativeDriver) throws -> ResolvedTarget {
+            // The write lands on whatever the hit-test reaches, which a --label
+            // redirect or an overlay can make differ from the selected field.
+            func target(at point: Point, screen: AXNode.Frame?, roots: [AXNode]) -> ResolvedTarget {
+                let hit = try? driver.element(at: point, udid: udid)
+                return ResolvedTarget(
+                    point: point, screen: screen,
+                    identity: hit.flatMap { TextEntryIdentity(element: $0, in: roots, at: point) },
+                    type: hit?.type
+                )
+            }
+
             if let x, let y {
                 let roots = try ChildTree.nodes(udid: udid, deep: false)
                 guard let frame = screenFrame(of: roots) else {
@@ -802,13 +870,11 @@ extension Sipi {
                     x: x, y: y, unit: coordinate.unit,
                     screen: ScreenSize(width: frame.width, height: frame.height)
                 )
-                return ResolvedTarget(
-                    point: Point(
-                        x: frame.x + normalizedInput.x * frame.width,
-                        y: frame.y + normalizedInput.y * frame.height
-                    ),
-                    screen: frame
+                let point = Point(
+                    x: frame.x + normalizedInput.x * frame.width,
+                    y: frame.y + normalizedInput.y * frame.height
                 )
+                return target(at: point, screen: frame, roots: roots)
             }
 
             let query: AccessibilityQuery
@@ -822,23 +888,20 @@ extension Sipi {
                 throw ValidationError("Either provide both -x/-y, or use --id/--label/--value to target the field.")
             }
 
+            func resolve(in roots: [AXNode]) throws -> ResolvedTarget {
+                let resolution = try AccessibilityTargetResolver.resolveTap(
+                    roots: roots, query: query, elementType: elementType
+                )
+                return target(at: resolution.point, screen: screenFrame(of: roots), roots: roots)
+            }
+
             let roots = try driver.describe(udid, deep: false)
             do {
-                return ResolvedTarget(
-                    point: try AccessibilityTargetResolver.resolveTap(
-                        roots: roots, query: query, elementType: elementType
-                    ).point,
-                    screen: screenFrame(of: roots)
-                )
+                return try resolve(in: roots)
             } catch let error as ElementResolutionError where error.isNotFound {
                 let deepRoots = try ChildTree.nodes(udid: udid, deep: true)
                 do {
-                    return ResolvedTarget(
-                        point: try AccessibilityTargetResolver.resolveTap(
-                            roots: deepRoots, query: query, elementType: elementType
-                        ).point,
-                        screen: screenFrame(of: deepRoots)
-                    )
+                    return try resolve(in: deepRoots)
                 } catch let retry as ElementResolutionError {
                     emitError("Warning: \(retry.description) No text written.")
                     throw ExitCode.failure
@@ -857,4 +920,6 @@ extension Sipi {
 struct ResolvedTarget {
     var point: Point
     var screen: AXNode.Frame?
+    var identity: TextEntryIdentity? = nil
+    var type: String? = nil
 }

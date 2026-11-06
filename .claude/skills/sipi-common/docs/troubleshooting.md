@@ -218,7 +218,7 @@ For *had no effect* — three measured causes:
    field never committed.
 3. **`--clear` against a pending composition.** Cmd+A goes to the IME and only
    one character is deleted, leaving the old text (`あbc` + clear + `world`
-   measured as `あb world`). Send `sipi key 41 "$UDID"` (Escape) first to discard
+   measured as `あb world`). Send `sipi key "$UDID" 41` (Escape) first to discard
    the composition.
 
 On a healthy device with no IME, *had no effect* means the field was not focused.
@@ -296,5 +296,5 @@ Nothing was pasted. Close Device Hub (and boot the device again), or use
 | iPad launches slowly | An iPhone app's content appears within ~4s of launch (`ui-driver.md` § Waiting); an iPad takes longer — wait with `wait-for`, not a fixed sleep |
 | Section header uppercase | Match case-insensitively (`grep -qi`) |
 | Dark Mode not applied yet | Wait 2-3s after changing the setting; iOS 18 applies it slowly |
-| System UI won't close | Tap a visible label first. PhotosPicker multiple: `sipi key 40 $UDID` confirms, keycode `41` cancels. FileImporter: `41`. Share Sheet: downward `sipi swipe`. ColorPicker: touch the close button |
+| System UI won't close | Tap a visible label first. PhotosPicker multiple: `sipi key $UDID 40` confirms, keycode `41` cancels. FileImporter: `41`. Share Sheet: downward `sipi swipe`. ColorPicker: touch the close button |
 | `.borderless` Button fake success (iOS 26+) | All tap methods give fake success inside a List. Remove `.borderless`, or tap the whole row |

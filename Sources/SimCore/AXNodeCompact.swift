@@ -67,7 +67,9 @@ public enum AXNodeCompact {
         if node.enabled == false {
             parts.append("disabled")
         }
-        if node.onscreen == false {
+        if node.positionUnknown == true {
+            parts.append("position-unknown")
+        } else if node.onscreen == false {
             parts.append("offscreen")
         }
         return parts.joined(separator: " ")

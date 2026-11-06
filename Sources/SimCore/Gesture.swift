@@ -33,10 +33,10 @@ public enum GesturePreset: String, Sendable, CaseIterable {
 
     public var summary: String {
         switch self {
-        case .scrollUp: return "Scroll up in the center of the screen"
-        case .scrollDown: return "Scroll down in the center of the screen"
-        case .scrollLeft: return "Scroll left in the center of the screen"
-        case .scrollRight: return "Scroll right in the center of the screen"
+        case .scrollUp: return "Swipe upward to reveal content below"
+        case .scrollDown: return "Swipe downward to reveal content above"
+        case .scrollLeft: return "Swipe left to reveal content to the right"
+        case .scrollRight: return "Swipe right to reveal content to the left"
         case .swipeFromLeftEdge: return "Swipe from the left edge to center (back navigation)"
         case .swipeFromRightEdge: return "Swipe from the right edge to center (forward navigation)"
         case .swipeFromTopEdge: return "Swipe from the top edge downward"

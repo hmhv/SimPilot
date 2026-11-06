@@ -634,6 +634,7 @@ public final class NativeDriver: SimDriver {
             enabled: boolValue(raw["enabled"]),
             frame: frame,
             hitPoint: hitPoint,
+            positionUnknown: trustProbeHitPoints && raw["positionUnknown"] as? Bool == true ? true : nil,
             children: children
         )
     }

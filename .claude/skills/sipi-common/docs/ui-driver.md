@@ -11,12 +11,11 @@ UDID=<resolved-udid>
 ```
 
 **Among the UDID-taking driver commands, the UDID position varies** — most take
-it first, but four do not:
+it first, but two do not:
 
 | Shape | Commands |
 |---|---|
-| `sipi <cmd> <udid> …` | every driver command in the tables below except the four listed here |
-| `sipi <cmd> <arg> <udid>` | `key <keycode>`, `gesture <preset>` |
+| `sipi <cmd> <udid> …` | every driver command in the tables below except the two listed here |
 | `sipi <cmd> --flags… <udid>` | `key-sequence --keycodes`, `key-combo --modifiers --key` |
 
 Diagnostic commands take **no** UDID positional — `doctor`, `devices`,
@@ -49,7 +48,7 @@ the top-left corner. Nothing warns you. Confirm a computed coordinate with
 | Tap by label / id | `"$SIPI" tap "$UDID" --label "Sign In"` / `--id auth.sign-in` |
 | Tap a derived coordinate | `"$SIPI" tap "$UDID" --pixel -x 200 -y 700` |
 | Put text in a field | `"$SIPI" set-text "$UDID" "text" --id <id>` |
-| Press a key | `"$SIPI" key 40 "$UDID"` |
+| Press a key | `"$SIPI" key "$UDID" 40` |
 | Capture the screen | `"$SIPI" screenshot "$UDID" out.png` — add `--max-pixel 600` when you are going to look at it yourself |
 | Which screen a foldable is showing | `"$SIPI" fold-state "$UDID"` — read only; see `foldables.md` |
 
@@ -181,7 +180,8 @@ with these polls brought it to 26.5s for the same conclusions.
 | Need | Command |
 |---|---|
 | Swipe | `"$SIPI" swipe "$UDID" --norm --start-x .5 --start-y .8 --end-x .5 --end-y .2` |
-| Scroll / system edge swipe | `"$SIPI" gesture scroll-down "$UDID"` — presets `scroll-{up,down,left,right}`, `swipe-from-{left,right,top,bottom}-edge` |
+| Reveal later rows below | `"$SIPI" gesture "$UDID" scroll-up` — finger moves up; `scroll-down` returns toward earlier rows above |
+| System edge swipe | `"$SIPI" gesture "$UDID" swipe-from-left-edge` — presets `swipe-from-{left,right,top,bottom}-edge` |
 | Precise drag (reorder, handle) | `"$SIPI" drag "$UDID" --norm --start-x .. --start-y .. --end-x .. --end-y .. --steps 60` |
 | Long press | `"$SIPI" touch "$UDID" --pixel -x .. -y .. --down --up --delay 1.5` |
 | Double tap | `"$SIPI" double-tap "$UDID" --label "Map"` (or `--pixel -x .. -y ..`) |

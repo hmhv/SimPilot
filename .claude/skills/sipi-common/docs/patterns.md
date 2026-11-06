@@ -58,8 +58,11 @@ which is a 0…100 percentage.
 | Search Bar | - | - | coordinate | - | No AXLabel |
 | Confirmation Dialog | Works | Works | Works | - | iPad popover has constraints |
 | ColorPicker popup | - | - | right edge circle | - | Touch the color well to open, × to close |
+| Row under a floating tab bar or toolbar | covered | covered | - | scroll first | A selector tap fails as covered without touching the screen. `sipi gesture $UDID scroll-up`, re-read, then tap |
+| Control under a pass-through overlay | covered | covered | coordinate | - | A later element drawn over the tap point counts as covering it, even one that lets touches through (a badge with `allowsHitTesting(false)`), so the tap fails as covered. Tap the point instead |
+| Home-screen widget contents | position unknown | - | screenshot | - | `--deep` lists them as `position-unknown`: a widget hit-tests far outside its buttons, so a selector tap fails; tap the point from a screenshot, checked with `describe-point` |
 | Tab Bar (AXRadioButton) | Works | - | Works | - | iOS 18.1-18.4, all iPad versions |
-| Tab Bar (no children) | - | - | computed | - | iOS 18.6+ iPhone; from width / tab count |
+| Tab Bar (no fast-tree children) | with `--element-type RadioButton` | deep fallback | fallback | - | See § Tab Switching; dismiss a covering keyboard first |
 
 **A — Toggle.** The resolver sibling-redirects a row label to its single switch,
 and when that switch is wider than 100pt it taps the trailing inset
@@ -90,17 +93,27 @@ only while expanded.
 
 ### Tab Switching
 
-- iOS 18.1-18.4: `AXRadioButton` present → tap by `--label`.
-- iOS 18.6+ / iOS 26+ iPhone: no children → compute coordinates from the tab bar
-  frame (width / tab count).
-- iPad: `AXRadioButton` present in all versions → `--label` works.
-- 6+ tabs: the last becomes "..." (More).
+Measured on Xcode 27.2 (27B52), iPhone 18 Pro / iOS 27.2: the fast tree returned
+a childless `Group "Tab Bar"`, while `describe-ui --deep` found the individual
+`RadioButton` labels and identifiers. A childless fast node is not evidence
+that tabs cannot be selected.
+
+- Tap with `tap --label "<tab label>" --element-type RadioButton`. The type
+  keeps the fast tree from matching another element with the same label, so the
+  tap escalates to deep discovery and reaches the tab.
+- To inspect the tabs, use `describe-ui --deep --format compact`. `--expect`
+  does not help: another element with the tab's label keeps it on the fast tree.
+- A keyboard can cover the tab bar. Dismiss it with `sipi key $UDID 41` (Escape)
+  and re-read before deciding that a tab is missing.
+- Use screenshot-derived coordinates only if the settled deep tree still lacks
+  the target. Do not divide the whole screen width by the tab count: the floating
+  tab bar can occupy only part of that width.
 
 ### Navigation (push/pop)
 
 - Back: read the back button's frame with `describe-ui`, then tap by coordinate
   (most reliable).
-- Edge back-swipe: `sipi gesture swipe-from-left-edge $UDID`. May not work on
+- Edge back-swipe: `sipi gesture $UDID swipe-from-left-edge`. May not work on
   iOS 18.1 — fall back to the back button there.
 
 ### Modal / Sheet
@@ -118,9 +131,21 @@ verifies the write against the app instead of reporting a silent success. The
 field must be on screen — it is hit-tested like a tap, so scroll it into view
 first.
 
-Two fields cannot self-verify and need `--no-verify` plus an assertion on the
-app's own output: a secure field (reads back as bullets) and an empty write
-(reports its placeholder).
+Readback uses a fresh process and follows a field that is uniquely identifiable
+by its identifier (or label) and type, rather than trusting its old position
+after a keyboard/layout change. Anonymous or ambiguous fields keep point
+readback; when an identified field is missing from both trees, only a field
+with the same identifier at the original point is read. An unreadable
+readback fails separately from a value mismatch: the write was sent, so inspect
+the field before retrying. Setting a value can itself bring up the keyboard;
+dismiss it before trying to reach controls it covers.
+
+Three fields cannot self-verify and need `--no-verify` plus an assertion on the
+app's own output: a secure field (reads back as bullets), an empty write
+(reports its placeholder), and a multi-line text view (`TextArea`/`TextView`).
+A SwiftUI `TextEditor` shows the written value while the app's binding stays
+empty, so set-text on a text view always exits nonzero after writing; prefer
+`sipi type` there.
 
 Use `sipi type` only when the KEYSTROKES are the subject — per-character
 `onChange`, keyboard toolbar, candidate bar, Return/submit. Tap the field to
@@ -139,11 +164,12 @@ service `type --xcode-mcp` reaches when its own keystrokes do not arrive — are
 
 ### Scrolling
 
-- Prefer the preset: `sipi gesture scroll-down $UDID` (also `scroll-up`,
-  `scroll-left`, `scroll-right`). Use `sipi swipe` only for a precise start/end
-  the preset cannot express.
+- Preset names describe the finger's direction: `sipi gesture $UDID scroll-up`
+  reveals later rows below; `scroll-down` returns toward earlier rows above.
+  `scroll-left` reveals content to the right, and `scroll-right` to the left.
+  Use `sipi swipe` for a precise start/end the preset cannot express.
 - System-edge gestures (back-swipe, Control Center, Notification Center):
-  `sipi gesture swipe-from-{left,right,top,bottom}-edge $UDID`.
+  `sipi gesture $UDID swipe-from-{left,right,top,bottom}-edge`.
 - Re-read with `describe-ui` after scrolling, before tapping.
 - Return to top: swipe 2-3 times, or tap the status bar (y=20).
 
@@ -327,11 +353,11 @@ with `xcrun simctl spawn "$UDID" defaults delete <suite>`.
 
 ## iOS Version Differences
 
-Measured on iOS 18.x and iOS 26. iOS 27 was not separately measured for these UI
-behaviors; treat the iOS 26+ column as the expected baseline and re-check with
-`describe-ui` before relying on it.
+The historical observations below cover iOS 18.x and iOS 26. For the tab-bar
+behavior measured on Xcode 27.2 / iOS 27.2, use § Tab Switching above; re-read
+the actual tree before applying the remaining older observations.
 
-| Component | iOS 18.x | iOS 26+ |
+| Component | iOS 18.x (historical) | iOS 26.x (historical) |
 |---|---|---|
 | Tab bar (iPhone) | 18.1-18.4: `AXRadioButton`. 18.6+: no children | Floating, no labels → coordinates |
 | Tab bar (iPad) | Top, `AXRadioButton` | Top, `AXRadioButton` |
@@ -346,10 +372,10 @@ behaviors; treat the iOS 26+ column as the expected baseline and re-check with
 
 | Pattern | Reason |
 |---|---|
-| Tab Badge (`.badge()`) | No tab bar children on iOS 18.6+ / 26+ |
+| Tab Badge (`.badge()`) | Do not infer its absence from a childless fast tab-bar node; inspect the deep tree and screenshot |
 | Keyboard show/hide | Keyboard state is not in describe-ui |
-| PhotosPicker (single) | Separate process. Grid is touchable; a tap dismisses immediately. Cancel with Esc (`sipi key 41 $UDID`) |
-| PhotosPicker (multiple) | Separate process. Confirm with Enter (`sipi key 40 $UDID`), cancel with Esc. Stability varies by version — see below |
+| PhotosPicker (single) | Separate process. Grid is touchable; a tap dismisses immediately. Cancel with Esc (`sipi key $UDID 41`) |
+| PhotosPicker (multiple) | Separate process. Confirm with Enter (`sipi key $UDID 40`), cancel with Esc. Stability varies by version — see below |
 | FileImporter | Separate process. Inspect with `describe-ui`; close with Esc if controls are unstable |
 | Share Sheet | Separate process. Close by tapping a visible label, or a downward `sipi swipe` |
 | `.borderless` Button in List (iOS 26+) | `--label` / `--id` / `touch` all give fake success. Remove `.borderless`, or tap the whole row |

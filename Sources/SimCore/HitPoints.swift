@@ -66,6 +66,11 @@ public enum HitPoints {
             return copy
         }
 
+        if node.positionUnknown == true {
+            copy.onscreen = false
+            return copy
+        }
+
         guard let frame = node.frame, frame.width > 0, frame.height > 0 else {
             copy.onscreen = false
             return copy

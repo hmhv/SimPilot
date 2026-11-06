@@ -1139,6 +1139,14 @@ static void SPRecordProbeHit(NSMutableDictionary *node, CGPoint p) {
     node[@"_probeCount"] = @([node[@"_probeCount"] integerValue] + 1);
 }
 
+static void SPRecordProbe(NSMutableDictionary *node, CGPoint p) {
+    if (SPFrameContainsPoint(node[@"frame"], p)) {
+        node[@"_probeInside"] = @YES;
+    } else {
+        SPRecordProbeHit(node, p);
+    }
+}
+
 // Turn the recorded probe bounds into the node's hitPoint and drop the
 // scratch keys, so the serialized tree carries only the contract fields.
 static void SPFinalizeProbeHit(NSMutableDictionary *node) {
@@ -1164,6 +1172,16 @@ static void SPFinalizeProbeHit(NSMutableDictionary *node) {
             && (maxX - minX) <= w + SPGridPitch && (maxY - minY) <= h + SPGridPitch;
         if (corroborated) {
             node[@"hitPoint"] = @{ @"x": @((minX + maxX) / 2.0), @"y": @((minY + maxY) / 2.0) };
+        } else if (node[@"_probeInside"] == nil
+                   && !CGRectIntersectsRect(
+                       CGRectMake([f[@"x"] doubleValue], [f[@"y"] doubleValue], w, h),
+                       CGRectInset(CGRectMake(minX, minY, maxX - minX, maxY - minY),
+                                   -SPGridPitch, -SPGridPitch))) {
+            // The frame lies away from every probe that reached the element, so
+            // it is in another view's space and its center is not a screen
+            // point. Widgets answer a hit-test far outside their buttons, so the
+            // probes cannot place the element either.
+            node[@"positionUnknown"] = @YES;
         }
         [node removeObjectForKey:@"_probeMinX"];
         [node removeObjectForKey:@"_probeMaxX"];
@@ -1171,6 +1189,7 @@ static void SPFinalizeProbeHit(NSMutableDictionary *node) {
         [node removeObjectForKey:@"_probeMaxY"];
         [node removeObjectForKey:@"_probeCount"];
     }
+    [node removeObjectForKey:@"_probeInside"];
     for (NSMutableDictionary *child in node[@"children"]) {
         SPFinalizeProbeHit(child);
     }
@@ -1181,16 +1200,29 @@ static void SPFinalizeProbeHit(NSMutableDictionary *node) {
 // produced) and record frames for grid coverage. Full-screen-ish containers are
 // excluded from coverage so the grid still probes open areas they nominally
 // "cover".
-- (void)indexNode:(NSMutableDictionary *)node
-            index:(NSMutableDictionary<NSString *, NSMutableDictionary *> *)index
-          covered:(NSMutableArray<NSDictionary *> *)covered
-       screenArea:(CGFloat)screenArea {
+//
+// Nodes are numbered in tree order, which is drawing order: a node that comes
+// after another's whole subtree is drawn over it. A floating tab bar comes after
+// the list rows scrolled underneath it, and those rows must not stop the grid
+// from probing the tabs.
+- (NSInteger)indexNode:(NSMutableDictionary *)node
+                 index:(NSMutableDictionary<NSString *, NSMutableDictionary *> *)index
+               covered:(NSMutableArray<NSDictionary *> *)covered
+             occluders:(NSMutableArray<NSDictionary *> *)occluders
+            screenArea:(CGFloat)screenArea
+                 order:(NSInteger)order {
+    NSInteger mine = order++;
     NSString *key = SPNodeKey(node);
     if (index[key] == nil) index[key] = node;
-    if (SPIsCoverable(node, screenArea)) [covered addObject:node[@"frame"]];
     for (NSMutableDictionary *child in node[@"children"]) {
-        [self indexNode:child index:index covered:covered screenArea:screenArea];
+        order = [self indexNode:child index:index covered:covered occluders:occluders
+                     screenArea:screenArea order:order];
     }
+    NSDictionary *f = node[@"frame"];
+    CGFloat area = [f[@"width"] doubleValue] * [f[@"height"] doubleValue];
+    if (SPIsCoverable(node, screenArea)) [covered addObject:@{ @"frame": f, @"end": @(order - 1) }];
+    if (area > 0 && area < screenArea / 2) [occluders addObject:@{ @"frame": f, @"order": @(mine) }];
+    return order;
 }
 
 // Grid discovery: many on-screen elements (status bar, map annotations,
@@ -1209,8 +1241,11 @@ static void SPFinalizeProbeHit(NSMutableDictionary *node) {
     CGFloat screenArea = screen.size.width * screen.size.height;
     NSMutableDictionary<NSString *, NSMutableDictionary *> *index = [NSMutableDictionary dictionary];
     NSMutableArray<NSDictionary *> *covered = [NSMutableArray array];
+    NSMutableArray<NSDictionary *> *occluders = [NSMutableArray array];
+    NSInteger order = 0;
     for (NSMutableDictionary *n in rootChildren) {
-        [self indexNode:n index:index covered:covered screenArea:screenArea];
+        order = [self indexNode:n index:index covered:covered occluders:occluders
+                     screenArea:screenArea order:order];
     }
 
     const CGFloat step = SPGridPitch;
@@ -1218,7 +1253,15 @@ static void SPFinalizeProbeHit(NSMutableDictionary *node) {
         for (CGFloat x = screen.origin.x; x < CGRectGetMaxX(screen) && *remaining > 0; x += step) {
             CGPoint p = CGPointMake(x, y);
             BOOL skip = NO;
-            for (NSDictionary *f in covered) { if (SPFrameContainsPoint(f, p)) { skip = YES; break; } }
+            for (NSDictionary *c in covered) {
+                if (!SPFrameContainsPoint(c[@"frame"], p)) continue;
+                BOOL drawnOver = NO;
+                for (NSDictionary *o in occluders) {
+                    if ([o[@"order"] integerValue] > [c[@"end"] integerValue]
+                        && SPFrameContainsPoint(o[@"frame"], p)) { drawnOver = YES; break; }
+                }
+                if (!drawnOver) { skip = YES; break; }
+            }
             if (skip) continue;
 
             id translation = ((id (*)(id, SEL, CGPoint, NSUInteger, id))objc_msgSend)(_translator, atPoint, p, (NSUInteger)0, token);
@@ -1239,9 +1282,7 @@ static void SPFinalizeProbeHit(NSMutableDictionary *node) {
                 // screen. Record it when the element's own frame disagrees —
                 // that is exactly the remote-view case, where the frame is
                 // local to another process's view and would tap the wrong spot.
-                if (!SPFrameContainsPoint(existing[@"frame"], p)) {
-                    SPRecordProbeHit(existing, p);
-                }
+                SPRecordProbe(existing, p);
                 continue;
             }
 
@@ -1249,16 +1290,13 @@ static void SPFinalizeProbeHit(NSMutableDictionary *node) {
             if (node == nil) continue;
             NSString *key = SPNodeKey(node);
             if (index[key] != nil) {
-                if (!SPFrameContainsPoint(index[key][@"frame"], p)) {
-                    SPRecordProbeHit(index[key], p);
-                }
+                SPRecordProbe(index[key], p);
                 continue;
             }
-            if (!SPFrameContainsPoint(node[@"frame"], p)) {
-                SPRecordProbeHit(node, p);
-            }
+            SPRecordProbe(node, p);
             [rootChildren addObject:node];
-            [self indexNode:node index:index covered:covered screenArea:screenArea];
+            order = [self indexNode:node index:index covered:covered occluders:occluders
+                         screenArea:screenArea order:order];
         }
     }
     for (NSMutableDictionary *n in rootChildren) {

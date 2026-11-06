@@ -34,6 +34,9 @@ public struct TapResolution: Equatable, Sendable {
     /// The resolved element's label, used for the same confirmation when it has
     /// no identifier.
     public let label: String?
+    /// The frame of an element drawn over `point`, such as a floating tab bar
+    /// over the rows scrolled beneath it. A touch there reaches that element.
+    public let occluder: AXNode.Frame?
 
     public init(
         point: Point,
@@ -41,7 +44,8 @@ public struct TapResolution: Equatable, Sendable {
         isOnScreen: Bool = true,
         frame: AXNode.Frame? = nil,
         identifier: String? = nil,
-        label: String? = nil
+        label: String? = nil,
+        occluder: AXNode.Frame? = nil
     ) {
         self.point = point
         self.isSwitchLikeControl = isSwitchLikeControl
@@ -49,5 +53,6 @@ public struct TapResolution: Equatable, Sendable {
         self.frame = frame
         self.identifier = identifier
         self.label = label
+        self.occluder = occluder
     }
 }

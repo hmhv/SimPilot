@@ -45,6 +45,9 @@ enum ScrollIntoView {
         case stuck(attempts: Int, frame: AXNode.Frame)
         /// Still off screen after spending every attempt.
         case exhausted(attempts: Int, frame: AXNode.Frame)
+        /// Something is drawn over it. No gesture is sent for this: a drag to
+        /// clear it can press whatever it starts on.
+        case covered
 
         var reason: String {
             switch self {
@@ -52,6 +55,8 @@ enum ScrollIntoView {
                 return "it never reached the screen — after \(attempts) scroll\(attempts == 1 ? "" : "s") its frame is still at (\(Int(frame.x)), \(Int(frame.y))) and has not moved. Either nothing on this screen scrolls that way, or the element reports a frame that is not in screen coordinates (elements inside a share sheet or other cross-process view do), in which case no amount of scrolling will help"
             case .exhausted(let attempts, let frame):
                 return "it is off screen at y=\(Int(frame.y)) and \(attempts) scrolls did not bring it into view"
+            case .covered:
+                return "another element (a tab bar, toolbar or keyboard) is drawn over it. Scroll it clear (`sipi gesture <udid> scroll-up`) or dismiss what covers it, then tap again"
             }
         }
     }
@@ -75,6 +80,7 @@ enum ScrollIntoView {
         var attempts = 0
 
         while attempts < maxAttempts {
+            if resolution.occluder != nil { throw Failure.covered }
             guard let direction = ScrollIntoViewGeometry.direction(of: lastFrame, screen: screen) else { break }
             let points = ScrollIntoViewGeometry.swipePoints(for: direction, target: lastFrame, screen: screen)
             try driver.swipe(points.from, points.to, duration: duration, udid: udid)
@@ -105,6 +111,7 @@ enum ScrollIntoView {
             lastFrame = nextFrame
         }
 
+        if resolution.occluder != nil { throw Failure.covered }
         throw Failure.exhausted(attempts: attempts, frame: lastFrame)
     }
 

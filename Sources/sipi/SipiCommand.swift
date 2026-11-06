@@ -13,7 +13,7 @@ import SimBridge
 import SimSkills
 
 /// The sipi version. Keep in sync with the repo-root VERSION file.
-let sipiVersion = "3.0.0"
+let sipiVersion = "3.1.0"
 
 @main
 struct Sipi: ParsableCommand {
